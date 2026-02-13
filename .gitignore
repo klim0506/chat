@@ -43,3 +43,7 @@ dist/
 *.tmp
 *.bak
 backend/celerybeat-schedule*
+
+# Cursor
+.cursorignore
+.cursorindexingignore
