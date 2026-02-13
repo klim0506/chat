@@ -3,6 +3,8 @@
 Thumbs.db
 .idea/
 .vscode/
+.claude/
+.playwright-mcp/
 
 # Python
 __pycache__/
@@ -34,8 +36,10 @@ pnpm-debug.log*
 frontend/dist/
 .next/
 dist/
+*.tsbuildinfo
 
 # Archives / temp
 *.zip
 *.tmp
 *.bak
+backend/celerybeat-schedule*
