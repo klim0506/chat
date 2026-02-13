@@ -86,7 +86,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def _save_message(self, user_id, data):
         if not ChatMember.objects.filter(chat_id=self.chat_id, user_id=user_id, status=ChatMember.Status.ACTIVE).exists():
             return None
-        msg = Message.objects.create(chat_id=self.chat_id, sender_id=user_id, msg_type=data.get("msg_type", "text"), content=data.get("content", ""), file_id=data.get("file_id") or None)
+        is_encrypted = data.get("is_encrypted", False)
+        encrypted_keys = data.get("encrypted_keys") or {}
+        sender_device_id = data.get("sender_device_id")
+        sender_device = None
+        if sender_device_id:
+            from apps.e2ee.models import Device
+            try:
+                sender_device = Device.objects.get(user_id=user_id, device_id=sender_device_id, is_active=True)
+            except Device.DoesNotExist:
+                pass
+        msg = Message.objects.create(
+            chat_id=self.chat_id,
+            sender_id=user_id,
+            msg_type=data.get("msg_type", "text"),
+            content=data.get("content", ""),
+            file_id=data.get("file_id") or None,
+            reply_to_id=data.get("reply_to") or None,
+            is_encrypted=is_encrypted,
+            sender_device=sender_device,
+            encrypted_keys=encrypted_keys,
+        )
         # Attach multiple files (M2M) if provided
         file_ids = data.get("file_ids") or []
         if file_ids:
@@ -98,6 +118,29 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 msg.save(update_fields=["file"])
         sender = getattr(msg, "sender", None)
         display_name = (sender.display_name or sender.phone) if sender else str(user_id)
+        # Build reply_to snapshot if replying
+        reply_to_data = None
+        if msg.reply_to_id:
+            try:
+                replied = Message.objects.select_related("sender").get(id=msg.reply_to_id)
+                reply_sender = replied.sender
+                sender_data = None
+                if reply_sender:
+                    sender_data = {
+                        "id": str(reply_sender.id),
+                        "display_name": reply_sender.display_name or reply_sender.phone,
+                        "phone": reply_sender.phone if reply_sender.show_phone else None,
+                    }
+                reply_to_data = {
+                    "id": str(replied.id),
+                    "sender": sender_data,
+                    "msg_type": replied.msg_type,
+                    "content": "Зашифрованное сообщение" if getattr(replied, "is_encrypted", False) else replied.content,
+                    "is_deleted": replied.is_deleted,
+                    "created_at": replied.created_at.isoformat(),
+                }
+            except Message.DoesNotExist:
+                pass
         result = {
             "id": str(msg.id),
             "chat_id": str(msg.chat_id),
@@ -107,6 +150,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "content": msg.content,
             "file_id": str(msg.file_id) if msg.file_id else None,
             "created_at": msg.created_at.isoformat(),
+            "reply_to": reply_to_data,
+            "is_encrypted": msg.is_encrypted,
+            "encrypted_keys": msg.encrypted_keys,
+            "sender_device_id": msg.sender_device.device_id if msg.sender_device else None,
         }
         # Include file details for media messages
         from apps.files.views import make_file_token
@@ -263,6 +310,31 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             "chat_title": event["chat_title"],
             "message": event["message"],
             "is_muted": event.get("is_muted", False),
+        }))
+
+    async def notify_new_login(self, event):
+        """Forward new-login alert to the WebSocket client."""
+        await self.send(text_data=json.dumps({
+            "type": "new_login_alert",
+            "session_id": event.get("session_id"),
+            "device": event.get("device", ""),
+            "ip": event.get("ip", ""),
+            "time": event.get("time", ""),
+        }))
+
+    async def force_logout(self, event):
+        """Tell specific sessions to log out."""
+        await self.send(text_data=json.dumps({
+            "type": "force_logout",
+            "terminated_session_ids": event.get("terminated_session_ids", []),
+        }))
+
+    async def e2ee_prekeys_low(self, event):
+        """Notify client to upload more one-time prekeys."""
+        await self.send(text_data=json.dumps({
+            "type": "e2ee.prekeys_low",
+            "device_id": event.get("device_id"),
+            "remaining": event.get("remaining"),
         }))
 
     @database_sync_to_async

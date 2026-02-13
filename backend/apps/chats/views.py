@@ -1,6 +1,7 @@
 import logging
+from uuid import UUID
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -42,7 +43,73 @@ class ChatViewSet(viewsets.ModelViewSet):
     permission_classes = [HasActiveSubscription]
 
     def get_queryset(self):
-        return Chat.objects.filter(is_active=True, members__user=self.request.user, members__status=ChatMember.Status.ACTIVE).distinct().select_related("owner").prefetch_related("members__user")
+        current_user_membership = Prefetch(
+            "members",
+            queryset=ChatMember.objects.filter(
+                user=self.request.user,
+                status=ChatMember.Status.ACTIVE,
+            ).only("id", "chat_id", "user_id", "status", "last_read_at", "is_muted", "pin_order"),
+            to_attr="current_user_membership",
+        )
+        return (
+            Chat.objects.filter(
+                is_active=True,
+                members__user=self.request.user,
+                members__status=ChatMember.Status.ACTIVE,
+            )
+            .distinct()
+            .order_by("-created_at")
+            .select_related("owner")
+            .prefetch_related("members__user", current_user_membership)
+        )
+
+    @action(detail=False, methods=["post"], url_path="pins")
+    def set_pins(self, request):
+        raw_ids = request.data.get("chat_ids", [])
+        if not isinstance(raw_ids, list):
+            return Response({"detail": "chat_ids must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cleaned: list[UUID] = []
+        seen: set[UUID] = set()
+        for item in raw_ids:
+            try:
+                cid = UUID(str(item))
+            except (TypeError, ValueError):
+                return Response({"detail": "Invalid chat id in chat_ids."}, status=status.HTTP_400_BAD_REQUEST)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            cleaned.append(cid)
+
+        max_pinned = 5
+        if len(cleaned) > max_pinned:
+            return Response({"detail": f"Max pinned chats is {max_pinned}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        memberships = ChatMember.objects.filter(
+            user=request.user,
+            status=ChatMember.Status.ACTIVE,
+            chat_id__in=cleaned,
+        )
+        if memberships.count() != len(cleaned):
+            return Response({"detail": "Some chats are unavailable."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            ChatMember.objects.filter(user=request.user, status=ChatMember.Status.ACTIVE).exclude(
+                pin_order__isnull=True
+            ).update(pin_order=None)
+
+            by_chat_id = {m.chat_id: m for m in memberships}
+            to_update = []
+            for idx, cid in enumerate(cleaned, start=1):
+                m = by_chat_id.get(cid)
+                if not m:
+                    continue
+                m.pin_order = idx
+                to_update.append(m)
+            if to_update:
+                ChatMember.objects.bulk_update(to_update, ["pin_order"])
+
+        return Response({"pinned_chat_ids": [str(cid) for cid in cleaned]})
 
     @action(detail=True, methods=["post"], url_path="mark-read")
     def mark_read(self, request, pk=None):
@@ -244,6 +311,13 @@ class CreateOrGetDMView(APIView):
             if existing:
                 return Response(ChatSerializer(existing, context={"request": request}).data)
 
+            # Проверка приватности: кто может писать в ЛС
+            if target_user.dm_privacy == User.DM_PRIVACY_NOBODY:
+                return Response(
+                    {"detail": "Пользователь запретил писать ему в личные сообщения."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             # Создать новый личный чат (без типа, без ссылки-приглашения)
             slug = generate_slug()
             while Chat.objects.filter(slug=slug).exists():
@@ -364,6 +438,66 @@ class ChatMemberViewSet(viewsets.ViewSet):
         member.status = ChatMember.Status.KICKED
         member.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["post"], url_path="invite")
+    def invite(self, request, chat_id=None):
+        """Пригласить пользователя в группу по user_id или username. Только owner/admin."""
+        chat_id = chat_id or request.resolver_match.kwargs.get("chat_id")
+        chat = get_object_or_404(Chat, id=chat_id)
+        if getattr(chat, "is_personal", False) or getattr(chat, "is_favorites", False):
+            return Response({"detail": "Нельзя приглашать в личный чат или «Избранное»."}, status=status.HTTP_400_BAD_REQUEST)
+        my_membership = ChatMember.objects.filter(
+            chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
+        ).first()
+        if not my_membership:
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        if my_membership.role != ChatMember.Role.ADMIN and chat.owner_id != request.user.id:
+            return Response({"detail": "Только владелец или администратор может приглашать."}, status=status.HTTP_403_FORBIDDEN)
+        user_id = request.data.get("user_id")
+        username = request.data.get("username", "").strip()
+        if not user_id and not username:
+            return Response({"detail": "Укажите user_id или username."}, status=status.HTTP_400_BAD_REQUEST)
+        if user_id and username:
+            return Response({"detail": "Укажите только user_id или только username."}, status=status.HTTP_400_BAD_REQUEST)
+        if user_id:
+            try:
+                invited_user = User.objects.get(pk=user_id)
+            except (User.DoesNotExist, ValueError, TypeError):
+                return Response({"detail": "Пользователь не найден."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            invited_user = User.objects.filter(username__iexact=username).first()
+            if not invited_user:
+                return Response({"detail": "Пользователь не найден."}, status=status.HTTP_400_BAD_REQUEST)
+        if invited_user.pk == request.user.pk:
+            return Response({"detail": "Нельзя пригласить самого себя."}, status=status.HTTP_400_BAD_REQUEST)
+        if invited_user.add_to_group_privacy == User.ADD_TO_GROUP_NOBODY:
+            return Response(
+                {"detail": "Пользователь запретил добавлять его в группы."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if chat.members.filter(status=ChatMember.Status.ACTIVE).count() >= chat.effective_max_members:
+            return Response({"detail": "Чат заполнен."}, status=status.HTTP_400_BAD_REQUEST)
+        existing = ChatMember.objects.filter(chat=chat, user=invited_user).first()
+        if existing:
+            if existing.status == ChatMember.Status.ACTIVE:
+                return Response(
+                    ChatSerializer(chat, context={"request": request}).data,
+                    status=status.HTTP_200_OK,
+                )
+            if existing.status == ChatMember.Status.PENDING:
+                return Response({"detail": "Запрос уже отправлен. Ожидайте подтверждения от владельца."}, status=status.HTTP_202_ACCEPTED)
+            if existing.status == ChatMember.Status.KICKED:
+                return Response({"detail": "Пользователь был исключён из чата."}, status=status.HTTP_403_FORBIDDEN)
+        is_open = chat.chat_type == Chat.ChatType.OPEN
+        member_status = ChatMember.Status.ACTIVE if is_open else ChatMember.Status.PENDING
+        ChatMember.objects.get_or_create(
+            chat=chat, user=invited_user,
+            defaults={"role": ChatMember.Role.MEMBER, "status": member_status},
+        )
+        chat.refresh_from_db()
+        if is_open:
+            return Response(ChatSerializer(chat, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        return Response({"detail": "Запрос на вступление отправлен. Ожидайте подтверждения от владельца."}, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["post"], url_path="set-admin")
     def set_admin(self, request, chat_id=None):

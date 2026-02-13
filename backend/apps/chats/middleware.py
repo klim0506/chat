@@ -8,18 +8,26 @@ User = get_user_model()
 
 @database_sync_to_async
 def get_user_from_token(token):
+    """Decode JWT, validate session, and return (user, session_id) or (None, None)."""
     if not token:
-        return None
+        return None, None
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         if payload.get("type") not in (None, "access"):
-            return None
+            return None, None
         user_id = payload.get("user_id")
         if not user_id:
-            return None
-        return User.objects.get(pk=user_id)
+            return None, None
+        # Check session is still active (skip for legacy tokens without sid)
+        sid = payload.get("sid")
+        if sid:
+            from apps.users.models import UserSession
+            if not UserSession.objects.filter(id=sid, is_active=True).exists():
+                return None, None
+        user = User.objects.get(pk=user_id)
+        return user, sid
     except (jwt.InvalidTokenError, User.DoesNotExist):
-        return None
+        return None, None
 
 
 class JWTAuthMiddleware:
@@ -36,5 +44,7 @@ class JWTAuthMiddleware:
             subs = scope.get("subprotocols") or []
             if len(subs) >= 2 and subs[0] == "bearer":
                 token = subs[1]
-        scope["user"] = await get_user_from_token(token)
+        user, session_id = await get_user_from_token(token)
+        scope["user"] = user
+        scope["session_id"] = session_id
         return await self.app(scope, receive, send)

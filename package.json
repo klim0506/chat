@@ -7,9 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "docker:up": "docker compose up -d db redis backend celery celery-beat frontend nginx",
+    "docker:up:core": "docker compose up -d db redis backend frontend",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f --tail=200",
+    "docker:ps": "docker compose ps",
     "run": "concurrently -k -n backend,frontend -c yellow,blue \"npm run run:backend\" \"npm run run:frontend\"",
     "run:backend": "cd backend && python manage.py migrate && python manage.py runserver 0.0.0.0:8000",
-    "run:frontend": "cd frontend && npm run dev"
+    "run:frontend": "cd frontend && npm run dev",
+    "run:worker": "cd backend && celery -A config.celery worker -l info",
+    "run:beat": "cd backend && celery -A config.celery beat -l info",
+    "run:all": "concurrently -k -n backend,frontend,worker,beat -c yellow,blue,green,magenta \"npm run run:backend\" \"npm run run:frontend\" \"npm run run:worker\" \"npm run run:beat\""
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",

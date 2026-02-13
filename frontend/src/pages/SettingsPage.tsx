@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getPermission, requestPermission, NOTIFICATIONS_SUPPORTED, type NotificationPermission } from "../lib/notifications";
-import { authApi, paymentsApi, type User, type SubscriptionStatus, type StarsBalance } from "../api/client";
+import { authApi, paymentsApi, e2eeApi, sessionsApi, type User, type SubscriptionStatus, type StarsBalance, type E2eeDevice, type UserSessionInfo } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { usePreferencesStore, MESSAGE_TEXT_SCALES } from "../store/preferences";
 import { getAvatarInitials } from "../lib/avatar-initials";
@@ -35,6 +35,159 @@ const REASON_LABELS: Record<string, string> = {
   chat_expansion: "Расширение чата",
   admin_grant: "Бонус",
 };
+
+function E2eeDevicesSection() {
+  const [devices, setDevices] = useState<E2eeDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [removing, setRemoving] = useState<string | null>(null);
+  useEffect(() => {
+    e2eeApi.listDevices()
+      .then((r) => setDevices(r.data))
+      .catch(() => setDevices([]))
+      .finally(() => setLoading(false));
+  }, []);
+  if (loading) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  if (devices.length === 0) return <p className="text-sm text-slate-500">Нет зарегистрированных устройств.</p>;
+  return (
+    <div className="space-y-2">
+      {devices.map((d) => (
+        <div key={d.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 border border-slate-200">
+          <div>
+            <p className="text-sm font-medium text-slate-800">{d.name || `Устройство ${d.device_id}`}</p>
+            <p className="text-xs text-slate-500">ID: {d.device_id} · {new Date(d.last_active_at).toLocaleDateString("ru-RU")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              setRemoving(d.id);
+              try {
+                await e2eeApi.removeDevice(d.id);
+                setDevices((prev) => prev.filter((x) => x.id !== d.id));
+              } catch {}
+              setRemoving(null);
+            }}
+            disabled={removing === d.id}
+            className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+          >
+            {removing === d.id ? "…" : "Завершить сессию"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SessionsSection() {
+  const [sessions, setSessions] = useState<UserSessionInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [terminating, setTerminating] = useState<string | null>(null);
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false);
+
+  useEffect(() => {
+    sessionsApi
+      .list()
+      .then((r) => setSessions(r.data))
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleTerminate = async (id: string) => {
+    setTerminating(id);
+    try {
+      await sessionsApi.terminate(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      /* ignore */
+    }
+    setTerminating(null);
+  };
+
+  const handleLogoutAll = async () => {
+    setLogoutAllLoading(true);
+    try {
+      await sessionsApi.logoutAll();
+      setSessions((prev) => prev.filter((s) => s.is_current));
+    } catch {
+      /* ignore */
+    }
+    setLogoutAllLoading(false);
+  };
+
+  if (loading) return <p className="text-sm text-slate-500">Загрузка...</p>;
+  if (sessions.length === 0)
+    return <p className="text-sm text-slate-500">Нет активных сессий.</p>;
+
+  const otherSessions = sessions.filter((s) => !s.is_current);
+
+  return (
+    <div className="space-y-3">
+      {sessions.map((s) => (
+        <div
+          key={s.id}
+          className={`flex items-center justify-between py-2.5 px-3 rounded-lg border ${
+            s.is_current
+              ? "bg-blue-50 border-blue-200"
+              : "bg-slate-50 border-slate-200"
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-slate-800 truncate">
+                {s.device_label || "Неизвестное устройство"}
+              </p>
+              {s.is_current && (
+                <span className="shrink-0 text-[10px] font-semibold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                  Текущая
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {s.ip_address && <span>{s.ip_address} · </span>}
+              Вход: {new Date(s.created_at).toLocaleDateString("ru-RU")}{" "}
+              {new Date(s.created_at).toLocaleTimeString("ru-RU", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {!s.is_current && (
+                <span>
+                  {" "}
+                  · Активна:{" "}
+                  {new Date(s.last_active).toLocaleDateString("ru-RU")}{" "}
+                  {new Date(s.last_active).toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </p>
+          </div>
+          {!s.is_current && (
+            <button
+              type="button"
+              onClick={() => handleTerminate(s.id)}
+              disabled={terminating === s.id}
+              className="shrink-0 ml-3 text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+            >
+              {terminating === s.id ? "..." : "Завершить"}
+            </button>
+          )}
+        </div>
+      ))}
+      {otherSessions.length > 0 && (
+        <button
+          type="button"
+          onClick={handleLogoutAll}
+          disabled={logoutAllLoading}
+          className="w-full mt-1 py-2.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {logoutAllLoading
+            ? "Завершение..."
+            : `Завершить все другие сессии (${otherSessions.length})`}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function ScaleButton({ scale, label }: { scale: (typeof MESSAGE_TEXT_SCALES)[number]; label: string }) {
   const current = usePreferencesStore((s) => s.messageTextScale);
@@ -367,35 +520,158 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   )}
                 </div>
 
-                {/* Приватность: показ времени последнего захода */}
+                {/* Активные сессии */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    Активные сессии
+                  </label>
+                  <SessionsSection />
+                </div>
+
+                {/* E2EE устройства */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    Устройства (сквозное шифрование)
+                  </label>
+                  <E2eeDevicesSection />
+                </div>
+
+                {/* Приватность: показ времени последнего захода и номера телефона */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     Приватность
                   </label>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-slate-800">Показывать время последнего захода</p>
-                      <p className="text-xs text-slate-500">Если выключено, другие увидят «был(а) в сети недавно»</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const newVal = !user.show_last_seen;
-                        try {
-                          const res = await authApi.updateMe({ show_last_seen: newVal } as Partial<typeof user>);
-                          setUser(res.data);
-                        } catch { /* ignore */ }
-                      }}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                        user.show_last_seen !== false ? "bg-blue-600" : "bg-slate-200"
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          user.show_last_seen !== false ? "translate-x-5" : "translate-x-0"
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-slate-800">Показывать время последнего захода</p>
+                        <p className="text-xs text-slate-500">Если выключено, другие увидят «был(а) в сети недавно»</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const newVal = !user.show_last_seen;
+                          try {
+                            const res = await authApi.updateMe({ show_last_seen: newVal } as Partial<typeof user>);
+                            setUser(res.data);
+                          } catch { /* ignore */ }
+                        }}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          user.show_last_seen !== false ? "bg-blue-600" : "bg-slate-200"
                         }`}
-                      />
-                    </button>
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            user.show_last_seen !== false ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-slate-800">Показывать номер телефона</p>
+                        <p className="text-xs text-slate-500">Если выключено, другие не увидят ваш номер</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const newVal = !user.show_phone;
+                          try {
+                            const res = await authApi.updateMe({ show_phone: newVal } as Partial<typeof user>);
+                            setUser(res.data);
+                          } catch { /* ignore */ }
+                        }}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          user.show_phone !== false ? "bg-blue-600" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            user.show_phone !== false ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-800 mb-2">Кто может писать мне в ЛС</p>
+                      <div className="flex gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="dm_privacy"
+                            checked={user.dm_privacy !== "nobody"}
+                            onChange={async () => {
+                              if (user.dm_privacy === "nobody") {
+                                try {
+                                  const res = await authApi.updateMe({ dm_privacy: "everyone" } as Partial<typeof user>);
+                                  setUser(res.data);
+                                } catch { /* ignore */ }
+                              }
+                            }}
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">Все</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="dm_privacy"
+                            checked={user.dm_privacy === "nobody"}
+                            onChange={async () => {
+                              if (user.dm_privacy !== "nobody") {
+                                try {
+                                  const res = await authApi.updateMe({ dm_privacy: "nobody" } as Partial<typeof user>);
+                                  setUser(res.data);
+                                } catch { /* ignore */ }
+                              }
+                            }}
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">Никто</span>
+                        </label>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">Если «Никто», новые пользователи не смогут написать вам первыми</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-800 mb-2">Кто может добавлять меня в группы</p>
+                      <div className="flex gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="add_to_group_privacy"
+                            checked={user.add_to_group_privacy !== "nobody"}
+                            onChange={async () => {
+                              if (user.add_to_group_privacy === "nobody") {
+                                try {
+                                  const res = await authApi.updateMe({ add_to_group_privacy: "everyone" } as Partial<typeof user>);
+                                  setUser(res.data);
+                                } catch { /* ignore */ }
+                              }
+                            }}
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">Все</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="add_to_group_privacy"
+                            checked={user.add_to_group_privacy === "nobody"}
+                            onChange={async () => {
+                              if (user.add_to_group_privacy !== "nobody") {
+                                try {
+                                  const res = await authApi.updateMe({ add_to_group_privacy: "nobody" } as Partial<typeof user>);
+                                  setUser(res.data);
+                                } catch { /* ignore */ }
+                              }
+                            }}
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-slate-700">Никто</span>
+                        </label>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">Если «Никто», вас нельзя будет пригласить в группы</p>
+                    </div>
                   </div>
                 </div>
               </div>

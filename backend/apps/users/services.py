@@ -91,12 +91,12 @@ def generate_code(length=6):
 
 
 def _normalize_phone(phone: str) -> str:
-    """Номер только цифры (без + и пробелов)."""
+    """РќРѕРјРµСЂ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹ (Р±РµР· + Рё РїСЂРѕР±РµР»РѕРІ)."""
     return phone.strip().replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
 
 
 def send_sms_redsms(phone: str, text: str) -> bool:
-    """RedSMS HTTP API. Документация: https://docs.redsms.ru/http/getting-started/"""
+    """RedSMS HTTP API. Р”РѕРєСѓРјРµРЅС‚Р°С†РёСЏ: https://docs.redsms.ru/http/getting-started/"""
     import os
     import requests
 
@@ -128,68 +128,13 @@ def send_sms_redsms(phone: str, text: str) -> bool:
         return False
 
 
-def send_sms_smpp(phone: str, text: str) -> bool:
-    """Send SMS via SMPP protocol (RedSMS)."""
-    try:
-        import smpplib.client
-        import smpplib.gsm
-        import smpplib.consts
-    except ImportError:
-        logger.error("smpplib not installed, run: pip install smpplib")
-        return False
-
-    host = getattr(settings, "SMPP_HOST", "")
-    port = getattr(settings, "SMPP_PORT", 2775)
-    system_id = getattr(settings, "SMPP_SYSTEM_ID", "")
-    password = getattr(settings, "SMPP_PASSWORD", "")
-    source_addr = getattr(settings, "SMPP_SOURCE_ADDR", "REDSMS.RU")
-
-    if not system_id or not password:
-        logger.warning("SMPP credentials not configured")
-        return False
-
-    dest = _normalize_phone(phone)
-
-    try:
-        parts, encoding_flag, msg_type_flag = smpplib.gsm.make_parts(text)
-        client = smpplib.client.Client(host, port, timeout=10)
-        client.connect()
-        client.bind_transceiver(system_id=system_id, password=password)
-
-        for part in parts:
-            client.send_message(
-                source_addr_ton=smpplib.consts.SMPP_TON_ALNUM,
-                source_addr_npi=smpplib.consts.SMPP_NPI_UNK,
-                source_addr=source_addr,
-                dest_addr_ton=smpplib.consts.SMPP_TON_INTL,
-                dest_addr_npi=smpplib.consts.SMPP_NPI_ISDN,
-                destination_addr=dest,
-                short_message=part,
-                data_coding=encoding_flag,
-                esm_class=msg_type_flag,
-                registered_delivery=False,
-            )
-
-        client.unbind()
-        client.disconnect()
-        logger.info(f"SMPP SMS sent to {dest}")
-        return True
-    except Exception as e:
-        logger.error(f"SMPP send failed: {e}")
-        return False
-
-
 def send_sms(phone: str, text: str) -> bool:
-    """Send SMS — tries SMPP first, falls back to RedSMS HTTP API."""
-    if getattr(settings, "SMPP_SYSTEM_ID", ""):
-        if send_sms_smpp(phone, text):
-            return True
-        logger.warning("SMPP failed, falling back to RedSMS HTTP")
+    """Send SMS via RedSMS HTTP API."""
     return send_sms_redsms(phone, text)
 
 
 # ---------------------------------------------------------------------------
-# Telegram Gateway API — send verification codes via @VerificationCodes
+# Telegram Gateway API вЂ” send verification codes via @VerificationCodes
 # ---------------------------------------------------------------------------
 
 def send_telegram_verification(phone: str, code: str) -> dict | None:
@@ -222,13 +167,26 @@ def send_telegram_verification(phone: str, code: str) -> dict | None:
             },
             timeout=10,
         )
-        data = resp.json()
-        if data.get("ok"):
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.warning(
+                "Telegram Gateway non-JSON response: status=%s body=%s",
+                resp.status_code,
+                (resp.text or "")[:500],
+            )
+            return None
+
+        if resp.status_code == 200 and data.get("ok"):
             logger.info(f"Telegram Gateway code sent to {dest}, request_id={data['result'].get('request_id')}")
             return data["result"]
-        else:
-            logger.warning(f"Telegram Gateway error: {data.get('error')}")
-            return None
+        logger.warning(
+            "Telegram Gateway error: status=%s error=%s body=%s",
+            resp.status_code,
+            data.get("error"),
+            str(data)[:500],
+        )
+        return None
     except Exception as e:
         logger.error(f"Telegram Gateway request failed: {e}")
         return None
@@ -279,4 +237,48 @@ def incr_verify_attempts(phone: str) -> int:
     else:
         return _mem_incr(REDIS_VERIFY_ATTEMPTS_KEY.format(phone=phone), REDIS_OTP_TTL)
 
+
+# ---------------------------------------------------------------------------
+# New-login notification (WebSocket if online, SMS if offline)
+# ---------------------------------------------------------------------------
+
+def notify_new_login(user, session) -> None:
+    """Notify the user about a new login on another device.
+    Uses WebSocket if the user has an active connection, SMS otherwise.
+    Should be called only for existing users (not first registration)."""
+    from apps.users.online import is_online
+
+    if is_online(str(user.id)):
+        # Send via WebSocket (free, instant)
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+
+            channel_layer = get_channel_layer()
+            if channel_layer is not None:
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{user.id}",
+                    {
+                        "type": "notify.new_login",
+                        "session_id": str(session.id),
+                        "device": session.device_label,
+                        "ip": session.ip_address or "",
+                        "time": session.created_at.isoformat(),
+                    },
+                )
+                return
+        except Exception:
+            logger.exception("Failed to send new-login notification via WebSocket")
+            # Fall through to SMS
+
+    # Fallback: SMS
+    try:
+        send_sms(
+            user.phone,
+            f"Новый вход: {session.device_label}, "
+            f"{session.created_at:%H:%M}. "
+            f"Не вы? Зайдите в Настройки -> Сессии.",
+        )
+    except Exception:
+        logger.exception("Failed to send new-login SMS notification")
 

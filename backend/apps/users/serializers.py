@@ -2,11 +2,11 @@ import re
 from rest_framework import serializers
 from .models import User, UserAvatar
 
-USERNAME_REGEX = re.compile(r"^[a-z0-9_]{3,30}$")
+USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 
 
 def normalize_username(value: str) -> str:
-    return (value or "").strip().lower()
+    return (value or "").strip()
 
 
 def validate_username_format(value: str) -> str:
@@ -36,15 +36,26 @@ class UserSerializer(serializers.ModelSerializer):
     avatars = serializers.SerializerMethodField()
     is_online = serializers.SerializerMethodField()
     last_seen_display = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = (
             "id", "phone", "username", "telegram_username", "display_name",
             "avatar", "avatar_url", "avatars", "referral_code", "stars",
-            "is_online", "last_seen_display", "show_last_seen",
+            "is_online", "last_seen_display", "show_last_seen", "show_phone",
+            "dm_privacy", "add_to_group_privacy",
         )
         read_only_fields = ("id", "phone", "telegram_username", "referral_code", "stars", "is_online", "last_seen_display")
+
+    def get_phone(self, obj):
+        """Return phone only when show_phone or viewer is the user herself."""
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated and request.user.pk == obj.pk:
+            return obj.phone
+        if obj.show_phone:
+            return obj.phone
+        return None
 
     def get_is_online(self, obj):
         from .online import is_online
@@ -65,7 +76,7 @@ class UserSerializer(serializers.ModelSerializer):
         if value is None or (isinstance(value, str) and not value.strip()):
             return value
         normalized = validate_username_format(value)
-        qs = User.objects.filter(username__iexact=normalized)
+        qs = User.objects.filter(username=normalized)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():

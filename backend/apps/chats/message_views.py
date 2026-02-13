@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from .models import Chat, ChatMember, Message, MessageReaction, UserPinnedMessage, REACTION_EMOJIS, MAX_REACTIONS_PER_USER
+from .models import Chat, ChatMember, Message, MessageReaction, UserPinnedMessage, ChatPinnedMessage, REACTION_EMOJIS, MAX_REACTIONS_PER_USER
 from .serializers import MessageSerializer
 from apps.users.serializers import UserSerializer
 
@@ -19,6 +19,19 @@ def _broadcast_message_updated(chat_id, message_data):
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_id}",
                 {"type": "chat.message.updated", "message": message_data},
+            )
+    except Exception:
+        pass
+
+
+def _broadcast_new_message(chat_id, message_data):
+    """Уведомить участников чата о новом сообщении (forward и др.)."""
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f"chat_{chat_id}",
+                {"type": "chat.message.broadcast", "message": message_data},
             )
     except Exception:
         pass
@@ -52,12 +65,20 @@ class MessageListCreateView(APIView):
         if err is not None:
             return err
         other_members_read = _get_other_members_read(chat, request)
-        messages = (
+        qs = (
             Message.objects.filter(chat=chat, is_deleted=False)
-            .select_related("sender", "file")
+            .select_related("sender", "file", "reply_to", "reply_to__sender", "reply_to__file", "forwarded_from", "forwarded_from_chat", "sender_device")
             .prefetch_related("reactions", "files")
-            .order_by("created_at")[:100]
+            .order_by("created_at")
         )
+        # Delta-sync: only return messages created after the given ISO timestamp
+        since = request.query_params.get("since")
+        if since:
+            from django.utils.dateparse import parse_datetime
+            since_dt = parse_datetime(since)
+            if since_dt:
+                qs = qs.filter(created_at__gt=since_dt)
+        messages = qs[:100]
         context = {"request": request, "other_members_read": other_members_read}
         return Response(MessageSerializer(messages, many=True, context=context).data)
 
@@ -159,7 +180,8 @@ class MessageReactionView(APIView):
 
 
 class MessagePinView(APIView):
-    """POST: закрепить сообщение для себя (scope=me) или для всех (scope=all). DELETE: открепить."""
+    """POST: закрепить сообщение для себя (scope=me) или для всех (scope=all). DELETE: открепить.
+    Multi-pin для всех: ChatPinnedMessage, лимит зависит от expansion_tier."""
 
     def post(self, request, chat_id, message_id):
         chat, err = _check_chat_member(request, chat_id)
@@ -174,8 +196,20 @@ class MessagePinView(APIView):
                     {"detail": "Закрепить для всех могут только владелец или администратор чата."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            chat.pinned_message = msg
-            chat.save(update_fields=["pinned_message"])
+            # Check limit
+            current_count = ChatPinnedMessage.objects.filter(chat=chat).count()
+            if current_count >= chat.max_pins:
+                return Response(
+                    {"detail": f"Максимум {chat.max_pins} закреплённых сообщений для этого чата."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Determine next pin_order
+            max_order = ChatPinnedMessage.objects.filter(chat=chat).order_by("-pin_order").values_list("pin_order", flat=True).first()
+            next_order = (max_order or 0) + 1
+            ChatPinnedMessage.objects.get_or_create(
+                chat=chat, message=msg,
+                defaults={"pinned_by": request.user, "pin_order": next_order},
+            )
         else:
             UserPinnedMessage.objects.get_or_create(user=request.user, chat=chat, message=msg)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -193,9 +227,55 @@ class MessagePinView(APIView):
                     {"detail": "Открепить для всех могут только владелец или администратор чата."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            if chat.pinned_message_id == msg.id:
-                chat.pinned_message = None
-                chat.save(update_fields=["pinned_message"])
+            ChatPinnedMessage.objects.filter(chat=chat, message=msg).delete()
         else:
             UserPinnedMessage.objects.filter(user=request.user, chat=chat, message=msg).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ForwardMessageView(APIView):
+    """POST: переслать сообщение из одного чата в другой.
+    Body: { "message_id": "<uuid>", "source_chat_id": "<uuid>" }
+    """
+
+    def post(self, request, chat_id):
+        # Target chat
+        target_chat, err = _check_chat_member(request, chat_id)
+        if err is not None:
+            return err
+        source_chat_id = request.data.get("source_chat_id")
+        message_id = request.data.get("message_id")
+        if not source_chat_id or not message_id:
+            return Response(
+                {"detail": "Укажите source_chat_id и message_id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Check source chat access
+        source_chat = get_object_or_404(Chat, id=source_chat_id)
+        if not source_chat.members.filter(user=request.user, status=ChatMember.Status.ACTIVE).exists():
+            return Response({"detail": "Нет доступа к исходному чату."}, status=status.HTTP_403_FORBIDDEN)
+        # Get original message
+        original = get_object_or_404(Message, id=message_id, chat=source_chat, is_deleted=False)
+        # Create forwarded message in target chat
+        forwarded = Message.objects.create(
+            chat=target_chat,
+            sender=request.user,
+            msg_type=original.msg_type,
+            content=original.content,
+            file=original.file,
+            waveform=original.waveform,
+            forwarded_from=original.sender,
+            forwarded_from_chat=source_chat,
+        )
+        # Copy M2M files
+        all_files = list(original.files.all())
+        if all_files:
+            forwarded.files.set(all_files)
+        elif original.file:
+            forwarded.files.set([original.file])
+        # Serialize and broadcast
+        other_members_read = _get_other_members_read(target_chat, request)
+        ctx = {"request": request, "other_members_read": other_members_read}
+        data = MessageSerializer(forwarded, context=ctx).data
+        _broadcast_new_message(str(target_chat.id), data)
+        return Response(data, status=status.HTTP_201_CREATED)

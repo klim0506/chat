@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 import secrets
 import uuid
@@ -31,7 +32,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     phone = models.CharField(max_length=20, unique=True)
-    username = models.CharField(max_length=30, unique=True, null=True, blank=True, db_index=True)
+    username = models.CharField(max_length=30, null=True, blank=True, db_index=True)
     telegram_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     telegram_username = models.CharField(max_length=255, blank=True)
     display_name = models.CharField(max_length=255, blank=True)
@@ -54,6 +55,38 @@ class User(AbstractBaseUser, PermissionsMixin):
     show_last_seen = models.BooleanField(
         default=True,
         help_text="Показывать другим время последнего захода",
+    )
+    show_phone = models.BooleanField(
+        default=True,
+        help_text="Показывать другим номер телефона",
+    )
+
+    # --- Privacy: who can write DMs ---
+    DM_PRIVACY_EVERYONE = "everyone"
+    DM_PRIVACY_NOBODY = "nobody"
+    DM_PRIVACY_CHOICES = [
+        (DM_PRIVACY_EVERYONE, "Все"),
+        (DM_PRIVACY_NOBODY, "Никто"),
+    ]
+    dm_privacy = models.CharField(
+        max_length=10,
+        choices=DM_PRIVACY_CHOICES,
+        default=DM_PRIVACY_EVERYONE,
+        help_text="Кто может писать в личные сообщения",
+    )
+
+    # --- Privacy: who can add to groups ---
+    ADD_TO_GROUP_EVERYONE = "everyone"
+    ADD_TO_GROUP_NOBODY = "nobody"
+    ADD_TO_GROUP_CHOICES = [
+        (ADD_TO_GROUP_EVERYONE, "Все"),
+        (ADD_TO_GROUP_NOBODY, "Никто"),
+    ]
+    add_to_group_privacy = models.CharField(
+        max_length=10,
+        choices=ADD_TO_GROUP_CHOICES,
+        default=ADD_TO_GROUP_EVERYONE,
+        help_text="Кто может добавлять в группы",
     )
 
     # --- Referral system ---
@@ -86,13 +119,40 @@ class User(AbstractBaseUser, PermissionsMixin):
     def save(self, *args, **kwargs):
         if not self.referral_code:
             self.referral_code = _generate_referral_code()
-        if self.username is not None and self.username != "":
-            self.username = self.username.lower().strip()
+        if self.username is not None:
+            self.username = self.username.strip() or None
         super().save(*args, **kwargs)
 
     class Meta:
-        verbose_name = "Пользователь"
-        verbose_name_plural = "Пользователи"
+        verbose_name = "User"
+        verbose_name_plural = "Users"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["username"],
+                condition=Q(username__isnull=False),
+                name="users_username_unique_cs",
+            )
+        ]
+
+
+
+class UserSession(models.Model):
+    """Tracks an authenticated session (one per login). Used for session listing,
+    revocation (logout), and new-login notifications."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    device_label = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_active = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["-last_active"]
+
+    def __str__(self):
+        return f"Session {self.id} ({self.device_label or 'unknown'}) for {self.user_id}"
 
 
 class UserAvatar(models.Model):

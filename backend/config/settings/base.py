@@ -13,8 +13,8 @@ SECRET_KEY = env("SECRET_KEY", default="")
 
 DEBUG = env("DEBUG")
 
-# Режим отладки авторизации: для номеров из AUTH_DEBUG_PHONES не отправляется SMS,
-# вход по коду из AUTH_DEBUG_CODE. Только для разработки.
+# Р РµР¶РёРј РѕС‚Р»Р°РґРєРё Р°РІС‚РѕСЂРёР·Р°С†РёРё: РґР»СЏ РЅРѕРјРµСЂРѕРІ РёР· AUTH_DEBUG_PHONES РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ SMS,
+# РІС…РѕРґ РїРѕ РєРѕРґСѓ РёР· AUTH_DEBUG_CODE. РўРѕР»СЊРєРѕ РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚РєРё.
 AUTH_DEBUG = env.bool("AUTH_DEBUG", default=False)
 AUTH_DEBUG_PHONES = env.list(
     "AUTH_DEBUG_PHONES",
@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "apps.users",
     "apps.chats",
+    "apps.e2ee",
     "apps.payments",
     "apps.files",
 ]
@@ -88,7 +89,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 TEMPLATES = [
@@ -121,15 +122,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_THROTTLE_RATES": {
-        "auth_send_code": "5/min",
+        "auth_send_code": env("AUTH_SEND_CODE_RATE", default="5/min"),
         "auth_verify_code": "15/min",
         "auth_refresh": "30/min",
         "payments_webhook": "60/min",
     },
 }
 
+# В dev-режиме ослабляем лимиты, чтобы тестовые входы не упирались в 429.
+if DEBUG:
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["auth_send_code"] = env("AUTH_SEND_CODE_RATE", default="1000/min")
+
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", "http://127.0.0.1:5173"])
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 if not DEBUG:
@@ -204,22 +210,17 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = not _REDIS_OK  # execute tasks synchronously when no Redis
 
-FILE_UPLOAD_MAX_MEMORY_SIZE = 512 * 1024 * 1024   # 0.5 ГБ
-DATA_UPLOAD_MAX_MEMORY_SIZE = 512 * 1024 * 1024  # 0.5 ГБ
+FILE_UPLOAD_MAX_MEMORY_SIZE = 512 * 1024 * 1024   # 0.5 Р“Р‘
+DATA_UPLOAD_MAX_MEMORY_SIZE = 512 * 1024 * 1024  # 0.5 Р“Р‘
 
 # Frontend URL for invite links etc.
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 
-# SMPP (RedSMS)
-SMPP_HOST = env("SMPP_HOST", default="smpp.redsms.ru")
-SMPP_PORT = env.int("SMPP_PORT", default=2775)
-SMPP_SYSTEM_ID = env("SMPP_SYSTEM_ID", default="")
-SMPP_PASSWORD = env("SMPP_PASSWORD", default="")
-SMPP_SOURCE_ADDR = env("SMPP_SOURCE_ADDR", default="Chat")
-
-# Telegram auth (бот для входа по коду)
+# Telegram auth
 TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 TELEGRAM_BOT_SECRET = env("TELEGRAM_BOT_SECRET", default="")
 
 # Telegram Gateway API (verification codes via @VerificationCodes)
 TELEGRAM_GATEWAY_TOKEN = env("TELEGRAM_GATEWAY_TOKEN", default="")
+
+

@@ -2,19 +2,23 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import { authApi, chatsApi, paymentsApi, type Chat, type UserSearchResult } from "../api/client";
 import { useAuthStore } from "../store/auth";
+import { useChatListStore } from "../store/chatList";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { showMessageNotification, requestPermission } from "../lib/notifications";
 import ChatPage from "./ChatPage";
 import SettingsPage from "./SettingsPage";
+import { useE2eeStore } from "../store/e2ee";
+import { OfflineBanner } from "../components/OfflineBanner";
+import { WsManager, buildWsUrl } from "../lib/ws-manager";
 
-const WS_BASE = import.meta.env.VITE_WS_URL || "";
 
 /** Превью сообщения для списка чатов (совпадает с логикой бэкенда get_last_message_preview). */
-function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } }): string {
+function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string }; is_encrypted?: boolean }): string {
   if (!msg) return "";
+  if ((msg as { is_encrypted?: boolean }).is_encrypted) return "Зашифрованное сообщение";
   const mime = (msg.file && msg.file.mime_type) || "";
-  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
   if (msg.msg_type === "audio") return "(голосовое)";
+  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
   if (String(mime).startsWith("image/")) return "(фото)";
   if (msg.msg_type === "file") return "(файл)";
   const text = (msg.content || "").trim();
@@ -45,7 +49,16 @@ export default function MessengerPage() {
   const location = useLocation();
   const showSettings = location.pathname === "/dashboard/settings";
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId || null);
-  const [chats, setChats] = useState<Chat[]>([]);
+  const chats = useChatListStore((s) => s.chats);
+  const chatListLoading = useChatListStore((s) => s.loading);
+  const chatListError = useChatListStore((s) => s.error);
+  const pinnedChatIds = useChatListStore((s) => s.pinnedChatIds);
+  const setPinnedChatIds = useChatListStore((s) => s.setPinnedChatIds);
+  const storeUpsertChat = useChatListStore((s) => s.upsertChat);
+  const storeUpdateChat = useChatListStore((s) => s.updateChat);
+  const storeRemoveChat = useChatListStore((s) => s.removeChat);
+  const storeSetUnread = useChatListStore((s) => s.setUnread);
+  const loadChats = useChatListStore((s) => s.loadChats);
   const [, setSub] = useState<{ is_valid?: boolean; is_referral_trial?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -78,25 +91,7 @@ export default function MessengerPage() {
   /** Контекстное меню по правому клику на чат */
   const [chatContextMenu, setChatContextMenu] = useState<{ x: number; y: number; chat: Chat } | null>(null);
   const MAX_PINNED = 5;
-  /** Закреплённые чаты (localStorage, для сортировки; не более MAX_PINNED) */
-  const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
-    try {
-      const s = localStorage.getItem("pinned_chat_ids");
-      const arr = s ? JSON.parse(s) : [];
-      return Array.isArray(arr) ? arr.slice(0, MAX_PINNED) : [];
-    } catch {
-      return [];
-    }
-  });
-  const upsertChat = useCallback((chat: Chat, updates?: Partial<Chat>) => {
-    setChats((prev) => {
-      const idx = prev.findIndex((c) => c.id === chat.id);
-      if (idx === -1) return [{ ...chat, ...(updates || {}) }, ...prev];
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...chat, ...(updates || {}) };
-      return next;
-    });
-  }, []);
+  const lastSyncedPinnedRef = useRef<string[]>([]);
 
   // Toast: ссылка скопирована при создании чата (группа — приглашение, личный — ссылка на чат)
   useEffect(() => {
@@ -119,6 +114,13 @@ export default function MessengerPage() {
     }
   }, [location.pathname, urlChatId]);
 
+  /* ---------- E2EE device registration (when authenticated) ---------- */
+  useEffect(() => {
+    if (token) {
+      useE2eeStore.getState().ensureRegistered();
+    }
+  }, [token]);
+
   /* ---------- Load data ---------- */
   useEffect(() => {
     paymentsApi.getSubscription()
@@ -129,9 +131,9 @@ export default function MessengerPage() {
           setLoading(false);
           return;
         }
-        return chatsApi.list().then((res) => {
-          const data = res.data;
-          setChats(Array.isArray(data) ? data : data.results ?? []);
+        // Use the store's loadChats (cache-first + network revalidate)
+        return loadChats().then(() => {
+          lastSyncedPinnedRef.current = useChatListStore.getState().pinnedChatIds;
         });
       })
       .catch((e) => {
@@ -143,7 +145,16 @@ export default function MessengerPage() {
         }
       })
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ---------- New-login toast ---------- */
+  const [newLoginToast, setNewLoginToast] = useState<{ device: string; ip: string } | null>(null);
+  useEffect(() => {
+    if (!newLoginToast) return;
+    const t = setTimeout(() => setNewLoginToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [newLoginToast]);
 
   /* ---------- Global notification WebSocket ---------- */
   const handleNotification = useCallback((data: {
@@ -152,31 +163,60 @@ export default function MessengerPage() {
     chat_title: string;
     message: { sender_display_name?: string; content?: string };
     is_muted: boolean;
+    // new_login_alert fields
+    device?: string;
+    ip?: string;
+    session_id?: string;
+    // force_logout fields
+    terminated_session_ids?: string[];
   }) => {
+    // Handle force_logout: if our session was terminated, clear tokens and redirect
+    if (data.type === "force_logout") {
+      const currentSid = useAuthStore.getState().sessionId;
+      const terminated = data.terminated_session_ids || [];
+      if (currentSid && terminated.includes(currentSid)) {
+        useAuthStore.getState().clearTokens();
+        window.location.href = "/auth";
+      }
+      return;
+    }
+
+    // Handle new login alert: show toast
+    if (data.type === "new_login_alert") {
+      setNewLoginToast({ device: data.device || "Unknown", ip: data.ip || "" });
+      return;
+    }
+
+    // Handle E2EE prekeys low: upload more one-time prekeys
+    if (data.type === "e2ee.prekeys_low") {
+      useE2eeStore.getState().uploadPrekeysIfLow();
+      return;
+    }
+
     if (data.type === "new_message") {
       const preview = data.message ? formatMessagePreview(data.message) : undefined;
-      let found = false;
-      setChats((prev) =>
-        prev.map((c) => {
-          if (c.id !== data.chat_id) return c;
-          found = true;
-          return {
-            ...c,
-            unread_count: c.id === activeChatId ? c.unread_count : (c.unread_count || 0) + 1,
-            last_message_preview: preview ?? c.last_message_preview,
-          };
-        })
-      );
-      if (!found) {
+      const currentChats = useChatListStore.getState().chats;
+      const found = currentChats.some((c) => c.id === data.chat_id);
+
+      if (found) {
+        // Update existing chat in store
+        const isActive = data.chat_id === activeChatId;
+        storeUpdateChat(data.chat_id, {
+          unread_count: isActive
+            ? (currentChats.find((c) => c.id === data.chat_id)?.unread_count || 0)
+            : (currentChats.find((c) => c.id === data.chat_id)?.unread_count || 0) + 1,
+          ...(preview ? { last_message_preview: preview } : {}),
+        });
+      } else {
         chatsApi.get(data.chat_id).then((res) => {
-          upsertChat(res.data, {
+          storeUpsertChat(res.data, {
             unread_count: activeChatId === data.chat_id ? res.data.unread_count : (res.data.unread_count || 0) + 1,
             last_message_preview: preview ?? res.data.last_message_preview,
           });
         }).catch(() => {
           const now = new Date().toISOString();
           const stubOwner = { id: data.chat_id, phone: "", display_name: data.chat_title || "User", avatar: null };
-          upsertChat({
+          storeUpsertChat({
             id: data.chat_id,
             title: data.chat_title || "Новый чат",
             description: "",
@@ -205,35 +245,32 @@ export default function MessengerPage() {
         showMessageNotification(data.chat_title || "Новое сообщение", data.message || {});
       }
     }
-  }, [activeChatId, upsertChat]);
+  }, [activeChatId, storeUpsertChat, storeUpdateChat]);
 
+  const notifMgrRef = useRef<WsManager | null>(null);
   useEffect(() => {
     if (!token || needsSub) return;
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
       requestPermission();
     }
-    const wsUrl =
-      (WS_BASE ? WS_BASE.replace(/^http/, "ws") : `${window.location.origin.replace(/^http/, "ws")}`) +
-      `/ws/notifications/`;
-    const ws = new WebSocket(wsUrl, ["bearer", token]);
-    notifWsRef.current = ws;
-    let cancelled = false;
-    ws.onopen = () => {
-      if (cancelled) ws.close();
-    };
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleNotification(data);
-      } catch { /* */ }
-    };
+    const wsUrl = buildWsUrl("/ws/notifications/");
+    const mgr = new WsManager({
+      url: wsUrl,
+      protocols: ["bearer", token],
+    });
+    notifMgrRef.current = mgr;
+    notifWsRef.current = mgr.raw;
+
+    mgr.on("*", (data: unknown) => {
+      handleNotification(data as Parameters<typeof handleNotification>[0]);
+    });
+
+    mgr.connect();
+
     return () => {
-      cancelled = true;
+      notifMgrRef.current = null;
       notifWsRef.current = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
-        ws.close();
-      }
-      /* When CONNECTING, we don't close here to avoid "closed before established" console error; onopen will close if cancelled */
+      mgr.dispose();
     };
   }, [token, needsSub, handleNotification]);
 
@@ -256,7 +293,7 @@ export default function MessengerPage() {
 
   const openChat = (chatId: string) => {
     setActiveChatId(chatId);
-    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, unread_count: 0 } : c));
+    storeSetUnread(chatId, 0);
     navigate(`/chat/${chatId}`, { replace: true });
   };
 
@@ -270,7 +307,6 @@ export default function MessengerPage() {
   };
 
   // Sort: pinned first (preserve pin order), then unread first, then by created_at
-  // TODO: persist pin order on backend so multi-device ordering stays consistent.
   const sortedChats = [...chats].sort((a, b) => {
     const ia = pinnedChatIds.indexOf(a.id);
     const ib = pinnedChatIds.indexOf(b.id);
@@ -331,12 +367,6 @@ export default function MessengerPage() {
     } catch { /* ignore */ }
   }, [sidebarWidth]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("pinned_chat_ids", JSON.stringify(pinnedChatIds));
-    } catch { /* ignore */ }
-  }, [pinnedChatIds]);
-
   // Закрытие контекстного меню при клике снаружи
   useEffect(() => {
     if (!chatContextMenu) return;
@@ -348,39 +378,51 @@ export default function MessengerPage() {
     };
   }, [chatContextMenu]);
 
-  const togglePin = useCallback((chatId: string) => {
-    setPinnedChatIds((prev) => {
-      if (prev.includes(chatId)) return prev.filter((id) => id !== chatId);
-      if (prev.length >= MAX_PINNED) return prev;
-      return [...prev, chatId];
-    });
-    setChatContextMenu(null);
-  }, []);
+  const togglePin = useCallback(async (chatId: string) => {
+    const prev = pinnedChatIds;
+    const next = prev.includes(chatId)
+      ? prev.filter((id) => id !== chatId)
+      : (prev.length >= MAX_PINNED ? prev : [...prev, chatId]);
+
+    // no-op (limit reached)
+    if (next === prev) {
+      setChatContextMenu(null);
+      return;
+    }
+
+    setPinnedChatIds(next);
+    try {
+      const { data } = await chatsApi.setPins(next);
+      const synced = (data.pinned_chat_ids || []).slice(0, MAX_PINNED);
+      setPinnedChatIds(synced);
+      lastSyncedPinnedRef.current = synced;
+    } catch {
+      setPinnedChatIds(lastSyncedPinnedRef.current);
+    } finally {
+      setChatContextMenu(null);
+    }
+  }, [pinnedChatIds]);
 
   const handleToggleMute = useCallback(
     async (chat: Chat) => {
       try {
         const { data } = await chatsApi.toggleMute(chat.id);
-        setChats((prev) =>
-          prev.map((c) => (c.id === chat.id ? { ...c, is_muted: data.is_muted } : c))
-        );
+        storeUpdateChat(chat.id, { is_muted: data.is_muted });
       } catch { /* ignore */ }
       setChatContextMenu(null);
     },
-    []
+    [storeUpdateChat]
   );
 
   const handleMarkUnread = useCallback(
     async (chat: Chat) => {
       try {
         await chatsApi.markUnread(chat.id);
-        setChats((prev) =>
-          prev.map((c) => (c.id === chat.id ? { ...c, unread_count: Math.max(1, (c.unread_count || 0)) } : c))
-        );
+        storeSetUnread(chat.id, (prev) => Math.max(1, prev));
       } catch { /* ignore */ }
       setChatContextMenu(null);
     },
-    []
+    [storeSetUnread]
   );
 
   // Единый поиск: по чатам (filteredChats) и по юзернеймам (debounced API)
@@ -410,7 +452,7 @@ export default function MessengerPage() {
         .getOrCreateDm(userId)
         .then((res) => {
           const chat = res.data;
-          setChats((prev) => (prev.some((c) => c.id === chat.id) ? prev : [chat, ...prev]));
+          storeUpsertChat(chat);
           openChat(chat.id);
           setSearchQuery("");
           setUserSearchResults([]);
@@ -426,8 +468,14 @@ export default function MessengerPage() {
             }
           }
         })
-        .catch(() => {
-          setError("Не удалось открыть чат");
+        .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
+          const detail = err?.response?.data?.detail;
+          setError(
+            err?.response?.status === 403 && detail
+              ? detail
+              : "Не удалось открыть чат"
+          );
+          setTimeout(() => setError(""), 5000);
         });
     },
     [openChat]
@@ -471,11 +519,7 @@ export default function MessengerPage() {
           setJoinStatus("joined");
           setJoinMessage(data.already_member ? "Вы уже в чате." : "Вы вступили в чат.");
           const newChatId = data.id;
-          setChats((prev) => {
-            const already = prev.some((c) => c.id === newChatId);
-            if (already) return prev;
-            return [{ ...res.data } as Chat, ...prev];
-          });
+          storeUpsertChat({ ...res.data } as Chat);
           setShowJoinByLinkModal(false);
           setJoinLinkInput("");
           setJoinStatus("idle");
@@ -496,7 +540,9 @@ export default function MessengerPage() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+    <div className="flex flex-col h-screen bg-slate-50 overflow-hidden relative">
+      <OfflineBanner />
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
       {/* Toast: ссылка-приглашение скопирована */}
       {showInviteLinkCopiedToast && (
         <button
@@ -508,6 +554,30 @@ export default function MessengerPage() {
             <path d="M20 6 9 17l-5-5"/>
           </svg>
           <span>{inviteToastIsChatLink ? "Ссылка на чат скопирована в буфер обмена" : "Ссылка-приглашение скопирована в буфер обмена"}</span>
+        </button>
+      )}
+
+      {/* Toast: новый вход в аккаунт */}
+      {newLoginToast && (
+        <button
+          type="button"
+          onClick={() => {
+            setNewLoginToast(null);
+            navigate("/dashboard/settings");
+          }}
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-3 bg-amber-600 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-amber-700 transition-colors text-left max-w-md"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-200 shrink-0">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div>
+            <p className="font-medium">Новый вход в аккаунт</p>
+            <p className="text-amber-100 text-xs mt-0.5">
+              {newLoginToast.device}{newLoginToast.ip ? ` (${newLoginToast.ip})` : ""}. Не вы? Нажмите, чтобы открыть настройки сессий.
+            </p>
+          </div>
         </button>
       )}
 
@@ -664,10 +734,10 @@ export default function MessengerPage() {
 
         {/* Список: при активном поиске — чаты + пользователи, иначе только чаты */}
         <div className="flex-1 overflow-y-auto">
-          {loading && <p className="text-slate-500 text-sm text-center py-8">Загрузка…</p>}
-          {error && <p className="text-red-500 text-sm text-center py-8">{error}</p>}
+          {(loading || chatListLoading) && <p className="text-slate-500 text-sm text-center py-8">Загрузка…</p>}
+          {(error || chatListError) && <p className="text-red-500 text-sm text-center py-8">{error || chatListError}</p>}
 
-          {needsSub && !loading && (
+          {needsSub && !loading && !chatListLoading && (
             <div className="p-4">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                 <h2 className="text-sm font-semibold text-amber-900 mb-1">Необходима подписка</h2>
@@ -679,7 +749,7 @@ export default function MessengerPage() {
             </div>
           )}
 
-          {!needsSub && !loading && !error && chats.length === 0 && q.length === 0 && (
+          {!needsSub && !loading && !chatListLoading && !error && !chatListError && chats.length === 0 && q.length === 0 && (
             <div className="p-6 text-center">
               <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
@@ -704,7 +774,7 @@ export default function MessengerPage() {
             </div>
           )}
 
-          {!needsSub && !loading && (filteredChats.length > 0 || q.length > 0) && (
+          {!needsSub && !loading && !chatListLoading && (filteredChats.length > 0 || q.length > 0) && (
             <>
               {filteredChats.length > 0 ? (
                 <ul className="divide-y divide-slate-400">
@@ -730,20 +800,30 @@ export default function MessengerPage() {
                         >
                           <div className="relative shrink-0">
                             {(chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
-                              <img
-                                src={
-                                  withPreviewParams(
-                                    chat.is_personal && chat.other_member
-                                      ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
-                                      : chat.avatar_url,
-                                    96
-                                  ) || ""
-                                }
-                                alt=""
-                                className="w-12 h-12 rounded-full object-cover"
-                                loading="lazy"
-                                decoding="async"
-                              />
+                              <>
+                                <img
+                                  src={
+                                    withPreviewParams(
+                                      chat.is_personal && chat.other_member
+                                        ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
+                                        : chat.avatar_url,
+                                      96
+                                    ) || ""
+                                  }
+                                  alt=""
+                                  className="w-12 h-12 rounded-full object-cover"
+                                  loading="lazy"
+                                  decoding="async"
+                                  onError={(e) => { const img = e.currentTarget; img.style.display = 'none'; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ''; }}
+                                />
+                                <div style={{ display: 'none' }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                                  isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
+                                }`}>
+                                  {chat.is_personal && chat.other_member
+                                    ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
+                                    : getAvatarInitials(chat.title || "Ч")}
+                                </div>
+                              </>
                             ) : (
                               <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
                                 isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
@@ -764,8 +844,13 @@ export default function MessengerPage() {
                                   <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
                                 </svg>
                               )}
-                              <span className={`font-medium truncate text-sm ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
+                              <span className={`font-medium truncate text-sm flex items-center gap-1 ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
                                 {chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
+                                {chat.is_personal && (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-slate-400" aria-hidden>
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                  </svg>
+                                )}
                               </span>
                               {chat.is_muted && (
                                 <span className="shrink-0 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded" title="Без звука">
@@ -879,33 +964,37 @@ export default function MessengerPage() {
               chatId={activeChatId}
               onBack={closeChat}
               onChatUpdated={(updated) =>
-                setChats((prev) =>
-                  prev.map((c) => {
-                    if (c.id !== updated.id) return c;
-                    const next = { ...c };
-                    if (updated.title !== undefined) next.title = updated.title;
-                    if (updated.avatar_url !== undefined) next.avatar_url = updated.avatar_url;
-                    if (updated.is_muted !== undefined) next.is_muted = updated.is_muted;
-                    return next;
-                  })
-                )
+                {
+                  const updates: Partial<Chat> = {};
+                  if (updated.title !== undefined) updates.title = updated.title;
+                  if (updated.avatar_url !== undefined) updates.avatar_url = updated.avatar_url;
+                  if (updated.is_muted !== undefined) updates.is_muted = updated.is_muted;
+                  storeUpdateChat(updated.id, updates);
+                }
               }
               onMessageSent={(cid, preview) =>
-                setChats((prev) =>
-                  prev.map((c) => (c.id === cid ? { ...c, last_message_preview: preview } : c))
-                )
+                storeUpdateChat(cid, { last_message_preview: preview })
               }
               onChatLeft={(leftChatId) => {
-                setChats((prev) => prev.filter((c) => c.id !== leftChatId));
+                storeRemoveChat(leftChatId);
                 closeChat();
               }}
               onOpenDmWithUserId={(userId) => {
-                // Личный чат с человеком только один — getOrCreateDm возвращает существующий или создаёт единственный
-                chatsApi.getOrCreateDm(userId).then((res) => {
-                  const chat = res.data;
-                  setChats((prev) => (prev.some((c) => c.id === chat.id) ? prev : [chat, ...prev]));
-                  openChat(chat.id);
-                }).catch(() => {});
+                chatsApi.getOrCreateDm(userId)
+                  .then((res) => {
+                    const chat = res.data;
+                    storeUpsertChat(chat);
+                    openChat(chat.id);
+                  })
+                  .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
+                    const detail = err?.response?.data?.detail;
+                    setError(
+                      err?.response?.status === 403 && detail
+                        ? detail
+                        : "Не удалось открыть чат"
+                    );
+                    setTimeout(() => setError(""), 5000);
+                  });
               }}
             />
           </div>
@@ -946,6 +1035,7 @@ export default function MessengerPage() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }

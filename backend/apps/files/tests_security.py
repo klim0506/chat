@@ -81,3 +81,37 @@ class FileUploadAccessTest(TestCase):
         expired_token = make_file_token(str(att.id), expires_at=int(time.time()) - 3600)
         res = self.client.get(f"/api/files/{att.id}/", {"t": expired_token})
         self.assertEqual(res.status_code, 403)
+
+class FileScanGateTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(phone="+79990009999", display_name="Scan")
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_access_token(self.user.pk)}")
+
+    def test_serve_pending_scan_returns_423(self):
+        att = FileAttachment.objects.create(
+            uploader=self.user,
+            original_name="x.jpg",
+            file_path="chat_uploads/test/x.jpg",
+            mime_type="image/jpeg",
+            size_bytes=0,
+            storage_type=FileAttachment.StorageType.LOCAL,
+            scan_status=FileAttachment.ScanStatus.PENDING,
+        )
+        token = make_file_token(str(att.id))
+        res = self.client.get(f"/api/files/{att.id}/", {"t": token})
+        self.assertEqual(res.status_code, 423)
+
+    def test_serve_infected_returns_403(self):
+        att = FileAttachment.objects.create(
+            uploader=self.user,
+            original_name="x.jpg",
+            file_path="chat_uploads/test/x.jpg",
+            mime_type="image/jpeg",
+            size_bytes=0,
+            storage_type=FileAttachment.StorageType.LOCAL,
+            scan_status=FileAttachment.ScanStatus.INFECTED,
+        )
+        token = make_file_token(str(att.id))
+        res = self.client.get(f"/api/files/{att.id}/", {"t": token})
+        self.assertEqual(res.status_code, 403)

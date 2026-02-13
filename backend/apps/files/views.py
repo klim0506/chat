@@ -19,7 +19,8 @@ from rest_framework.response import Response
 from apps.chats.models import ChatMember
 from .models import FileAttachment
 from .serializers import FileAttachmentSerializer
-from PIL import Image
+from .tasks import scan_uploaded_file
+from PIL import Image, ImageOps
 
 MAX_FILE_SIZE = 512 * 1024 * 1024  # 0.5 ГБ
 FILE_TOKEN_TTL_SECONDS = 60 * 60
@@ -75,16 +76,22 @@ class FileUploadView(APIView):
             return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
         if file_obj.size > MAX_FILE_SIZE:
             return Response({"detail": "Файл больше 0,5 ГБ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_encrypted = request.data.get("is_encrypted") in (True, "true", "1")
         clean_original_name = os.path.basename(file_obj.name or "file")
         guessed_mime = mimetypes.guess_type(clean_original_name)[0] or ""
         mime_type = guessed_mime or file_obj.content_type or "application/octet-stream"
-        if mime_type == "image/svg+xml":
-            return Response({"detail": "SVG-файлы запрещены из соображений безопасности."}, status=status.HTTP_400_BAD_REQUEST)
-        if not any(
-            mime_type.startswith(prefix) if prefix.endswith("/") else mime_type == prefix
-            for prefix in ALLOWED_UPLOAD_MIME_PREFIXES
-        ):
-            return Response({"detail": "Неподдерживаемый тип файла."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if is_encrypted:
+            mime_type = "application/octet-stream"
+        else:
+            if mime_type == "image/svg+xml":
+                return Response({"detail": "SVG-файлы запрещены из соображений безопасности."}, status=status.HTTP_400_BAD_REQUEST)
+            if not any(
+                mime_type.startswith(prefix) if prefix.endswith("/") else mime_type == prefix
+                for prefix in ALLOWED_UPLOAD_MIME_PREFIXES
+            ):
+                return Response({"detail": "Неподдерживаемый тип файла."}, status=status.HTTP_400_BAD_REQUEST)
         chat_id_raw = request.data.get("chat_id")
         chat_id = None
         if chat_id_raw:
@@ -106,6 +113,7 @@ class FileUploadView(APIView):
         with open(full_path, "wb+") as dest:
             for chunk in file_obj.chunks():
                 dest.write(chunk)
+        scan_status = FileAttachment.ScanStatus.ENCRYPTED if is_encrypted else FileAttachment.ScanStatus.PENDING
         att = FileAttachment.objects.create(
             uploader=request.user,
             original_name=clean_original_name,
@@ -113,7 +121,14 @@ class FileUploadView(APIView):
             mime_type=mime_type,
             size_bytes=file_obj.size,
             storage_type=FileAttachment.StorageType.LOCAL,
+            scan_status=scan_status,
+            is_encrypted=is_encrypted,
         )
+        if not is_encrypted:
+            try:
+                scan_uploaded_file.delay(str(att.id))
+            except Exception:
+                pass
         return Response(FileAttachmentSerializer(att, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
@@ -129,13 +144,19 @@ class SecureFileServeView(APIView):
             att = FileAttachment.objects.get(pk=file_id)
         except FileAttachment.DoesNotExist:
             raise Http404
+        if att.scan_status == FileAttachment.ScanStatus.PENDING:
+            return Response({"detail": "Файл проходит антивирусную проверку."}, status=status.HTTP_423_LOCKED)
+        if att.scan_status in {FileAttachment.ScanStatus.INFECTED, FileAttachment.ScanStatus.ERROR}:
+            return Response({"detail": "Доступ к файлу запрещён."}, status=status.HTTP_403_FORBIDDEN)
+
+        is_encrypted = getattr(att, "is_encrypted", False) or att.scan_status == FileAttachment.ScanStatus.ENCRYPTED
         media_root = Path(settings.MEDIA_ROOT).resolve()
         full_path = (media_root / att.file_path).resolve()
         if media_root not in full_path.parents and full_path != media_root:
             raise Http404
         if not full_path.is_file():
             raise Http404
-        content_type = att.mime_type or mimetypes.guess_type(att.original_name)[0] or "application/octet-stream"
+        content_type = "application/octet-stream" if is_encrypted else (att.mime_type or mimetypes.guess_type(att.original_name)[0] or "application/octet-stream")
 
         # Optional lightweight preview for images
         try:
@@ -146,10 +167,11 @@ class SecureFileServeView(APIView):
         except (TypeError, ValueError):
             w, h = 0, 0
 
-        if content_type.startswith("image/") and (w or h):
+        if not is_encrypted and content_type.startswith("image/") and (w or h):
             w = max(16, min(2000, w or 0))
             h = max(16, min(2000, h or 0))
             with Image.open(full_path) as img:
+                img = ImageOps.exif_transpose(img)
                 if not w or not h:
                     # Preserve aspect ratio if only one side provided
                     if w and not h:
@@ -166,7 +188,7 @@ class SecureFileServeView(APIView):
                     out_type = "image/png"
                 else:
                     img = img.convert("RGB")
-                    img.save(buf, format="WEBP", quality=70, method=6)
+                    img.save(buf, format="WEBP", quality=85, method=6)
                     out_type = "image/webp"
                 buf.seek(0)
                 resp = HttpResponse(buf.read(), content_type=out_type)

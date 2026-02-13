@@ -13,12 +13,14 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
+  /** Current session ID (from JWT "sid" claim) — used for session management. */
+  sessionId: string | null;
   isAuthenticated: boolean;
   setTokens: (access: string, refresh: string, user?: AuthUser) => void;
   clearTokens: () => void;
 }
 
-/** Decode JWT payload without verification (to extract user_id). */
+/** Decode JWT payload without verification (to extract user_id, sid). */
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
@@ -36,14 +38,16 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       user: null,
+      sessionId: null,
       isAuthenticated: false,
       setTokens: (access, refresh, user) => {
         const payload = decodeJwtPayload(access);
         const userId = payload?.user_id as string | undefined;
+        const sessionId = (payload?.sid as string) || null;
         const resolved: AuthUser | null = user ?? (userId ? { id: userId, phone: "", display_name: "" } : null);
-        set({ accessToken: access, refreshToken: refresh, user: resolved, isAuthenticated: true });
+        set({ accessToken: access, refreshToken: refresh, user: resolved, sessionId, isAuthenticated: true });
       },
-      clearTokens: () => set({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false }),
+      clearTokens: () => set({ accessToken: null, refreshToken: null, user: null, sessionId: null, isAuthenticated: false }),
     }),
     {
       name: "auth-storage",

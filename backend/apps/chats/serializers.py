@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Chat, ChatMember, Message, MessageReaction, ScheduledMessage, UserPinnedMessage, REACTION_EMOJIS, DEFAULT_MAX_MEMBERS
+from .models import Chat, ChatMember, Message, MessageReaction, ScheduledMessage, UserPinnedMessage, ChatPinnedMessage, REACTION_EMOJIS, DEFAULT_MAX_MEMBERS
+from apps.files.serializers import FileAttachmentSerializer
 from apps.users.serializers import UserSerializer
 from .utils import generate_slug, make_verification_code
 
@@ -19,6 +20,7 @@ class ChatSerializer(serializers.ModelSerializer):
     chat_type = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     is_muted = serializers.SerializerMethodField()
+    pin_order = serializers.SerializerMethodField()
     is_expanded = serializers.SerializerMethodField()
     expanded_until = serializers.DateTimeField(read_only=True)
     effective_max_members = serializers.SerializerMethodField()
@@ -26,6 +28,8 @@ class ChatSerializer(serializers.ModelSerializer):
     background_url = serializers.SerializerMethodField()
     other_member = serializers.SerializerMethodField()
     pinned_message = serializers.SerializerMethodField()
+    pinned_messages = serializers.SerializerMethodField()
+    max_pins = serializers.SerializerMethodField()
     my_pinned_messages = serializers.SerializerMethodField()
     last_message_preview = serializers.SerializerMethodField()
 
@@ -35,11 +39,23 @@ class ChatSerializer(serializers.ModelSerializer):
             "id", "title", "description", "slug", "chat_type", "is_personal", "is_favorites", "max_members", "owner",
             "members_count", "invite_link", "is_active", "created_at",
             "unread_count", "is_muted",
+            "pin_order",
             "is_expanded", "expanded_until", "effective_max_members",
             "avatar_url", "background_url", "other_member",
-            "pinned_message", "my_pinned_messages",
+            "pinned_message", "pinned_messages", "max_pins", "my_pinned_messages",
             "last_message_preview",
         )
+
+    def _get_membership(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        prefetched = getattr(obj, "current_user_membership", None)
+        if prefetched is not None:
+            return prefetched[0] if prefetched else None
+        return obj.members.filter(
+            user=request.user, status=ChatMember.Status.ACTIVE
+        ).first()
 
     def get_is_expanded(self, obj):
         return obj.is_expanded
@@ -74,9 +90,7 @@ class ChatSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return 0
-        membership = obj.members.filter(
-            user=request.user, status=ChatMember.Status.ACTIVE
-        ).first()
+        membership = self._get_membership(obj)
         if not membership:
             return 0
         if not membership.last_read_at:
@@ -90,10 +104,12 @@ class ChatSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
-        membership = obj.members.filter(
-            user=request.user, status=ChatMember.Status.ACTIVE
-        ).first()
+        membership = self._get_membership(obj)
         return membership.is_muted if membership else False
+
+    def get_pin_order(self, obj):
+        membership = self._get_membership(obj)
+        return membership.pin_order if membership else None
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -136,12 +152,38 @@ class ChatSerializer(serializers.ModelSerializer):
         ]
 
     def get_pinned_message(self, obj):
-        """Сообщение, закреплённое для всех в чате."""
+        """Первое (самое свежее) закреплённое для всех сообщение — backward compat."""
+        pins = self._get_all_pinned(obj)
+        if pins:
+            return pins[0]
+        # Fallback: legacy single pinned_message FK
         msg = getattr(obj, "pinned_message", None)
-        if not msg or msg.is_deleted:
-            return None
+        if msg and not msg.is_deleted:
+            ctx = {"request": self.context.get("request"), "other_members_read": self._other_members_read(obj)}
+            return MessageSerializer(msg, context=ctx).data
+        return None
+
+    def _get_all_pinned(self, obj):
+        """All pinned-for-all messages, serialized."""
+        pins = (
+            ChatPinnedMessage.objects.filter(chat=obj)
+            .select_related("message", "message__sender", "message__file", "message__reply_to", "message__reply_to__sender", "message__reply_to__file", "message__forwarded_from", "message__forwarded_from_chat")
+            .prefetch_related("message__files", "message__reactions")
+            .order_by("-pin_order")
+        )
         ctx = {"request": self.context.get("request"), "other_members_read": self._other_members_read(obj)}
-        return MessageSerializer(msg, context=ctx).data
+        return [
+            MessageSerializer(p.message, context=ctx).data
+            for p in pins
+            if not p.message.is_deleted
+        ]
+
+    def get_pinned_messages(self, obj):
+        """Все закреплённые для всех сообщения (упорядочены по pin_order desc)."""
+        return self._get_all_pinned(obj)
+
+    def get_max_pins(self, obj):
+        return obj.max_pins
 
     def get_my_pinned_messages(self, obj):
         """Список сообщений, закреплённых текущим пользователем для себя."""
@@ -166,11 +208,13 @@ class ChatSerializer(serializers.ModelSerializer):
         msg = obj.messages.filter(is_deleted=False).order_by("-created_at").first()
         if not msg:
             return ""
+        if getattr(msg, "is_encrypted", False):
+            return "Зашифрованное сообщение"
         mime = (msg.file and getattr(msg.file, "mime_type", None)) or ""
-        if msg.msg_type == "video" or msg.msg_type == "video_circle" or str(mime).startswith("video/"):
-            return "(видео)"
         if msg.msg_type == "audio":
             return "(голосовое)"
+        if msg.msg_type == "video" or msg.msg_type == "video_circle" or str(mime).startswith("video/"):
+            return "(видео)"
         if str(mime).startswith("image/"):
             return "(фото)"
         if msg.msg_type == "file":
@@ -234,8 +278,21 @@ class JoinChatSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=64)
 
 
+class ReplyMessageSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for the replied-to message (no recursion)."""
+    sender = UserSerializer(read_only=True)
+    file = FileAttachmentSerializer(read_only=True)
+
+    class Meta:
+        model = Message
+        fields = ("id", "sender", "msg_type", "content", "file", "created_at", "is_deleted")
+        read_only_fields = fields
+
+
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserSerializer(read_only=True)
+    file = FileAttachmentSerializer(read_only=True)
+    files = FileAttachmentSerializer(read_only=True, many=True)
     reactions = serializers.SerializerMethodField()
     my_reactions = serializers.SerializerMethodField()
     read_status = serializers.SerializerMethodField()
@@ -244,6 +301,12 @@ class MessageSerializer(serializers.ModelSerializer):
         child=serializers.UUIDField(), write_only=True, required=False,
         help_text="Список UUID файлов для прикрепления к сообщению",
     )
+    file_id = serializers.UUIDField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        help_text="UUID одного файла для прикрепления к сообщению",
+    )
     waveform = serializers.ListField(
         child=serializers.IntegerField(min_value=0, max_value=255),
         required=False,
@@ -251,13 +314,24 @@ class MessageSerializer(serializers.ModelSerializer):
         max_length=128,
         help_text="Амплитуды для визуализации аудио (0–255, до 128 значений)",
     )
+    # Reply — write: UUID, read: nested lightweight serializer
+    reply_to_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    reply_to = ReplyMessageSerializer(read_only=True)
+    # Forward — read-only nested fields
+    forwarded_from = UserSerializer(read_only=True)
+    forwarded_from_chat_title = serializers.SerializerMethodField()
+    # E2EE (write: int, read: from sender_device.device_id)
+    sender_device_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = Message
         fields = (
             "id", "chat", "sender", "msg_type", "content", "file", "files",
             "created_at", "edited_at", "is_deleted", "reactions", "my_reactions", "read_status", "read_by",
-            "file_ids", "waveform",
+            "file_ids", "file_id", "waveform",
+            "reply_to_id", "reply_to",
+            "forwarded_from", "forwarded_from_chat_title",
+            "is_encrypted", "encrypted_keys", "sender_device_id",
         )
         read_only_fields = ("id", "chat", "sender", "created_at", "edited_at", "is_deleted", "files")
 
@@ -303,9 +377,36 @@ class MessageSerializer(serializers.ModelSerializer):
             obj.reactions.filter(user=request.user).values_list("emoji", flat=True).order_by("emoji")
         )
 
+    def get_forwarded_from_chat_title(self, obj):
+        if obj.forwarded_from_chat_id:
+            return getattr(obj.forwarded_from_chat, "title", None)
+        return None
+
     def create(self, validated_data):
+        file_id = validated_data.pop("file_id", None)
         file_ids = validated_data.pop("file_ids", None) or []
+        reply_to_id = validated_data.pop("reply_to_id", None)
+        sender_device_id = validated_data.pop("sender_device_id", None)
+        if reply_to_id:
+            validated_data["reply_to_id"] = reply_to_id
+        if sender_device_id is not None:
+            from apps.e2ee.models import Device
+            try:
+                device = Device.objects.get(user=validated_data["sender"], device_id=sender_device_id, is_active=True)
+                validated_data["sender_device"] = device
+            except Device.DoesNotExist:
+                pass
         msg = super().create(validated_data)
+        if file_id:
+            from apps.files.models import FileAttachment
+            request = self.context.get("request")
+            attachments = FileAttachment.objects.filter(id=file_id)
+            if request and request.user and request.user.is_authenticated:
+                attachments = attachments.filter(uploader=request.user)
+            att = attachments.first()
+            if att:
+                msg.file = att
+                msg.save(update_fields=["file"])
         if file_ids:
             from apps.files.models import FileAttachment
             attachments = FileAttachment.objects.filter(id__in=file_ids)
@@ -322,6 +423,8 @@ class MessageSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Return nested file objects for reading, accept UUIDs for writing."""
         data = super().to_representation(instance)
+        if instance.sender_device:
+            data["sender_device_id"] = instance.sender_device.device_id
         from apps.files.serializers import FileAttachmentSerializer
         if instance.file:
             data["file"] = FileAttachmentSerializer(instance.file, context=self.context).data

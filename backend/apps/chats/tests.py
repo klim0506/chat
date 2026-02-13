@@ -403,3 +403,42 @@ class FileUploadAPITest(TestCase):
         att = _create_file(self.user, "secret.jpg")
         res = self.client.get(f"/api/files/{att.id}/")
         self.assertEqual(res.status_code, 403)
+
+class ChatPinOrderApiTest(TestCase):
+    def setUp(self):
+        self.user = _create_user(phone="79990005566", display_name="Pins")
+        self.chat1 = _create_chat(self.user, title="Pin A")
+        self.chat2 = _create_chat(self.user, title="Pin B")
+        self.chat3 = _create_chat(self.user, title="Pin C")
+        from apps.payments.models import UserSubscription
+        UserSubscription.objects.create(user=self.user)
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {_make_token(self.user)}")
+
+    def test_set_pins_persists_order(self):
+        res = self.client.post(
+            "/api/chats/pins/",
+            {"chat_ids": [str(self.chat2.id), str(self.chat1.id)]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+        self.assertEqual(res.data["pinned_chat_ids"], [str(self.chat2.id), str(self.chat1.id)])
+
+        m1 = ChatMember.objects.get(chat=self.chat1, user=self.user)
+        m2 = ChatMember.objects.get(chat=self.chat2, user=self.user)
+        m3 = ChatMember.objects.get(chat=self.chat3, user=self.user)
+        self.assertEqual(m2.pin_order, 1)
+        self.assertEqual(m1.pin_order, 2)
+        self.assertIsNone(m3.pin_order)
+
+    def test_list_chats_contains_pin_order(self):
+        ChatMember.objects.filter(chat=self.chat3, user=self.user).update(pin_order=1)
+        ChatMember.objects.filter(chat=self.chat1, user=self.user).update(pin_order=2)
+
+        res = self.client.get("/api/chats/")
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+        data = res.data if isinstance(res.data, list) else res.data.get("results", [])
+        by_id = {item["id"]: item for item in data}
+        self.assertEqual(by_id[str(self.chat3.id)]["pin_order"], 1)
+        self.assertEqual(by_id[str(self.chat1.id)]["pin_order"], 2)
+        self.assertIsNone(by_id[str(self.chat2.id)]["pin_order"])

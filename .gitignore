@@ -37,6 +37,9 @@ frontend/dist/
 .next/
 dist/
 *.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/
+frontend/.asset-opt-cache.json
 
 # Archives / temp
 *.zip

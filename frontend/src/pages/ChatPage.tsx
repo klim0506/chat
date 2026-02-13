@@ -1,29 +1,43 @@
-import { useEffect, useLayoutEffect, useState, useRef, useCallback, Fragment } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { useParams, Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { chatsApi, messagesApi, filesApi, scheduledApi, paymentsApi, authApi } from "../api/client";
-import type { Chat, ChatMember, Message, User, ScheduledMessage as ScheduledMessageType } from "../api/client";
+import type { Chat, ChatMember, Message, User, UserSearchResult, ScheduledMessage as ScheduledMessageType } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { usePreferencesStore } from "../store/preferences";
+import { useMessagesStore, normalizeMessage as storeNormalizeMessage } from "../store/messages";
+import { useOutboxStore } from "../store/outbox";
+import { useNetworkStore } from "../store/network";
 import { getAvatarInitials } from "../lib/avatar-initials";
+import { compressImageForUpload } from "../lib/image-compression";
 import { showMessageNotification } from "../lib/notifications";
 import { AvatarEditorModal } from "../components/AvatarEditorModal";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 import { FilePreviewModal } from "../components/FilePreviewModal";
+import { OfflineBanner } from "../components/OfflineBanner";
+import { ProgressiveImage } from "../components/ProgressiveImage";
+import { WsManager, buildWsUrl } from "../lib/ws-manager";
+import { db } from "../lib/db";
+import { prepareEncryptedMessage } from "../lib/e2ee/prepare-message";
+import { decryptFromDevice } from "../lib/e2ee/session-manager";
+import * as e2eeKeyStorage from "../lib/e2ee/key-storage";
+import { computeSafetyNumber, formatSafetyNumber } from "../lib/e2ee/safety-number";
+import { useCachedMediaUrl } from "../hooks/useCachedMediaUrl";
+import { AnimatedReaction } from "../components/AnimatedReaction";
+import { REACTIONS } from "../lib/reaction-animations";
 // Фон по умолчанию для всех чатов (файл из public или алиас в vite.config)
 import defaultChatBackground from "@default-chat-bg";
 
-const WS_BASE = import.meta.env.VITE_WS_URL || "";
-
-/** Эмодзи для реакций (должен совпадать с бэкендом) */
-const REACTION_EMOJIS = [
-  "🔥", "💫", "✨", "❤️", "🥰", "😂", "😎", "🎉", "🙌", "👏", "💪", "🤩", "🌟", "😮", "😢",
-];
+/** Эмодзи для реакций (из reaction-animations, совпадает с бэкендом) */
+const REACTION_EMOJIS = REACTIONS.map((r) => r.emoji);
 
 /** Максимальный размер файла при загрузке — 0,5 ГБ */
 const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
+const VIRTUALIZATION_THRESHOLD = 120;
+const VIRTUAL_ROW_ESTIMATE = 92;
+const VIRTUAL_OVERSCAN = 10;
 
 /** Эмодзи для вставки в текст сообщения (пикер у поля ввода) */
 const INPUT_EMOJIS = [
@@ -70,6 +84,42 @@ type SpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
    Helpers
    ================================================================ */
 
+/** Проверка, что две даты (ISO) относятся к одному дню в локальной временной зоне */
+function isSameDay(isoA: string | undefined, isoB: string | undefined): boolean {
+  if (!isoA || !isoB) return false;
+  const a = new Date(isoA);
+  const b = new Date(isoB);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+/** Форматирование даты для разделителей: «Сегодня», «Вчера» или «15 февраля [2025]» */
+function formatDateLabel(iso: string | undefined, lang: "en" | "ru"): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const thisYear = today.getFullYear();
+
+  const day = d.getDate();
+  const month = d.getMonth();
+  const year = d.getFullYear();
+
+  const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+  const isYesterday = day === yesterday.getDate() && month === yesterday.getMonth() && year === yesterday.getFullYear();
+
+  if (lang === "ru") {
+    if (isToday) return "Сегодня";
+    if (isYesterday) return "Вчера";
+    const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+    return year !== thisYear ? `${day} ${months[month]} ${year}` : `${day} ${months[month]}`;
+  }
+  if (isToday) return "Today";
+  if (isYesterday) return "Yesterday";
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return year !== thisYear ? `${months[month]} ${day}, ${year}` : `${months[month]} ${day}`;
+}
+
 function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const ta = document.createElement("textarea");
@@ -85,51 +135,7 @@ function copyToClipboard(text: string): Promise<void> {
 
 /** Сжатие изображения для экономии памяти (скрепка / нижняя зона). Качество умеренное, без сильной потери. */
 async function compressImage(file: File): Promise<File> {
-  // TODO: move image compression to a Web Worker to avoid UI jank on low-end devices.
-  const maxDim = 1920;
-  const quality = 0.82;
-  return new Promise((resolve) => {
-    const img = document.createElement("img");
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let w = img.naturalWidth;
-      let h = img.naturalHeight;
-      if (w <= maxDim && h <= maxDim && file.type === "image/jpeg" && file.size < 800 * 1024) {
-        resolve(file);
-        return;
-      }
-      const scale = Math.min(maxDim / w, maxDim / h, 1);
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(file);
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            resolve(file);
-            return;
-          }
-          const name = file.name.replace(/\.[a-z]+$/i, ".jpg") || "image.jpg";
-          resolve(new File([blob], name, { type: "image/jpeg" }));
-        },
-        "image/jpeg",
-        quality
-      );
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
-    img.src = url;
-  });
+  return compressImageForUpload(file, { maxDim: 2560, quality: 0.92 });
 }
 
 /** Убирает Markdown-разметку для вставки в Word и т.п.: жирный, курсив, ссылки [текст](url)→текст, код `...`, заголовки #. */
@@ -283,6 +289,17 @@ function setEditableCursorOffset(editable: HTMLElement, offset: number): void {
   }
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+function lowerBound(values: number[], target: number): number {
+  let left = 0;
+  let right = values.length;
+  while (left < right) {
+    const mid = (left + right) >> 1;
+    if (values[mid] < target) left = mid + 1;
+    else right = mid;
+  }
+  return left;
 }
 
 /** Получить Range по символьным смещениям в contenteditable */
@@ -443,8 +460,8 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
 function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } | null }): string {
   if (!msg) return "";
   const mime = (msg.file && msg.file.mime_type) || "";
-  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
   if (msg.msg_type === "audio") return "(голосовое)";
+  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
   if (String(mime).startsWith("image/")) return "(фото)";
   if (msg.msg_type === "file") return "(файл)";
   const text = (msg.content || "").trim();
@@ -462,6 +479,107 @@ function withPreviewParams(url: string, width: number): string {
   } catch {
     return url;
   }
+}
+
+/** Видео с автовоспроизведением при появлении в зоне видимости (muted для обхода политики браузера). */
+function InlineAutoplayVideo({ src, className = "" }: { src: string; className?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    const container = containerRef.current;
+    if (!el || !container) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (!e) return;
+        if (e.isIntersecting) {
+          el.muted = true;
+          el.play().catch(() => {});
+        } else {
+          el.pause();
+        }
+      },
+      { threshold: 0.25, rootMargin: "50px" }
+    );
+    io.observe(container);
+    return () => io.disconnect();
+  }, [src]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <video
+        ref={videoRef}
+        src={src}
+        className={className}
+        preload="metadata"
+        playsInline
+        muted
+        loop
+        controls
+      />
+    </div>
+  );
+}
+
+function SafetyNumberButton({ otherUserId, otherUserName, myUserId }: { otherUserId: string; otherUserName: string; myUserId: string }) {
+  const [show, setShow] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const identity = await e2eeKeyStorage.getIdentityKeyPair();
+      const { e2eeApi } = await import("../api/client");
+      const { data } = await e2eeApi.getKeyBundle(otherUserId);
+      const bundle = data.devices?.[0];
+      if (!identity || !bundle) {
+        setCode(null);
+        return;
+      }
+      const num = computeSafetyNumber(
+        (await import("../lib/e2ee/crypto")).toBase64(identity.publicKey),
+        myUserId,
+        bundle.identity_key,
+        otherUserId
+      );
+      setCode(num);
+    } catch {
+      setCode(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [otherUserId, myUserId]);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => { setShow(true); load(); }}
+        className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium"
+      >
+        Проверить шифрование
+      </button>
+      {show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShow(false)}>
+          <div className="bg-white rounded-xl p-6 max-w-sm mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-slate-800 mb-2">Код верификации с {otherUserName}</h3>
+            {loading ? (
+              <p className="text-sm text-slate-500">Загрузка…</p>
+            ) : code ? (
+              <p className="text-sm font-mono text-slate-800 break-all">{formatSafetyNumber(code)}</p>
+            ) : (
+              <p className="text-sm text-slate-500">Не удалось вычислить код.</p>
+            )}
+            <p className="text-xs text-slate-500 mt-2">Сравните этот код при личной встрече.</p>
+            <button type="button" onClick={() => setShow(false)} className="mt-4 w-full py-2 bg-slate-100 rounded-lg text-sm font-medium hover:bg-slate-200">
+              Закрыть
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function normalizeInviteLink(link: string): string {
@@ -484,10 +602,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const currentUser = useAuthStore((s) => s.user);
   const myUserId = currentUser?.id || "";
   const textScale = usePreferencesStore((s) => s.messageTextScale);
+  const language = usePreferencesStore((s) => s.language);
 
   const [chat, setChat] = useState<Chat | null>(null);
   const [members, setMembers] = useState<ChatMember[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const messages = useMessagesStore((s) => s.byChat[chatId ?? ""] ?? []);
+  const storeUpsertMessage = useMessagesStore((s) => s.upsertMessage);
+  const storeLoadMessages = useMessagesStore((s) => s.loadMessages);
+  const storeUpdateMessage = useMessagesStore((s) => s.updateMessage);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState<string | null>(null);
@@ -511,7 +633,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Идёт ли AI-распознавание речи (транскрипция в поле ввода). */
   const [aiListening, setAiListening] = useState(false);
   /** Контекстное меню правого клика по кнопке микрофона (переключение режима). */
-  const [voiceMenuPos, setVoiceMenuPos] = useState<{ x: number; y: number } | null>(null);
   /** Текущие амплитуды для визуализации во время записи (32 полоски) */
   const [liveWaveform, setLiveWaveform] = useState<number[]>([]);
   /** Уровень громкости при записи (0..255) для индикатора */
@@ -528,6 +649,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Редактирование сообщения в поле ввода (для сообщений только из эмодзи) */
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [formatMenuPos, setFormatMenuPos] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
+  /** Сообщение, на которое отвечаем (reply bar над input) */
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  /** Сообщение для пересылки (открывает ForwardModal) */
+  const [forwardModalMessage, setForwardModalMessage] = useState<Message | null>(null);
+  /** Telegram-style pinned messages: index currently shown */
+  const [pinnedIndex, setPinnedIndex] = useState(0);
   /** Просмотр одного изображения в модалке поверх чата */
   const [singleImagePreview, setSingleImagePreview] = useState<{ url: string; fileName?: string } | null>(null);
   /** Файлы для предпросмотра перед отправкой (модалка). asFileOnly: отправлять всё как file (drop в верхнюю зону) */
@@ -546,6 +673,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const savedFormatRangeRef = useRef<Range | null>(null);
   const undoStackRef = useRef<string[]>([""]);
   const undoIndexRef = useRef(0);
+  // upsertMessageChronologically is now handled by useMessagesStore.upsertMessage
 
   /** Установить и markdown-состояние, и отображение в contenteditable (при программной смене контента) */
   const setInputAndEditable = useCallback((markdown: string) => {
@@ -652,6 +780,11 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [approveRejectLoading, setApproveRejectLoading] = useState<string | null>(null);
+  const [inviteSearchQuery, setInviteSearchQuery] = useState("");
+  const [inviteSearchResults, setInviteSearchResults] = useState<UserSearchResult[]>([]);
+  const [inviteSearchLoading, setInviteSearchLoading] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState("");
   const [showInfoMenu, setShowInfoMenu] = useState(false);
   const infoMenuRef = useRef<HTMLDivElement>(null);
   const [showAvatarFullscreen, setShowAvatarFullscreen] = useState<string | null>(null);
@@ -668,6 +801,10 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const SWIPE_THRESHOLD_PX = 80;
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const rowHeightsRef = useRef<Map<string, number>>(new Map());
+  const [virtualMeasureTick, setVirtualMeasureTick] = useState(0);
+  const [messagesScrollTop, setMessagesScrollTop] = useState(0);
+  const [messagesViewportHeight, setMessagesViewportHeight] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const notifWsRef = useRef<WebSocket | null>(null);
@@ -680,14 +817,72 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
   }, []);
 
+  const messageIndexById = useMemo(() => {
+    const idx = new Map<string, number>();
+    messages.forEach((m, i) => idx.set(m.id, i));
+    return idx;
+  }, [messages]);
+
+  const virtualState = useMemo(() => {
+    const count = messages.length;
+    const offsets = new Array<number>(count + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < count; i += 1) {
+      const id = messages[i].id;
+      const rowHeight = rowHeightsRef.current.get(id) ?? VIRTUAL_ROW_ESTIMATE;
+      offsets[i + 1] = offsets[i] + rowHeight;
+    }
+
+    const enabled = count >= VIRTUALIZATION_THRESHOLD && messagesViewportHeight > 0;
+    if (!enabled) {
+      return {
+        enabled: false,
+        start: 0,
+        end: count,
+        topPadding: 0,
+        bottomPadding: 0,
+        offsets,
+      };
+    }
+
+    const viewTop = Math.max(0, messagesScrollTop);
+    const viewBottom = viewTop + messagesViewportHeight;
+    const start = Math.max(0, lowerBound(offsets, viewTop) - 1 - VIRTUAL_OVERSCAN);
+    const end = Math.min(count, lowerBound(offsets, viewBottom) + VIRTUAL_OVERSCAN);
+    return {
+      enabled: true,
+      start,
+      end,
+      topPadding: offsets[start],
+      bottomPadding: Math.max(0, offsets[count] - offsets[end]),
+      offsets,
+    };
+  }, [messages, messagesScrollTop, messagesViewportHeight, virtualMeasureTick]);
+
   const scrollToMessageId = useCallback((messageId: string) => {
-    const el = document.querySelector(`[data-message-id="${messageId}"]`);
-    (el?.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    const scrollRoot = messagesScrollRef.current;
+    const anchor = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (anchor) {
+      (anchor.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      setShowInfo(false);
+      return;
+    }
+    const idx = messageIndexById.get(messageId);
+    if (scrollRoot && idx !== undefined) {
+      const approxTop = virtualState.offsets[idx] ?? (idx * VIRTUAL_ROW_ESTIMATE);
+      scrollRoot.scrollTop = Math.max(0, approxTop - 120);
+      requestAnimationFrame(() => {
+        const delayedAnchor = document.querySelector(`[data-message-id="${messageId}"]`);
+        (delayedAnchor?.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      });
+    }
     setShowInfo(false);
-  }, []);
+  }, [messageIndexById, virtualState.offsets]);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const handleMessagesScroll = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (el) setMessagesScrollTop(el.scrollTop);
     setShowScrollToBottom(!isScrolledToBottom());
   }, [isScrolledToBottom]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -716,24 +911,66 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   }, []);
 
   /* ---------- Send text (after scrollToBottom so it can be used in deps) ---------- */
-  const sendTextMessage = useCallback((text: string) => {
+  const sendTextMessage = useCallback(async (text: string) => {
     if (!chatId || !text.trim()) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "chat.message", msg_type: "text", content: text }));
+    const replyId = replyToMessage?.id || undefined;
+    const trimmed = text.trim();
+
+    const doSendPlain = () => {
+      const payload = { type: "chat.message" as const, msg_type: "text", content: trimmed, ...(replyId ? { reply_to: replyId } : {}) };
+      if (chatWsRef.current?.isConnected()) {
+        chatWsRef.current.send(payload);
+      } else if (!useNetworkStore.getState().isOnline) {
+        useOutboxStore.getState().enqueue({ chatId, msgType: "text", content: trimmed });
+        scrollToBottom();
+      } else {
+        messagesApi.create(chatId, { msg_type: "text", content: trimmed, ...(replyId ? { reply_to_id: replyId } : {}) }).then((res) => {
+          storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
+          scrollToBottom();
+          onMessageSent?.(chatId, formatMessagePreview(res.data));
+        });
+      }
       setInput("");
+      setReplyToMessage(null);
       if (inputEditableRef.current) inputEditableRef.current.innerHTML = "";
       resetUndoStack();
-      return;
+    };
+
+    if (chat?.is_personal && chat.other_member) {
+      try {
+        const encPayload = await prepareEncryptedMessage(myUserId, chat, trimmed, replyId);
+        if (encPayload) {
+          if (chatWsRef.current?.isConnected()) {
+            chatWsRef.current.send(encPayload);
+          } else if (!useNetworkStore.getState().isOnline) {
+            useOutboxStore.getState().enqueue({ chatId, msgType: "text", content: trimmed });
+            scrollToBottom();
+          } else {
+            messagesApi.create(chatId, {
+              msg_type: "text",
+              content: encPayload.content,
+              is_encrypted: true,
+              sender_device_id: encPayload.sender_device_id,
+              encrypted_keys: encPayload.encrypted_keys,
+              ...(replyId ? { reply_to_id: replyId } : {}),
+            }).then((res) => {
+              storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
+              scrollToBottom();
+              onMessageSent?.(chatId, "Зашифрованное сообщение");
+            });
+          }
+          setInput("");
+          setReplyToMessage(null);
+          if (inputEditableRef.current) inputEditableRef.current.innerHTML = "";
+          resetUndoStack();
+          return;
+        }
+      } catch {
+        /* fall back to plain */
+      }
     }
-    messagesApi.create(chatId, { msg_type: "text", content: text }).then((res) => {
-      setMessages((prev) => [...prev, normalizeMessage(res.data)]);
-      scrollToBottom();
-      onMessageSent?.(chatId, formatMessagePreview(res.data));
-    });
-    setInput("");
-    if (inputEditableRef.current) inputEditableRef.current.innerHTML = "";
-    resetUndoStack();
-  }, [chatId, resetUndoStack, scrollToBottom, onMessageSent]);
+    doSendPlain();
+  }, [chatId, chat, replyToMessage, resetUndoStack, scrollToBottom, onMessageSent, storeUpsertMessage]);
 
   const [editablePlainCursor, setEditablePlainCursor] = useState({ plain: "", cursor: 0 });
   const mentionableMembers = members.filter((m) => m.status === "active" && (m.user as User).id !== myUserId);
@@ -880,9 +1117,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (!chatId) return;
     chatsApi.markRead(chatId).catch(() => {});
     // Also notify via notification WS
-    if (notifWsRef.current?.readyState === WebSocket.OPEN) {
-      notifWsRef.current.send(JSON.stringify({ type: "mark_read", chat_id: chatId }));
-    }
+    notifMgrRef.current?.send({ type: "mark_read", chat_id: chatId });
   }, [chatId]);
 
   /* ---------- Reset unread state when switching chat ---------- */
@@ -892,13 +1127,38 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setSeenBottomIds(new Set());
     setUnreadLineDismissed(false);
     sentinelRefs.current.clear();
+    rowHeightsRef.current.clear();
+    setVirtualMeasureTick((v) => v + 1);
+    setMessagesScrollTop(0);
   }, [chatId]);
+
+  useLayoutEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const update = () => setMessagesViewportHeight(el.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const active = new Set(messages.map((m) => m.id));
+    let changed = false;
+    rowHeightsRef.current.forEach((_, id) => {
+      if (!active.has(id)) {
+        rowHeightsRef.current.delete(id);
+        changed = true;
+      }
+    });
+    if (changed) setVirtualMeasureTick((v) => v + 1);
+  }, [messages]);
 
   /* ---------- Load data ---------- */
   useEffect(() => {
     if (!chatId || !token) return;
     setLoading(true);
-    chatsApi.get(chatId).then((res) => {
+    const chatP = chatsApi.get(chatId).then((res) => {
       setChat(res.data);
       setIsMuted(res.data.is_muted);
       // Initialize online status from other_member if available
@@ -909,13 +1169,34 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           [om.id]: { is_online: !!om.is_online, last_seen_display: om.last_seen_display },
         }));
       }
-    }).catch(() => setChat(null)).finally(() => setLoading(false));
-    messagesApi.list(chatId).then((res) => {
-      setMessages((res.data as Message[]).map(normalizeMessage));
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => scrollToBottomInstant());
-      });
+      return res.data;
+    }).catch(() => { setChat(null); return null; }).finally(() => setLoading(false));
+    const msgsP = storeLoadMessages(chatId);
+
+    // Wait for both chat metadata and messages before deciding scroll target
+    Promise.all([chatP, msgsP]).then(([chatData, msgs]) => {
+      const unread = chatData?.unread_count ?? 0;
+      if (unread > 0 && msgs && msgs.length > 0) {
+        // Set initialUnreadIds BEFORE scroll so the divider renders in the same frame
+        const clampedUnread = Math.min(unread, msgs.length);
+        const ids = msgs.slice(-clampedUnread).map((m: { id: string }) => m.id);
+        setInitialUnreadIds(ids);
+        // Wait for React to render the divider, then scroll to it
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const divider = document.querySelector('[data-unread-line]');
+          if (divider) {
+            divider.scrollIntoView({ block: 'start' });
+            // Small upward nudge for visual breathing room
+            if (messagesScrollRef.current) messagesScrollRef.current.scrollTop -= 12;
+          } else {
+            scrollToBottomInstant();
+          }
+        }));
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottomInstant()));
+      }
     });
+
     chatsApi.members(chatId).then((res) => {
       setMembers(res.data);
       // Initialize online status from members
@@ -929,12 +1210,30 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         setOnlineStatus((prev) => ({ ...prev, ...statusMap }));
       }
     }).catch(() => {});
-  }, [chatId, token, scrollToBottom, scrollToBottomInstant]);
+  }, [chatId, token, scrollToBottomInstant]);
 
   const refreshChat = useCallback(() => {
     if (!chatId) return;
     chatsApi.get(chatId).then((res) => setChat(res.data));
   }, [chatId]);
+
+  const canInviteToGroup = chat && !chat.is_personal && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"));
+
+  useEffect(() => {
+    if (!inviteSearchQuery.trim()) {
+      setInviteSearchResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      setInviteSearchLoading(true);
+      authApi
+        .searchUsers(inviteSearchQuery)
+        .then((res) => setInviteSearchResults(res.data.results || []))
+        .catch(() => setInviteSearchResults([]))
+        .finally(() => setInviteSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [inviteSearchQuery]);
 
   /* ---------- Зафиксировать список непрочитанных при первом наличии чата и сообщений ---------- */
   useEffect(() => {
@@ -1040,114 +1339,169 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     return () => window.removeEventListener("focus", handleFocus);
   }, [markRead]);
 
-  /* ---------- Chat WebSocket ---------- */
+  /* ---------- Chat WebSocket (with auto-reconnect + delta sync) ---------- */
+  const chatWsRef = useRef<WsManager | null>(null);
   useEffect(() => {
     if (!chatId || !token) return;
-    const wsUrl =
-      (WS_BASE ? WS_BASE.replace(/^http/, "ws") : `${window.location.origin.replace(/^http/, "ws")}`) +
-      `/ws/chat/${chatId}/`;
-    const ws = new WebSocket(wsUrl, ["bearer", token]);
-    wsRef.current = ws;
-    ws.onopen = () => {
-      if (wsRef.current !== ws) ws.close();
-    };
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "chat.message" && data.message) {
-          const raw = data.message;
-          const msg: Message = normalizeMessage({
-            ...raw,
-            id: raw.id,
-            created_at: raw.created_at || new Date().toISOString(),
-            reactions: raw.reactions ?? {},
-            my_reactions: raw.my_reactions ?? (raw.my_reaction ? [raw.my_reaction] : []),
-            read_status: getSenderId(raw) === myUserId ? (raw.read_status || "delivered") : undefined,
-          });
-          const isMine = getSenderId(raw) === myUserId;
-          const atBottom = isScrolledToBottom();
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg];
-          });
-          if (isMine) onMessageSent?.(chatId!, formatMessagePreview(raw));
-          if (isMine || atBottom) setTimeout(scrollToBottom, 80);
-          if (!document.hidden) markRead();
-        }
-        if (data.type === "chat.message.updated" && data.message) {
-          const raw = data.message;
-          if (raw.is_deleted) {
-            setMessages((prev) => prev.filter((m) => m.id !== raw.id));
-          } else {
-            const updated: Message = normalizeMessage({
-              ...raw,
-              id: raw.id,
-              created_at: raw.created_at || new Date().toISOString(),
-              reactions: raw.reactions ?? {},
-              my_reactions: raw.my_reactions ?? (raw.my_reaction ? [raw.my_reaction] : []),
-              read_status: getSenderId(raw) === myUserId ? (raw.read_status || "delivered") : undefined,
-            });
-            setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
-          }
-        }
-        if (data.type === "chat.mark_read" && data.last_read_at) {
-          const readAt = new Date(data.last_read_at).getTime();
-          if (data.user_id !== myUserId) {
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (getSenderId(m) !== myUserId) return m;
-                if (new Date(m.created_at).getTime() <= readAt) {
-                  return { ...m, read_status: "read" as const };
+    const wsUrl = buildWsUrl(`/ws/chat/${chatId}/`);
+    const mgr = new WsManager({
+      url: wsUrl,
+      protocols: ["bearer", token],
+      onOpen: () => {
+        // On reconnect, delta-sync messages since last known
+        const meta = db.syncMeta.get(chatId);
+        if (meta) {
+          meta.then((m) => {
+            if (m?.lastMessageAt) {
+              messagesApi.list(chatId, { since: m.lastMessageAt }).then((res) => {
+                const freshMsgs = (res.data as Message[]).map(storeNormalizeMessage);
+                for (const msg of freshMsgs) {
+                  storeUpsertMessage(chatId, msg);
                 }
-                return m;
-              })
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+        // Flush outbox on reconnect
+        useOutboxStore.getState().flush().catch(() => {});
+      },
+    });
+    chatWsRef.current = mgr;
+    wsRef.current = mgr.raw;
+
+    // Subscribe to WS events
+    mgr.on("chat.message", async (data: unknown) => {
+      const d = data as { message?: Record<string, unknown> };
+      if (!d.message) return;
+      let raw = d.message;
+      const isEncrypted = raw.is_encrypted === true;
+      const encryptedKeys = (raw.encrypted_keys as Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>) ?? {};
+      if (isEncrypted && !(getSenderId(raw as Message) === myUserId)) {
+        const myDeviceId = await e2eeKeyStorage.getCurrentDeviceId();
+        const senderId = getSenderId(raw as Message);
+        const senderDeviceId = (raw.sender_device_id as number) ?? 0;
+        const myEntry = myDeviceId != null ? encryptedKeys[String(myDeviceId)] : null;
+        if (myEntry) {
+          try {
+            const decrypted = await decryptFromDevice(
+              senderId,
+              senderDeviceId,
+              myEntry.type as 0 | 1,
+              myEntry.body,
+              myEntry.type === 0 ? { identity_key: myEntry.identity_key!, ephemeral_key: myEntry.ephemeral_key!, spk_id: myEntry.spk_id!, opk_id: myEntry.opk_id } : undefined
             );
+            raw = { ...raw, content: decrypted };
+          } catch {
+            raw = { ...raw, content: "[не удалось расшифровать]" };
+          }
+        } else {
+          raw = { ...raw, content: "[нет ключа для этого устройства]" };
+        }
+      } else if (isEncrypted && getSenderId(raw as Message) === myUserId) {
+        raw = { ...raw, content: (raw.content as string) || "[зашифровано]" };
+      }
+      const msg: Message = normalizeMessage({
+        ...raw,
+        id: raw.id as string,
+        created_at: (raw.created_at as string) || new Date().toISOString(),
+        reactions: (raw.reactions as Record<string, number>) ?? {},
+        my_reactions: (raw.my_reactions as string[]) ?? ((raw as { my_reaction?: string }).my_reaction ? [(raw as { my_reaction: string }).my_reaction] : []),
+        read_status: getSenderId(raw as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
+      } as Message & { my_reaction?: string });
+      const isMine = getSenderId(raw as Message) === myUserId;
+      const atBottom = isScrolledToBottom();
+      storeUpsertMessage(chatId, msg);
+      if (isMine) onMessageSent?.(chatId, formatMessagePreview(raw as Message));
+      if (isMine || atBottom) setTimeout(scrollToBottom, 80);
+      if (!document.hidden) markRead();
+    });
+
+    mgr.on("chat.message.updated", (data: unknown) => {
+      const d = data as { message?: Record<string, unknown> };
+      if (!d.message) return;
+      const raw = d.message;
+      if (raw.is_deleted) {
+        storeUpdateMessage(chatId, raw.id as string, { is_deleted: true });
+      } else {
+        const updated: Message = storeNormalizeMessage({
+          ...raw,
+          id: raw.id as string,
+          created_at: (raw.created_at as string) || new Date().toISOString(),
+          reactions: (raw.reactions as Record<string, number>) ?? {},
+          my_reactions: (raw.my_reactions as string[]) ?? ((raw as { my_reaction?: string }).my_reaction ? [(raw as { my_reaction: string }).my_reaction] : []),
+          read_status: getSenderId(raw as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
+        } as Message & { my_reaction?: string });
+        storeUpsertMessage(chatId, updated);
+      }
+    });
+
+    mgr.on("chat.mark_read", (data: unknown) => {
+      const d = data as { last_read_at?: string; user_id?: string };
+      if (!d.last_read_at) return;
+      const readAt = new Date(d.last_read_at).getTime();
+      if (d.user_id !== myUserId) {
+        const currentMsgs = useMessagesStore.getState().byChat[chatId] ?? [];
+        for (const m of currentMsgs) {
+          if (getSenderId(m) !== myUserId) continue;
+          if (new Date(m.created_at).getTime() <= readAt && m.read_status !== "read") {
+            storeUpdateMessage(chatId, m.id, { read_status: "read" as const });
           }
         }
-        if (data.type === "chat.typing") {
-          setTyping(data.display_name || data.user_id);
-          setTimeout(() => setTyping(null), 3000);
-        }
-        if (data.type === "user.online.status" && data.user_id) {
-          setOnlineStatus((prev) => ({
-            ...prev,
-            [data.user_id]: { is_online: data.is_online, last_seen_display: data.last_seen_display },
-          }));
-        }
-      } catch { /* ignore */ }
-    };
-    return () => {
-      wsRef.current = null;
-      if (ws.readyState === WebSocket.CONNECTING) return;
-      ws.close();
-    };
-  }, [chatId, token, scrollToBottom, myUserId, markRead, isScrolledToBottom, onMessageSent]);
+      }
+    });
 
-  /* ---------- Global notification WebSocket (for browser notifications) ---------- */
+    mgr.on("chat.typing", (data: unknown) => {
+      const d = data as { display_name?: string; user_id?: string };
+      setTyping(d.display_name || d.user_id || null);
+      setTimeout(() => setTyping(null), 3000);
+    });
+
+    mgr.on("user.online.status", (data: unknown) => {
+      const d = data as { user_id?: string; is_online?: boolean; last_seen_display?: string | null };
+      if (d.user_id) {
+        setOnlineStatus((prev) => ({
+          ...prev,
+          [d.user_id!]: { is_online: !!d.is_online, last_seen_display: d.last_seen_display },
+        }));
+      }
+    });
+
+    mgr.connect();
+
+    return () => {
+      chatWsRef.current = null;
+      wsRef.current = null;
+      mgr.dispose();
+    };
+  }, [chatId, token, scrollToBottom, myUserId, markRead, isScrolledToBottom, onMessageSent, storeUpsertMessage, storeUpdateMessage]);
+
+  /* ---------- Global notification WebSocket (with auto-reconnect) ---------- */
+  const notifMgrRef = useRef<WsManager | null>(null);
   useEffect(() => {
     if (!token) return;
-    const wsUrl =
-      (WS_BASE ? WS_BASE.replace(/^http/, "ws") : `${window.location.origin.replace(/^http/, "ws")}`) +
-      `/ws/notifications/`;
-    const ws = new WebSocket(wsUrl, ["bearer", token]);
-    notifWsRef.current = ws;
-    ws.onopen = () => {
-      if (notifWsRef.current !== ws) ws.close();
-    };
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type !== "new_message" || data.is_muted) return;
-        const inThisChat = data.chat_id === chatId;
-        const tabVisible = !document.hidden;
-        if (tabVisible && inThisChat) return;
-        showMessageNotification(data.chat_title || "Новое сообщение", data.message || {});
-      } catch { /* */ }
-    };
+    const wsUrl = buildWsUrl("/ws/notifications/");
+    const mgr = new WsManager({
+      url: wsUrl,
+      protocols: ["bearer", token],
+    });
+    notifMgrRef.current = mgr;
+    notifWsRef.current = mgr.raw;
+
+    mgr.on("new_message", (data: unknown) => {
+      const d = data as { chat_id?: string; chat_title?: string; message?: Record<string, unknown>; is_muted?: boolean };
+      if (d.is_muted) return;
+      const inThisChat = d.chat_id === chatId;
+      const tabVisible = !document.hidden;
+      if (tabVisible && inThisChat) return;
+      showMessageNotification(d.chat_title || "Новое сообщение", d.message || {});
+    });
+
+    mgr.connect();
+
     return () => {
+      notifMgrRef.current = null;
       notifWsRef.current = null;
-      if (ws.readyState === WebSocket.CONNECTING) return;
-      ws.close();
+      mgr.dispose();
     };
   }, [token, chatId]);
 
@@ -1177,7 +1531,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       );
       const msgRes = await messagesApi.create(chatId, { msg_type: msgType, content: file.name, file_id: fileId });
       if (msgRes?.data?.id) {
-        setMessages((prev) => [...prev, normalizeMessage(msgRes.data)]);
+        storeUpsertMessage(chatId, storeNormalizeMessage(msgRes.data));
         scrollToBottom();
         onMessageSent?.(chatId, formatMessagePreview(msgRes.data));
       } else {
@@ -1211,12 +1565,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       const fileIds = uploadResults.map((r) => r.data.id);
       const names = imageFiles.map((f) => f.name).join(", ");
       const msgRes = await messagesApi.create(chatId, {
-        msg_type: "image",
+        msg_type: "file",
         content: names,
         file_ids: fileIds,
       });
       if (msgRes?.data?.id) {
-        setMessages((prev) => [...prev, normalizeMessage(msgRes.data)]);
+        storeUpsertMessage(chatId, storeNormalizeMessage(msgRes.data));
         scrollToBottom();
         onMessageSent?.(chatId, formatMessagePreview(msgRes.data));
       } else {
@@ -1238,7 +1592,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (editingMessageId && chatId) {
       if (text) {
         messagesApi.update(chatId, editingMessageId, { content: text }).then((res) => {
-          setMessages((prev) => prev.map((m) => (m.id === res.data.id ? normalizeMessage(res.data) : m)));
+          storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
           setEditingMessageId(null);
           setInput("");
           if (inputEditableRef.current) inputEditableRef.current.innerHTML = "";
@@ -1361,7 +1715,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   };
 
   const sendTyping = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: "chat.typing" }));
+    chatWsRef.current?.send({ type: "chat.typing" });
   };
 
   /* ---------- Mute toggle ---------- */
@@ -1515,6 +1869,24 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       .finally(() => setApproveRejectLoading(null));
   };
 
+  const handleInviteUser = (userId: string) => {
+    if (!chatId) return;
+    setInviteLoading(true);
+    setInviteError("");
+    chatsApi
+      .invite(chatId, { user_id: userId })
+      .then(() => {
+        refreshChat();
+        chatsApi.members(chatId).then((r) => setMembers(r.data)).catch(() => {});
+        setInviteSearchQuery("");
+        setInviteSearchResults([]);
+      })
+      .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
+        setInviteError(err?.response?.data?.detail || "Не удалось пригласить");
+      })
+      .finally(() => setInviteLoading(false));
+  };
+
   const handleLeaveChat = () => {
     if (!chatId || !window.confirm("Вы уверены, что хотите выйти из чата?")) return;
     setLeaveLoading(true);
@@ -1659,7 +2031,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             waveform: waveform.length > 0 ? waveform : undefined,
           });
           if (msgRes?.data?.id) {
-            setMessages((prev) => [...prev, normalizeMessage(msgRes.data)]);
+            storeUpsertMessage(chatId!, storeNormalizeMessage(msgRes.data));
             scrollToBottom();
             onMessageSent?.(chatId!, formatMessagePreview(msgRes.data));
           } else {
@@ -1795,16 +2167,17 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
   }, [voiceInputMode, aiListening, startAiListening, stopAiListening]);
 
-  const toggleVoiceInputMode = useCallback(() => {
+  const toggleVoiceMode = useCallback(() => {
     setVoiceInputMode((prev) => {
-      const next = prev === "record" ? "ai" : "record";
+      const next = prev === "ai" ? "record" : "ai";
       try {
         localStorage.setItem("chat_voice_input_mode", next);
       } catch { /* ignore */ }
       return next;
     });
-    setVoiceMenuPos(null);
-  }, []);
+    if (recording) stopRecording();
+    if (aiListening) stopAiListening();
+  }, [recording, aiListening, stopRecording, stopAiListening]);
 
   /* ---------- Video recording ---------- */
   const MAX_VIDEO_DURATION = 60; // seconds
@@ -1934,13 +2307,23 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   };
 
   return (
-    <div className="flex flex-1 min-h-0 w-full bg-slate-50 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 w-full bg-slate-50 overflow-hidden">
+      <OfflineBanner />
+      <div className="flex flex-1 min-h-0 w-full overflow-hidden">
       {/* Модалка просмотра одного изображения — затемнение + картинка по центру */}
       {singleImagePreview && (
         <SingleImageModal
           url={singleImagePreview.url}
           fileName={singleImagePreview.fileName}
           onClose={() => setSingleImagePreview(null)}
+        />
+      )}
+      {/* Forward modal */}
+      {forwardModalMessage && chatId && (
+        <ForwardModal
+          message={forwardModalMessage}
+          sourceChatId={chatId}
+          onClose={() => setForwardModalMessage(null)}
         />
       )}
       {pendingFilesForPreview && (
@@ -2026,7 +2409,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
                 )}
               </div>
-          <h1 className="font-semibold text-slate-800">{chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}</h1>
+          <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
+                {chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
+                {chat.is_personal && (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" title="Сквозное шифрование">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                )}
+              </h1>
               {isMuted && (
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label="Беззвучный">
                   <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
@@ -2072,43 +2462,107 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           <div className="absolute inset-0 bg-white/30 pointer-events-none z-0" aria-hidden />
           <div
             ref={messagesScrollRef}
-            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-2 flex flex-col scrollbar-hide relative z-10"
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 space-y-1 flex flex-col scrollbar-hide relative z-10"
             onContextMenu={(e) => e.preventDefault()}
             onScroll={handleMessagesScroll}
           >
-          <div className="flex flex-col space-y-3 min-h-0">
-          {/* Закреплённые: для всех + для себя */}
-          {(chat?.pinned_message || (chat?.my_pinned_messages?.length ?? 0) > 0) && (
-            <div className="shrink-0 space-y-2 mb-2">
-              {chat?.pinned_message && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2">
-                  <p className="text-xs font-medium text-amber-800 mb-1">Закреплено для всех</p>
-                  <PinnedMessagePreview
-                    message={chat.pinned_message}
-                    onClick={() => {
-                      const el = document.querySelector(`[data-message-id="${chat!.pinned_message!.id}"]`);
-                      el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-                    }}
-                  />
-                </div>
-              )}
-              {(chat?.my_pinned_messages?.length ?? 0) > 0 && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2">
-                  <p className="text-xs font-medium text-slate-600 mb-1">Закреплено для вас</p>
-                  <div className="max-h-32 overflow-y-auto overflow-x-hidden scrollbar-hide space-y-1">
-                    {chat!.my_pinned_messages!.map((m) => (
-                      <PinnedMessagePreview
-                        key={m.id}
-                        message={m}
-                        onClick={() => {
-                          const el = document.querySelector(`[data-message-id="${m.id}"]`);
-                          el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-                        }}
-                      />
-                    ))}
+          {/* Плавающая дата при скролле (sticky date header) */}
+          {messages.length > 0 && (() => {
+            const showSticky = messagesScrollTop > 56;
+            const firstVisible = virtualState.enabled ? messages[virtualState.start] : messages[0];
+            const stickyLabel = showSticky && firstVisible ? formatDateLabel(firstVisible.created_at, language) : null;
+            return stickyLabel ? (
+              <div className="sticky top-0 z-20 flex justify-center pt-2 pb-1 -mt-2 pointer-events-none" aria-hidden>
+                <span className="px-3 py-1.5 rounded-full bg-slate-700/95 text-white text-xs font-medium shadow-lg backdrop-blur">
+                  {stickyLabel}
+                </span>
+              </div>
+            ) : null;
+          })()}
+          <div className="flex flex-col space-y-1 min-h-0">
+          {/* Telegram-style pinned message bar (for all) */}
+          {(() => {
+            const allPinned = chat?.pinned_messages ?? (chat?.pinned_message ? [chat.pinned_message] : []);
+            if (allPinned.length === 0) return null;
+            const safeIdx = pinnedIndex % allPinned.length;
+            const currentPin = allPinned[safeIdx];
+            const pinSender = (currentPin.sender as User)?.display_name || (currentPin.sender as User)?.phone || "";
+            const pinPreview = currentPin.msg_type !== "text" && currentPin.msg_type !== "emoji"
+              ? "(файл)"
+              : (currentPin.content || "").trim().slice(0, 80);
+            return (
+              <div className="shrink-0 mb-1">
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-2 px-3 py-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors min-h-[40px]"
+                  onClick={() => {
+                    // Scroll to current pin, then cycle
+                    const el = document.querySelector(`[data-message-id="${currentPin.id}"]`);
+                    el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+                    if (allPinned.length > 1) {
+                      setPinnedIndex((safeIdx + 1) % allPinned.length);
+                    }
+                  }}
+                >
+                  {/* Dot indicator — vertical bar segments */}
+                  {allPinned.length > 1 && (
+                    <div className="flex flex-col gap-[2px] shrink-0" style={{ height: 28 }}>
+                      {allPinned.map((_, i) => (
+                        <div
+                          key={i}
+                          className={`w-[3px] rounded-full transition-colors ${i === safeIdx ? "bg-blue-500" : "bg-slate-300"}`}
+                          style={{ height: `${Math.max(3, 28 / allPinned.length - 2)}px` }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {allPinned.length <= 1 && (
+                    <div className="w-[3px] h-[28px] rounded-full bg-blue-500 shrink-0" />
+                  )}
+                  {/* Content */}
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="text-xs font-medium text-blue-600 truncate">
+                      {allPinned.length > 1
+                        ? `Закреплено #${safeIdx + 1} · ${pinSender}`
+                        : pinSender}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">{pinPreview}</div>
                   </div>
+                  {/* Pin icon */}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
+                </button>
+              </div>
+            );
+          })()}
+          {/* Personal pinned messages */}
+          {(chat?.my_pinned_messages?.length ?? 0) > 0 && (
+            <div className="shrink-0 mb-1">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2">
+                <p className="text-xs font-medium text-slate-600 mb-1">Закреплено для вас</p>
+                <div className="max-h-32 overflow-y-auto overflow-x-hidden scrollbar-hide space-y-1">
+                  {chat!.my_pinned_messages!.map((m) => (
+                    <PinnedMessagePreview
+                      key={m.id}
+                      message={m}
+                      onClick={() => {
+                        const el = document.querySelector(`[data-message-id="${m.id}"]`);
+                        el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+                      }}
+                    />
+                  ))}
                 </div>
-              )}
+              </div>
+            </div>
+          )}
+          {/* E2EE banner для личного чата */}
+          {chat?.is_personal && chat?.other_member && (
+            <div className="shrink-0 flex justify-center py-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 border border-green-200 text-xs text-green-700">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                <span>Сообщения защищены сквозным шифрованием</span>
+              </div>
             </div>
           )}
           {/* Заявки на вступление — как обычное сообщение в ленте, кнопки в стиле Telegram */}
@@ -2160,42 +2614,82 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               const firstUnreadIndex = showUnreadLine
                 ? messages.findIndex((m) => initialUnreadIds.includes(m.id))
                 : -1;
-              return messages.map((msg, i) => (
-                <Fragment key={msg.id}>
-                  {showUnreadLine && i === firstUnreadIndex && (
-                    <div className="flex items-center gap-3 py-2">
-                      <span className="flex-1 h-px bg-slate-300" aria-hidden />
-                      <span className="text-xs font-medium text-slate-500 shrink-0">Непрочитанные сообщения</span>
-                      <span className="flex-1 h-px bg-slate-300" aria-hidden />
-                    </div>
-                  )}
-                  <MessageBubble
-                    message={msg}
-                    isMine={getSenderId(msg) === myUserId}
-                    chatId={chatId!}
-                    textScale={textScale}
-                    onMessageUpdated={(updated) =>
-                      setMessages((prev) => prev.map((m) => (m.id === updated.id ? normalizeMessage(updated) : m)))
-                    }
-                    onMessageDeleted={(id) => setMessages((prev) => prev.filter((m) => m.id !== id))}
-                    onStartEditInInput={(id, content) => { setEditingMessageId(id); setInputAndEditable((content || "").trim()); }}
-                    onImageClick={(url, fileName) => setSingleImagePreview({ url, fileName })}
-                    canPinForAll={!!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin")))}
-                    pinnedForAllMessageId={chat?.pinned_message?.id ?? null}
-                    myPinnedIds={chat?.my_pinned_messages?.map((m) => m.id) ?? []}
-                    onPinChange={refreshChat}
-                  />
-                  <div
-                    ref={(el) => {
-                      if (el) sentinelRefs.current.set(msg.id, el);
-                      else sentinelRefs.current.delete(msg.id);
-                    }}
-                    data-message-id={msg.id}
-                    className="h-px w-full shrink-0"
-                    aria-hidden
-                  />
+              const start = virtualState.enabled ? virtualState.start : 0;
+              const end = virtualState.enabled ? virtualState.end : messages.length;
+              const visibleMessages = messages.slice(start, end);
+              const GROUP_TIME_MS = 5 * 60 * 1000;
+              return (
+                <Fragment>
+                  {virtualState.enabled && <div style={{ height: virtualState.topPadding }} aria-hidden />}
+                  {visibleMessages.map((msg, offset) => {
+                    const i = start + offset;
+                    const nextMsg = messages[i + 1];
+                    const sameSender = nextMsg && getSenderId(msg) === getSenderId(nextMsg);
+                    const timeGap = nextMsg
+                      ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
+                      : Infinity;
+                    const showAvatar = !nextMsg || !sameSender || timeGap >= GROUP_TIME_MS;
+                    const prevMsg = messages[i - 1];
+                    const isFirstInGroup = !prevMsg || getSenderId(prevMsg) !== getSenderId(msg) ||
+                      new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
+                    const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
+                    return (
+                      <div
+                        key={msg.id}
+                        ref={(el) => {
+                          if (!el) return;
+                          const nextHeight = el.offsetHeight;
+                          const prevHeight = rowHeightsRef.current.get(msg.id);
+                          if (prevHeight == null || Math.abs(prevHeight - nextHeight) > 2) {
+                            rowHeightsRef.current.set(msg.id, nextHeight);
+                            setVirtualMeasureTick((v) => v + 1);
+                          }
+                        }}
+                        className={!isFirstInGroup ? "-mt-1" : ""}
+                      >
+                        {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
+                        {showUnreadLine && i === firstUnreadIndex && (
+                          <div data-unread-line className="flex items-center gap-3 py-2">
+                            <span className="flex-1 h-px bg-slate-300" aria-hidden />
+                            <span className="text-xs font-medium text-slate-500 shrink-0">Непрочитанные сообщения</span>
+                            <span className="flex-1 h-px bg-slate-300" aria-hidden />
+                          </div>
+                        )}
+                        <MessageBubble
+                          message={msg}
+                          isMine={getSenderId(msg) === myUserId}
+                          showAvatar={showAvatar}
+                          chatId={chatId!}
+                          textScale={textScale}
+                          onMessageUpdated={(updated) =>
+                            storeUpsertMessage(chatId!, storeNormalizeMessage(updated))
+                          }
+                          onMessageDeleted={(id) => storeUpdateMessage(chatId!, id, { is_deleted: true })}
+                          onStartEditInInput={(id, content) => { setEditingMessageId(id); setInputAndEditable((content || "").trim()); }}
+                          onImageClick={(url, fileName) => setSingleImagePreview({ url, fileName })}
+                          canPinForAll={!!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin")))}
+                          pinnedForAllIds={chat?.pinned_messages?.map((m) => m.id) ?? (chat?.pinned_message ? [chat.pinned_message.id] : [])}
+                          maxPins={chat?.max_pins ?? 1}
+                          myPinnedIds={chat?.my_pinned_messages?.map((m) => m.id) ?? []}
+                          onPinChange={refreshChat}
+                          onReply={(m) => { setReplyToMessage(m); inputEditableRef.current?.focus(); }}
+                          onForward={(m) => setForwardModalMessage(m)}
+                        />
+                        <div
+                          ref={(el) => {
+                            if (el) sentinelRefs.current.set(msg.id, el);
+                            else sentinelRefs.current.delete(msg.id);
+                          }}
+                          data-message-id={msg.id}
+                          className="h-px w-full shrink-0"
+                          aria-hidden
+                        />
+                      </div>
+                    );
+                  })}
+                  {virtualState.enabled && <div style={{ height: virtualState.bottomPadding }} aria-hidden />}
                 </Fragment>
-              ));
+              );
             })()
           )}
         <div ref={bottomRef} />
@@ -2205,7 +2699,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         <button
           type="button"
           onClick={() => { scrollToBottom(); setShowScrollToBottom(false); }}
-          className="absolute bottom-4 right-4 z-10 w-10 h-10 rounded-full bg-slate-700 text-white shadow-lg hover:bg-slate-600 flex items-center justify-center transition-colors"
+          className="absolute bottom-20 sm:bottom-4 right-4 z-10 w-10 h-10 rounded-full bg-slate-700 text-white shadow-lg hover:bg-slate-600 flex items-center justify-center transition-colors"
           title="Вниз"
           aria-label="Прокрутить вниз"
         >
@@ -2379,8 +2873,32 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 })}
               </div>
             )}
-            <form onSubmit={handleSubmit} className="p-2 flex gap-2 items-end" onContextMenu={(e) => { e.preventDefault(); setScheduleMenuPos({ x: e.clientX, y: e.clientY }); }}>
-              <label className="cursor-pointer text-slate-500 hover:text-slate-700 p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Прикрепить файл">
+            {/* Reply bar above input */}
+            {replyToMessage && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-l-[3px] border-blue-400 mx-2 mt-1 rounded-r-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-blue-500"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-blue-600 truncate">
+                    {(replyToMessage.sender as User)?.display_name || (replyToMessage.sender as User)?.phone || ""}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {replyToMessage.msg_type !== "text" && replyToMessage.msg_type !== "emoji"
+                      ? "(файл)"
+                      : (replyToMessage.content || "").trim().slice(0, 80)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="text-slate-400 hover:text-slate-600 p-0.5"
+                  onClick={() => setReplyToMessage(null)}
+                  title="Отменить ответ"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="p-1.5 sm:p-2 flex gap-1.5 sm:gap-2 items-end" onContextMenu={(e) => { e.preventDefault(); setScheduleMenuPos({ x: e.clientX, y: e.clientY }); }}>
+              <label className="cursor-pointer text-slate-500 hover:text-slate-700 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Прикрепить файл">
                 <input type="file" className="hidden" onChange={handleFile} disabled={uploading} accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" multiple />
                 {uploading ? (
                   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -2426,6 +2944,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   setTimeout(() => setMentionPicker((p) => (p.open ? { ...p, open: false } : p)), 150);
                 }}
                 onKeyDown={handleInputKeyDown}
+                onPaste={handlePaste}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -2438,7 +2957,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 style={{ height: "40px" }}
               />
             {/* Video circle button */}
-            <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-500 p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Кружочек" disabled={uploading}>
+            <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Кружочек" disabled={uploading}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
             </button>
             {/* Голос: запись файла или AI-транскрипция. Правый клик — переключить режим. */}
@@ -2448,10 +2967,10 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setVoiceMenuPos({ x: e.clientX, y: e.clientY });
+                toggleVoiceMode();
               }}
-              className={`p-2 rounded-lg transition-colors ${voiceInputMode === "ai" ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50" : "text-slate-500 hover:text-red-500 hover:bg-slate-100"} ${aiListening ? "bg-blue-100 text-blue-700" : ""}`}
-              title={voiceInputMode === "ai" ? (aiListening ? "Остановить диктовку" : "AI-голосовой ввод (транскрипция в поле)") : "Голосовое сообщение (правый клик — переключить на AI-ввод)"}
+              className={`p-1.5 sm:p-2 rounded-lg transition-colors ${voiceInputMode === "ai" ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50" : "text-slate-500 hover:text-red-500 hover:bg-slate-100"} ${aiListening ? "bg-blue-100 text-blue-700" : ""}`}
+              title={voiceInputMode === "ai" ? (aiListening ? "Остановить диктовку" : "AI-голосовой ввод (транскрипция в поле)") : "Голосовое сообщение (правый клик — AI-ввод и мгновенная транскрипция)"}
               disabled={uploading}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
@@ -2459,7 +2978,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             {input.trim() && (
               <button
                 type="submit"
-                className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
+                className="bg-blue-600 text-white p-1.5 sm:p-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
                 disabled={uploading}
                 title="Enter — отправить, Shift+Enter — новая строка"
               >
@@ -2486,36 +3005,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               Запланировать сообщение
             </button>
           </div>
-        )}
-
-        {/* Context menu: переключение режима голоса (правый клик по кнопке микрофона) */}
-        {voiceMenuPos && (
-          <>
-            <div className="fixed inset-0 z-40" aria-hidden onClick={() => setVoiceMenuPos(null)} />
-            <div
-              className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[220px]"
-              style={{ left: voiceMenuPos.x, top: voiceMenuPos.y }}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                onClick={toggleVoiceInputMode}
-              >
-                {voiceInputMode === "record" ? (
-                  <>
-                    <span className="text-blue-500">♪</span>
-                    Переключить на AI-голосовой ввод (транскрипция в поле)
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-                    Переключить на запись голосового сообщения
-                  </>
-                )}
-              </button>
-            </div>
-          </>
         )}
 
         {/* Context menu: Markdown-форматирование (правый клик по полю ввода) — не выходит за границы чата */}
@@ -2662,13 +3151,33 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         )}
       </div>
 
-      {/* Info sidebar */}
+      {/* Info sidebar — full-screen overlay on mobile, side panel on desktop */}
       {showInfo && (
-        <aside className="w-80 border-l bg-white flex flex-col overflow-y-auto shrink-0">
-          <div className="p-3 border-b">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-slate-800">О чате</h2>
-              <div className="flex items-center gap-1">
+        <>
+          {/* Backdrop (mobile only): tap to close */}
+          <div
+            className="fixed inset-0 z-40 bg-black/30 md:hidden"
+            onClick={() => setShowInfo(false)}
+            aria-hidden
+          />
+          <aside
+            className={`
+              fixed inset-0 z-50 bg-white flex flex-col overflow-y-auto
+              md:static md:inset-auto md:z-auto md:w-80 md:border-l md:shrink-0
+            `}
+          >
+            <div className="p-3 border-b flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowInfo(false)}
+                className="md:hidden p-2 -ml-1 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                aria-label="Закрыть"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <div className="flex items-center justify-between flex-1 min-w-0 mb-3">
+            <h2 className="text-lg font-semibold text-slate-800 truncate">О чате</h2>
+              <div className="flex items-center gap-1 shrink-0">
                 <div className="relative" ref={infoMenuRef}>
                   <button
                     type="button"
@@ -2807,6 +3316,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 </div>
               )}
               {chat.is_personal && chat.other_member && (
+                <>
                 <p className="text-xs mt-0.5">
                   {onlineStatus[chat.other_member.id]?.is_online ? (
                     <span className="text-green-500 font-medium">в сети</span>
@@ -2814,6 +3324,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     <span className="text-slate-500">{formatLastSeen(onlineStatus[chat.other_member.id]?.last_seen_display)}</span>
                   )}
                 </p>
+                <SafetyNumberButton otherUserId={chat.other_member.id} otherUserName={chat.other_member.display_name || chat.other_member.phone} myUserId={myUserId} />
+                </>
               )}
               {!chat.is_personal && (
                 <p className="text-xs text-slate-500">{chat.members_count} участник{chat.members_count === 1 ? "" : chat.members_count < 5 ? "а" : "ов"}</p>
@@ -3021,6 +3533,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 return !!(mime && mime.startsWith("image/"));
               };
               const isVideo = (msg: Message) => {
+                if (msg.msg_type === "audio") return false;
                 if (msg.msg_type === "video" || msg.msg_type === "video_circle") return true;
                 const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
                 return !!(mime && mime.startsWith("video/"));
@@ -3072,6 +3585,39 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   <div className="pt-2">
                     {mediaLinksFilesTab === "participants" && isGroup && (
                       <div className="space-y-4">
+                        {canInviteToGroup && (
+                          <div className="mb-4">
+                            <label className="block text-sm font-medium text-slate-600 mb-2">Пригласить по username</label>
+                            <input
+                              type="text"
+                              placeholder="Введите @username"
+                              value={inviteSearchQuery}
+                              onChange={(e) => setInviteSearchQuery(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                            {inviteError && <p className="text-red-500 text-xs mt-1">{inviteError}</p>}
+                            {inviteSearchLoading && <p className="text-slate-500 text-xs mt-1">Поиск...</p>}
+                            {inviteSearchResults.length > 0 && (
+                              <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50">
+                                {inviteSearchResults
+                                  .filter((u) => !activeMembers.some((m) => m.user.id === u.id))
+                                  .map((u) => (
+                                    <li key={u.id}>
+                                      <button
+                                        type="button"
+                                        disabled={inviteLoading}
+                                        onClick={() => handleInviteUser(u.id)}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-200 text-sm flex items-center gap-2"
+                                      >
+                                        <span className="font-medium truncate">{u.display_name || u.username || u.id}</span>
+                                        {u.username && <span className="text-slate-500 truncate">@{u.username}</span>}
+                                      </button>
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
                         <ul className="space-y-2">
                           {activeMembers.map((m) => {
                             const isMe = m.user.id === myUserId;
@@ -3154,7 +3700,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           return (
                           <button key={msg.id} type="button" onClick={() => scrollToMessageId(msg.id)} className="aspect-square rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-blue-400">
                             {isImg && url ? (
-                              <img src={url} alt="" className="w-full h-full object-cover" />
+                              <ProgressiveImage src={url} alt="" className="w-full h-full" objectFit="cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-slate-400">
                                 {isVideo(msg) ? (
@@ -3207,7 +3753,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
           </div>
         </aside>
+        </>
       )}
+      </div>
     </div>
   );
 }
@@ -3429,6 +3977,18 @@ function FileNameDisplay({ fileName, className = "" }: { fileName: string; class
   );
 }
 
+/** Разделитель даты между сообщениями (Сегодня, Вчера, 15 февраля) */
+function DateDivider({ date, lang }: { date: string; lang: "en" | "ru" }) {
+  const label = formatDateLabel(date, lang);
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <span className="flex-1 h-px bg-slate-300" aria-hidden />
+      <span className="text-xs font-medium text-slate-500 shrink-0">{label}</span>
+      <span className="flex-1 h-px bg-slate-300" aria-hidden />
+    </div>
+  );
+}
+
 /** Краткий превью закреплённого сообщения (клик — переход к сообщению) */
 function PinnedMessagePreview({ message, onClick }: { message: Message; onClick: () => void }) {
   const isFile = message.msg_type !== "text" && message.msg_type !== "emoji";
@@ -3446,6 +4006,99 @@ function PinnedMessagePreview({ message, onClick }: { message: Message; onClick:
   );
 }
 
+function ForwardModal({ message, sourceChatId, onClose }: { message: Message; sourceChatId: string; onClose: () => void }) {
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [search, setSearch] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    chatsApi.list().then((res) => {
+      const items = Array.isArray(res.data) ? res.data : (res.data as { results?: Chat[] }).results ?? [];
+      setChats(items);
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const filtered = chats.filter((c) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase().trim();
+    return c.title.toLowerCase().includes(q) || (c.other_member?.display_name || "").toLowerCase().includes(q);
+  });
+
+  const handleForward = async (targetChatId: string) => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await messagesApi.forward(targetChatId, { message_id: message.id, source_chat_id: sourceChatId });
+      setSent(true);
+      setTimeout(() => onClose(), 1200);
+    } catch {
+      setSending(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-xl w-[90vw] max-w-md max-h-[70vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200">
+          <h3 className="text-sm font-semibold text-slate-800">Переслать сообщение</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        {sent ? (
+          <div className="flex items-center justify-center p-8 text-green-600 text-sm font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M20 6 9 17l-5-5"/></svg>
+            Переслано
+          </div>
+        ) : (
+          <>
+            <div className="px-4 pt-3 pb-2">
+              <input
+                type="text"
+                placeholder="Поиск чата..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+              {filtered.map((c) => {
+                const chatTitle = c.is_personal && c.other_member ? (c.other_member.display_name || c.other_member.phone) : c.title;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                    onClick={() => handleForward(c.id)}
+                    disabled={sending}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-600 shrink-0">
+                      {getAvatarInitials(chatTitle)}
+                    </div>
+                    <span className="text-sm text-slate-800 truncate">{chatTitle}</span>
+                  </button>
+                );
+              })}
+              {filtered.length === 0 && (
+                <div className="text-center text-xs text-slate-400 py-6">Ничего не найдено</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function SingleImageModal({ url, fileName, onClose }: { url: string; fileName?: string; onClose: () => void }) {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -3459,7 +4112,13 @@ function SingleImageModal({ url, fileName, onClose }: { url: string; fileName?: 
       role="presentation"
     >
       <div className="max-w-[90vw] max-h-[90vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-        <img src={url} alt={fileName || ""} className="max-w-full max-h-[85vh] w-auto h-auto object-contain rounded-lg shadow-2xl" />
+        <ProgressiveImage
+          src={url}
+          alt={fileName || ""}
+          className="max-w-full max-h-[85vh] w-auto h-auto rounded-lg shadow-2xl"
+          loading="eager"
+          preserveAnimation={/\.gif$/i.test(fileName || "")}
+        />
       </div>
       <button
         type="button"
@@ -3478,19 +4137,25 @@ function MessageBubble({
   isMine,
   chatId,
   textScale,
+  showAvatar = true,
   onMessageUpdated,
   onMessageDeleted,
   onStartEditInInput,
   onImageClick,
   canPinForAll,
-  pinnedForAllMessageId,
+  pinnedForAllIds,
+  maxPins,
   myPinnedIds,
   onPinChange,
+  onReply,
+  onForward,
 }: {
   message: Message;
   isMine: boolean;
   chatId: string;
   textScale: number;
+  /** Показывать аватар (false — placeholder для группировки сообщений) */
+  showAvatar?: boolean;
   onMessageUpdated: (msg: Message) => void;
   onMessageDeleted?: (messageId: string) => void;
   /** Для сообщений только из эмодзи — редактировать в поле ввода, а не инлайном */
@@ -3499,12 +4164,18 @@ function MessageBubble({
   onImageClick?: (url: string, fileName?: string) => void;
   /** Может ли текущий пользователь закрепить сообщение для всех (админ/владелец) */
   canPinForAll?: boolean;
-  /** ID сообщения, закреплённого для всех в чате */
-  pinnedForAllMessageId?: string | null;
+  /** ID сообщений, закреплённых для всех в чате */
+  pinnedForAllIds?: string[];
+  /** Максимально допустимое кол-во закреплённых для всех */
+  maxPins?: number;
   /** ID сообщений, закреплённых текущим пользователем для себя */
   myPinnedIds?: string[];
   /** Вызов после закрепления/открепления (обновить чат) */
   onPinChange?: () => void;
+  /** Ответить на сообщение */
+  onReply?: (message: Message) => void;
+  /** Переслать сообщение */
+  onForward?: (message: Message) => void;
 }) {
   const [hoverDelayPassed, setHoverDelayPassed] = useState(false);
   const hoverDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3518,6 +4189,11 @@ function MessageBubble({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [contextMenuCopied, setContextMenuCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [swipeX, setSwipeX] = useState(0);
+  const swipeActiveRef = useRef(false);
+  const swipeXRef = useRef(0);
 
   useEffect(() => () => {
     if (reactionLimitToastTimerRef.current) clearTimeout(reactionLimitToastTimerRef.current);
@@ -3526,6 +4202,34 @@ function MessageBubble({
   useEffect(() => () => {
     if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
   }, []);
+
+  useEffect(() => () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  }, []);
+
+  const handleLongPress = () => {
+    longPressTimerRef.current = null;
+    if (!longPressStartRef.current) return;
+    setContextMenu({ x: longPressStartRef.current.x, y: longPressStartRef.current.y });
+    longPressStartRef.current = null;
+    if (navigator.vibrate) navigator.vibrate(15);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
+  };
+
+  // Deleted message placeholder
+  if (message.is_deleted) {
+    return (
+      <div className="flex justify-center py-1">
+        <span className="text-xs text-slate-400 italic">Сообщение удалено</span>
+      </div>
+    );
+  }
 
   const isFile = message.msg_type !== "text" && message.msg_type !== "emoji";
   const senderName = getSenderName(message);
@@ -3537,7 +4241,8 @@ function MessageBubble({
   const canEdit = isMine && !isFile && message.msg_type === "text";
   const canAddReaction = myReactions.length < 3;
 
-  const fileUrl = message.file ? ((message.file as { url?: string }).url || "#") : "#";
+  const rawFileUrl = message.file ? ((message.file as { url?: string }).url || "#") : "#";
+  const fileUrl = useCachedMediaUrl(rawFileUrl !== "#" ? rawFileUrl : null) || rawFileUrl;
   const fileName = message.file ? (message.file as { original_name?: string }).original_name || message.content : message.content;
   const fileMime = (message.file && (message.file as { mime_type?: string }).mime_type) || "";
   const isImageByMime = fileMime.startsWith("image/");
@@ -3549,10 +4254,12 @@ function MessageBubble({
   const fileIsVideo = isVideoByMime || (message.file && !fileMime && isVideoByExt);
   // Показывать как ссылку только для не-медиа; картинки и видео — всегда с превью
   const isImage = message.file && fileIsImage;
-  const filePreviewUrl = fileUrl && isImage ? withPreviewParams(fileUrl, 900) : fileUrl;
+  // Для одиночных изображений берём оригинал (без сильного сжатия превью).
+  const filePreviewUrl = fileUrl && isImage ? withPreviewParams(fileUrl, 1400) : fileUrl;
+  const fileDisplayUrl = filePreviewUrl || fileUrl;
   const isAudio = message.msg_type === "audio" || (message.file && (message.file as { mime_type?: string }).mime_type?.startsWith("audio/"));
-  const isVideo = message.file && (message.msg_type === "video" || fileIsVideo);
-  const isVideoCircle = message.msg_type === "video_circle" && message.file;
+  const isVideo = message.file && !isAudio && (message.msg_type === "video" || fileIsVideo);
+  const isVideoCircle = message.msg_type === "video_circle" && !isAudio && message.file;
 
   // Несколько изображений — плитка; учитываем mime и расширение
   const allFiles = (message.files ?? []).filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
@@ -3564,8 +4271,13 @@ function MessageBubble({
   const editedStr = message.edited_at
     ? new Date(message.edited_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })
     : null;
-  const readStatus = isMine ? (message.read_status || "delivered") : null;
-  const Checkmarks = readStatus === "read" ? (
+  const isPendingOutbox = isMine && message.sender?.id === "self";
+  const readStatus = isMine ? (isPendingOutbox ? "pending" : (message.read_status || "delivered")) : null;
+  const Checkmarks = readStatus === "pending" ? (
+    <span className="ml-1 inline-flex" title="Отправляется…">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 animate-pulse"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </span>
+  ) : readStatus === "read" ? (
     <span className="ml-1 inline-flex" title="Прочитано">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-0.5"><path d="M20 6 9 17l-5-5"/></svg>
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-1.5"><path d="M20 6 9 17l-5-5"/></svg>
@@ -3648,7 +4360,7 @@ function MessageBubble({
           disabled={reactionLoading}
           title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
         >
-          <span>{emoji}</span>
+          <AnimatedReaction emoji={emoji} size={18} playOnce />
           {count > 1 && <span className="ml-0.5 tabular-nums">{count}</span>}
         </button>
       ))}
@@ -3679,7 +4391,7 @@ function MessageBubble({
 
   return (
     <div
-      className={`flex ${isMine ? "justify-end" : "justify-start"} group ${hasReactions ? "mb-1" : ""}`}
+      className={`flex w-full ${isMine ? "justify-end" : "justify-start"} group ${hasReactions ? "mb-1" : ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onContextMenu={(e) => {
@@ -3692,9 +4404,83 @@ function MessageBubble({
         const y = Math.max(pad, Math.min(e.clientY, window.innerHeight - menuHeight - pad));
         setContextMenu({ x, y });
       }}
+      onTouchStart={(e) => {
+        if (e.touches.length !== 1) return;
+        longPressStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        swipeActiveRef.current = false;
+        setSwipeX(0);
+        longPressTimerRef.current = setTimeout(handleLongPress, 500);
+      }}
+      onTouchMove={(e) => {
+        if (!longPressStartRef.current || e.touches.length !== 1) return;
+        const x = e.touches[0].clientX;
+        const y = e.touches[0].clientY;
+        const dx = x - longPressStartRef.current.x;
+        const dy = y - longPressStartRef.current.y;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        if (adx > 10 || ady > 10) {
+          cancelLongPress();
+          if (adx > ady * 1.5 && dx > 0 && onReply) {
+            swipeActiveRef.current = true;
+            const val = Math.min(dx, 80);
+            swipeXRef.current = val;
+            setSwipeX(val);
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      }}
+      onTouchEnd={(e) => {
+        if (swipeActiveRef.current) {
+          swipeActiveRef.current = false;
+          if (swipeXRef.current >= 60 && onReply) {
+            onReply(message);
+            if (navigator.vibrate) navigator.vibrate(15);
+          }
+          setSwipeX(0);
+          e.stopPropagation();
+        } else {
+          cancelLongPress();
+        }
+      }}
+      onTouchCancel={(e) => {
+        swipeActiveRef.current = false;
+        setSwipeX(0);
+        cancelLongPress();
+        e.stopPropagation();
+      }}
     >
-      {/* Обёртка: [аватар + пузырь + реакции внизу] */}
-      <div className={`relative inline-flex flex-row flex-nowrap items-end gap-2.5 ${isMine ? "" : ""}`}>
+      {/* Обёртка: [reply icon при свайпе] [аватар + пузырь + реакции] */}
+      <div
+        className={`relative inline-flex flex-row flex-nowrap items-end gap-2.5 swipe-message ${isMine ? "ml-auto" : ""}`}
+        style={{
+          transform: `translateX(${swipeX}px)`,
+          transition: swipeX === 0 ? "transform 0.25s ease-out" : "none",
+        }}
+      >
+        {swipeX > 0 && onReply && (
+          <div
+            className="flex items-center justify-center shrink-0 w-10"
+            style={{ opacity: Math.min(swipeX / 60, 1) }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={swipeX >= 60 ? "text-blue-500 scale-110" : "text-slate-400"}
+            >
+              <polyline points="9 17 4 12 9 7"/>
+              <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+            </svg>
+          </div>
+        )}
         {/* Reaction picker — слева от сообщения (с другой стороны от аватарки), не перекрывая пузырь */}
         {isMine && hoverDelayPassed && !editing && (
           <div
@@ -3710,7 +4496,7 @@ function MessageBubble({
                   className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
                   title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
                 >
-                  {emoji}
+                  <AnimatedReaction emoji={emoji} size={24} loop />
                 </button>
               ))}
             </div>
@@ -3718,21 +4504,25 @@ function MessageBubble({
         )}
 
       <div className={`relative inline-flex flex-row items-end gap-2 max-w-[88%] min-w-0 shrink-0 ${isMine ? "order-2 flex-row-reverse" : "order-0"}`}>
-        {(() => {
-          const sender = message.sender as User;
-          const avatarUrl = sender?.avatar_url ?? sender?.avatar ?? null;
-          return (
-            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-xs font-semibold text-slate-600">
-                  {getAvatarInitials(senderName)}
-                </span>
-              )}
-            </div>
-          );
-        })()}
+        {!isMine && (showAvatar ? (
+          (() => {
+            const sender = message.sender as User;
+            const avatarUrl = sender?.avatar_url ?? sender?.avatar ?? null;
+            return (
+              <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xs font-semibold text-slate-600">
+                    {getAvatarInitials(senderName)}
+                  </span>
+                )}
+              </div>
+            );
+          })()
+        ) : (
+          <div className="w-8 h-8 shrink-0" aria-hidden />
+        ))}
         <div className={`flex flex-col min-w-0 ${isMine ? "items-end" : "items-start"}`}>
         {isEmojiOnly && !editing ? (
           <div className={`inline-flex flex-col gap-0.5 max-w-full min-w-0 rounded-2xl ${content.length <= 20 ? "px-6 py-3" : "px-3 py-1.5"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} style={{ fontSize: `${MESSAGE_EMOJI_BASE_PX * textScale}px` }}>
@@ -3747,7 +4537,42 @@ function MessageBubble({
             )}
           </div>
         ) : (
-        <div className={`inline-block max-w-full min-w-0 ${isImageBubble ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl pl-2 pr-2 pt-1.5 pb-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "px-6 py-3" : "px-3 py-1.5"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+        <div className={`inline-block max-w-full min-w-0 ${isImageBubble ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl pl-2 pr-2 pt-1.5 pb-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-7 pr-6 py-3" : "px-3 py-1.5"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+          {/* Forwarded header */}
+          {message.forwarded_from && (
+            <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-1 -mt-0.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+              <span>Переслано от <strong className="not-italic font-medium text-slate-600">{(message.forwarded_from as User).display_name || (message.forwarded_from as User).phone}</strong></span>
+              {message.forwarded_from_chat_title && (
+                <span className="text-slate-400 ml-0.5">из «{message.forwarded_from_chat_title}»</span>
+              )}
+            </div>
+          )}
+          {/* Reply quote block */}
+          {message.reply_to && !message.reply_to.is_deleted && (
+            <button
+              type="button"
+              className={`w-full text-left mb-1 -mt-0.5 rounded-lg px-2 py-1 border-l-[3px] ${isMine ? "border-blue-400 bg-blue-50/50" : "border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
+              onClick={() => {
+                const el = document.querySelector(`[data-message-id="${message.reply_to!.id}"]`);
+                el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+              }}
+            >
+              <div className="text-xs font-medium text-blue-600 truncate">
+                {(message.reply_to.sender as User)?.display_name || (message.reply_to.sender as User)?.phone || ""}
+              </div>
+              <div className="text-xs text-slate-500 truncate">
+                {message.reply_to.msg_type !== "text" && message.reply_to.msg_type !== "emoji"
+                  ? "(файл)"
+                  : (message.reply_to.content || "").trim().slice(0, 80)}
+              </div>
+            </button>
+          )}
+          {message.reply_to && message.reply_to.is_deleted && (
+            <div className="w-full text-left mb-1 -mt-0.5 rounded-lg px-2 py-1 border-l-[3px] border-slate-300 bg-slate-50/50">
+              <div className="text-xs text-slate-400 italic">Сообщение удалено</div>
+            </div>
+          )}
           {editing ? (
             <div className="min-w-[240px] max-w-full">
               <textarea
@@ -3782,7 +4607,7 @@ function MessageBubble({
             </div>
           ) : isVideo ? (
             <div className="min-w-0 max-w-full">
-              <video controls src={fileUrl} className="max-w-[300px] max-h-80 rounded-lg" preload="metadata" />
+              <InlineAutoplayVideo src={fileUrl} className="max-w-[300px] max-h-80 rounded-lg" />
               <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
@@ -3795,16 +4620,26 @@ function MessageBubble({
               </div>
             </div>
           ) : isFile && message.file ? (
-            <div className="min-w-0 max-w-full overflow-hidden rounded-lg">
+            <div className="min-w-0 max-w-full">
               {isImage ? (
                 onImageClick ? (
-                  <button type="button" onClick={() => onImageClick(fileUrl, fileName)} className="block min-w-0 max-w-full text-left">
-                    <img src={filePreviewUrl} alt={fileName} className="max-w-[300px] max-h-80 w-full h-auto object-contain rounded-lg cursor-pointer hover:opacity-90 transition-opacity" loading="lazy" decoding="async" />
-                  </button>
+                  <ProgressiveImage
+                    src={fileUrl}
+                    alt={fileName}
+                    className="w-[320px] max-w-[80vw] max-h-80 h-auto rounded-lg cursor-pointer"
+                    wrapper="button"
+                    onClick={() => onImageClick(fileUrl, fileName)}
+                    preserveAnimation={fileMime.includes("gif")}
+                  />
                 ) : (
-                  <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="block min-w-0 max-w-full">
-                    <img src={filePreviewUrl} alt={fileName} className="max-w-[300px] max-h-80 w-full h-auto object-contain rounded-lg cursor-pointer hover:opacity-90 transition-opacity" loading="lazy" decoding="async" />
-                  </a>
+                  <ProgressiveImage
+                    src={fileUrl}
+                    alt={fileName}
+                    className="w-[320px] max-w-[80vw] max-h-80 h-auto rounded-lg cursor-pointer"
+                    wrapper="a"
+                    href={fileUrl}
+                    preserveAnimation={fileMime.includes("gif")}
+                  />
                 )
               ) : isAudio ? (
                 (message as { waveform?: number[] }).waveform?.length ? (
@@ -3880,7 +4715,7 @@ function MessageBubble({
                   className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
                   title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
                 >
-                  {emoji}
+                  <AnimatedReaction emoji={emoji} size={24} loop />
                 </button>
               ))}
             </div>
@@ -3888,11 +4723,57 @@ function MessageBubble({
         )}
       </div>
       {contextMenu && (
-        <div
-          ref={menuRef}
-          className="fixed z-[100] min-w-[200px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
+        <>
+          <div
+            className="fixed inset-0 z-[99] md:hidden"
+            onClick={closeContextMenu}
+            aria-hidden
+          />
+          <div
+            ref={menuRef}
+            className="context-menu-bottom-sheet fixed z-[100] min-w-[200px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh] overflow-y-auto"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {/* Quick-react emoji row (mobile-first, visible on all) */}
+            <div className="flex flex-wrap justify-center gap-1 px-3 py-2 border-b border-slate-100 md:border-b-0 md:pb-0 md:pt-0 md:px-0 md:py-0 md:hidden">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
+                  onClick={() => {
+                    handleReaction(emoji);
+                    closeContextMenu();
+                  }}
+                  className={`w-9 h-9 flex items-center justify-center rounded-lg text-lg active:bg-slate-100 transition-colors ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
+                >
+                  <AnimatedReaction emoji={emoji} size={28} loop />
+                </button>
+              ))}
+            </div>
+            {/* 1. Ответить */}
+          {onReply && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+              onClick={() => { closeContextMenu(); onReply(message); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+              Ответить
+            </button>
+          )}
+          {/* 2. Переслать */}
+          {onForward && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+              onClick={() => { closeContextMenu(); onForward(message); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+              Переслать
+            </button>
+          )}
+          {/* 3. Копировать */}
           <button
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
@@ -3907,6 +4788,7 @@ function MessageBubble({
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
             {contextMenuCopied ? "Скопировано" : "Копировать"}
           </button>
+          {/* 4. Копировать для Word */}
           <button
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
@@ -3922,6 +4804,7 @@ function MessageBubble({
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
             Копировать для Word
           </button>
+          {/* 5. Редактировать */}
           {canEdit && (
             <button
               type="button"
@@ -3939,6 +4822,7 @@ function MessageBubble({
               Редактировать сообщение
             </button>
           )}
+          {/* 6. Удалить */}
           {isMine && onMessageDeleted && (
             <button
               type="button"
@@ -3949,9 +4833,11 @@ function MessageBubble({
               Удалить сообщение
             </button>
           )}
+          {/* 7. Pin actions */}
           {(() => {
             const isPinnedByMe = (myPinnedIds ?? []).includes(message.id);
-            const isPinnedForAll = pinnedForAllMessageId === message.id;
+            const isPinnedForAll = (pinnedForAllIds ?? []).includes(message.id);
+            const canPinMore = (pinnedForAllIds ?? []).length < (maxPins ?? 1);
             return (
               <>
                 {!isPinnedByMe && (
@@ -3980,7 +4866,7 @@ function MessageBubble({
                     Открепить для себя
                   </button>
                 )}
-                {canPinForAll && !isPinnedForAll && (
+                {canPinForAll && !isPinnedForAll && canPinMore && (
                   <button
                     type="button"
                     className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
@@ -4032,6 +4918,7 @@ function MessageBubble({
             </>
           )}
         </div>
+        </>
       )}
       {reactionLimitToast && createPortal(
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[500] px-4 py-2.5 bg-slate-800 text-white text-sm rounded-lg shadow-lg whitespace-nowrap animate-in fade-in duration-200" role="alert">
@@ -4064,6 +4951,18 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const progress = duration > 0 ? currentTime / duration : 0;
+  const waveform = useMemo(() => {
+    const count = 48;
+    let seed = 0;
+    for (let i = 0; i < fileUrl.length; i++) seed = (seed * 31 + fileUrl.charCodeAt(i)) >>> 0;
+    const values: number[] = [];
+    for (let i = 0; i < count; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const v = 40 + (seed % 180);
+      values.push(v);
+    }
+    return values;
+  }, [fileUrl]);
 
   const syncDuration = useCallback((el: HTMLAudioElement) => {
     const d = el.duration;
@@ -4117,13 +5016,13 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
   };
 
   return (
-    <div className="flex items-center gap-2 my-0.5">
+    <div className="flex items-center gap-3 my-0.5 min-w-[240px] max-w-[360px]">
       <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
       <button
         type="button"
         onClick={togglePlay}
-        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-          isMine ? "bg-blue-200 hover:bg-blue-300 text-slate-800" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
+        className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+          isMine ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
         }`}
         aria-label={isPlaying ? "Пауза" : "Воспроизвести"}
       >
@@ -4133,19 +5032,25 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         )}
       </button>
-      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
         <div
-          role="progressbar"
-          aria-valuenow={progress * 100}
-          className={`h-1.5 w-full rounded-full overflow-hidden cursor-pointer ${isMine ? "bg-blue-200/80" : "bg-slate-200"}`}
+          className="flex items-end gap-[2px] h-6 cursor-pointer select-none"
           onClick={handleBarClick}
+          role="button"
+          aria-label="Перемотка: клик по волне"
         >
-          <div
-            className={`h-full rounded-full transition-all ${isMine ? "bg-slate-600" : "bg-blue-600"}`}
-            style={{ width: `${progress * 100}%` }}
-          />
+          {waveform.map((v, i) => {
+            const played = (i + 1) / waveform.length <= progress;
+            return (
+              <div
+                key={i}
+                className={`w-[3px] rounded-full min-h-[2px] transition-colors ${played ? (isMine ? "bg-blue-600" : "bg-slate-500") : "bg-slate-300"}`}
+                style={{ height: `${Math.max(2, (v / 255) * 22)}px` }}
+              />
+            );
+          })}
         </div>
-        <div className={`text-xs ${isMine ? "text-slate-600" : "text-slate-500"}`}>
+        <div className={`text-xs tabular-nums ${isMine ? "text-slate-600" : "text-slate-500"}`}>
           {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
         </div>
       </div>
@@ -4171,8 +5076,8 @@ function AudioWaveform({
   if (!waveform.length) return null;
   const maxH = 20;
   const n = waveform.length;
-  const playedCls = isMine ? "bg-slate-600" : "bg-blue-600";
-  const unplayedCls = isMine ? "bg-blue-200/80" : "bg-slate-300";
+  const playedCls = isMine ? "bg-blue-600" : "bg-slate-500";
+  const unplayedCls = "bg-slate-300";
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) return;
@@ -4264,13 +5169,13 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
   };
 
   return (
-    <div className="flex items-center gap-2 my-0.5">
+    <div className="flex items-center gap-3 my-0.5 min-w-[240px] max-w-[360px]">
       <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
       <button
         type="button"
         onClick={togglePlay}
-        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-          isMine ? "bg-blue-200 hover:bg-blue-300 text-slate-800" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
+        className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+          isMine ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
         }`}
         aria-label={isPlaying ? "Пауза" : "Воспроизвести"}
       >
@@ -4280,9 +5185,9 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         )}
       </button>
-      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
         <AudioWaveform waveform={waveform} isMine={isMine} progress={progress} onSeek={handleSeek} />
-        <div className={`text-xs ${isMine ? "text-slate-600" : "text-slate-500"}`}>
+        <div className={`text-xs tabular-nums ${isMine ? "text-slate-600" : "text-slate-500"}`}>
           {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
         </div>
       </div>
@@ -4294,7 +5199,7 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
    ImageTileGrid — плиточное отображение нескольких изображений
    ================================================================ */
 
-function ImageTileGrid({ images }: { images: { id: string; url?: string | null; original_name?: string }[] }) {
+function ImageTileGrid({ images }: { images: { id: string; url?: string | null; original_name?: string; mime_type?: string }[] }) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const count = images.length;
 
@@ -4329,7 +5234,7 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
       <div className={`grid ${getGridClass()} gap-0.5 rounded-xl overflow-hidden max-w-[320px]`}>
         {visibleImages.map((img, idx) => {
           const url = img.url || "#";
-          const previewUrl = withPreviewParams(url, 520);
+          const previewUrl = withPreviewParams(url, 1400);
           const isLast = idx === maxShow - 1 && hiddenCount > 0;
           return (
             <div
@@ -4337,12 +5242,12 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
               className={`relative ${getItemClass(idx)} ${getItemHeight()} cursor-pointer overflow-hidden`}
               onClick={() => setLightboxIdx(idx)}
             >
-              <img
-                src={previewUrl}
+              <ProgressiveImage
+                src={url}
                 alt={img.original_name || ""}
-                className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
-                loading="lazy"
-                decoding="async"
+                className="w-full h-full hover:scale-105 transition-transform duration-200"
+                objectFit="cover"
+                preserveAnimation={(img.mime_type || "").includes("gif") || /\.gif$/i.test(img.original_name || "")}
               />
               {isLast && (
                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
@@ -4392,7 +5297,13 @@ function ImageLightbox({
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={onClose}>
       <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <img src={url} alt={img?.original_name || ""} className="max-w-full max-h-[85vh] object-contain rounded-lg" />
+        <ProgressiveImage
+          src={url}
+          alt={img?.original_name || ""}
+          className="max-w-full max-h-[85vh] rounded-lg"
+          loading="eager"
+          preserveAnimation={/\.gif$/i.test(img?.original_name || "")}
+        />
 
         {/* Навигация */}
         {idx > 0 && (
@@ -4431,26 +5342,62 @@ function ImageLightbox({
 
 function VideoCirclePlayer({ src }: { src: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const progress = duration > 0 ? currentTime / duration : 0;
 
+  const syncDuration = useCallback((el: HTMLVideoElement) => {
+    const d = el.duration;
+    if (Number.isFinite(d) && d > 0) setDuration(d);
+  }, []);
+
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
-    const onTimeUpdate = () => setCurrentTime(el.currentTime);
-    const onLoadedMetadata = () => setDuration(el.duration);
+    const onTimeUpdate = () => {
+      setCurrentTime(el.currentTime);
+      if (duration <= 0) syncDuration(el);
+    };
+    const onLoadedMetadata = () => syncDuration(el);
+    const onDurationChange = () => syncDuration(el);
     const onEnded = () => { setPlaying(false); setCurrentTime(0); };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("ended", onEnded);
+    syncDuration(el);
     return () => {
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("ended", onEnded);
     };
-  }, []);
+  }, [syncDuration, duration]);
+
+  /* Автовоспроизведение при появлении в зоне видимости (muted) */
+  useEffect(() => {
+    const el = videoRef.current;
+    const container = containerRef.current;
+    if (!el || !container) return;
+    el.muted = true;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (!e) return;
+        if (e.isIntersecting) {
+          el.play().then(() => setPlaying(true)).catch(() => {});
+        } else {
+          el.pause();
+          setPlaying(false);
+        }
+      },
+      { threshold: 0.25, rootMargin: "50px" }
+    );
+    io.observe(container);
+    return () => io.disconnect();
+  }, [src]);
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -4478,6 +5425,7 @@ function VideoCirclePlayer({ src }: { src: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div
+        ref={containerRef}
         className="relative w-48 h-48 rounded-full overflow-hidden cursor-pointer group bg-black"
         onClick={togglePlay}
       >
@@ -4487,6 +5435,8 @@ function VideoCirclePlayer({ src }: { src: string }) {
           className="w-full h-full object-cover"
           preload="metadata"
           playsInline
+          loop
+          muted
           onEnded={() => { setPlaying(false); setCurrentTime(0); }}
         />
         {/* Play overlay */}

@@ -7,6 +7,13 @@ DEFAULT_MAX_MEMBERS = 10
 EXPANSION_TIER_100 = 100
 EXPANSION_TIER_1000 = 1000
 
+# Лимиты закреплённых сообщений по уровню прокачки
+PIN_LIMITS = {
+    None: 1,                # без прокачки — 1 закреплённое
+    EXPANSION_TIER_100: 5,  # tier 100 — до 5
+    EXPANSION_TIER_1000: 20,  # tier 1000 — до 20
+}
+
 
 class Chat(models.Model):
     class ChatType(models.TextChoices):
@@ -64,6 +71,13 @@ class Chat(models.Model):
             return self.expansion_tier
         return self.max_members
 
+    @property
+    def max_pins(self) -> int:
+        """Максимальное количество закреплённых для всех сообщений (зависит от уровня прокачки)."""
+        if self.is_expanded:
+            return PIN_LIMITS.get(self.expansion_tier, 1)
+        return 1
+
     class Meta:
         verbose_name = "Чат"
         verbose_name_plural = "Чаты"
@@ -94,12 +108,17 @@ class ChatMember(models.Model):
         help_text="Беззвучный режим — уведомления не приходят",
     )
 
+    pin_order = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Pinned chat order for current user (1..N). Null means not pinned.",
+    )
+
     class Meta:
         unique_together = ("chat", "user")
         verbose_name = "Участник чата"
         verbose_name_plural = "Участники чатов"
-
-
 class Message(models.Model):
     class MsgType(models.TextChoices):
         TEXT = "text", "Текст"
@@ -119,11 +138,45 @@ class Message(models.Model):
         "files.FileAttachment", blank=True, related_name="multi_messages",
         help_text="Несколько файлов (изображений) в одном сообщении",
     )
+    # Reply (quote) — одноуровневое цитирование
+    reply_to = models.ForeignKey(
+        "self", on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="replies",
+        help_text="Сообщение, на которое отвечаем (одноуровневое цитирование)",
+    )
+    # Forward — кто и откуда переслал
+    forwarded_from = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="forwarded_messages",
+        help_text="Оригинальный отправитель пересланного сообщения",
+    )
+    forwarded_from_chat = models.ForeignKey(
+        Chat, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="forwarded_from_messages",
+        help_text="Оригинальный чат пересланного сообщения",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
     # Амплитуды для визуализации аудио (массив 0–255, ~60–80 значений)
     waveform = models.JSONField(null=True, blank=True)
+
+    # E2EE: при is_encrypted=True content содержит base64 ciphertext
+    is_encrypted = models.BooleanField(default=False)
+    sender_device = models.ForeignKey(
+        "e2ee.Device",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_messages",
+        help_text="Устройство отправителя (для E2EE)",
+    )
+    # Шифрованный message key для каждого устройства: {"<device_id>": {"type": 0|1, "body": "<base64>"}}
+    # type 0 = PreKeyWhisperMessage, type 1 = WhisperMessage
+    encrypted_keys = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["created_at"]
@@ -151,6 +204,21 @@ class UserPinnedMessage(models.Model):
         ordering = ["-created_at"]
         verbose_name = "Закреплённое сообщение (для себя)"
         verbose_name_plural = "Закреплённые сообщения (для себя)"
+
+
+class ChatPinnedMessage(models.Model):
+    """Закрепление сообщения для всех участников чата (admin/owner). Несколько закреплённых."""
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="pinned_messages_all")
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="pinned_in_chats_all")
+    pinned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pinned_for_all")
+    pin_order = models.PositiveIntegerField(default=0, help_text="Порядок отображения (больше = новее)")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("chat", "message")
+        ordering = ["-pin_order"]
+        verbose_name = "Закреплённое сообщение (для всех)"
+        verbose_name_plural = "Закреплённые сообщения (для всех)"
 
 
 class MessageReaction(models.Model):
