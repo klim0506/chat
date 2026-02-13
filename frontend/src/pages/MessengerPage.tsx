@@ -4,7 +4,6 @@ import { authApi, chatsApi, paymentsApi, type Chat, type UserSearchResult } from
 import { useAuthStore } from "../store/auth";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { showMessageNotification, requestPermission } from "../lib/notifications";
-import { useI18n } from "../lib/i18n";
 import ChatPage from "./ChatPage";
 import SettingsPage from "./SettingsPage";
 
@@ -271,6 +270,7 @@ export default function MessengerPage() {
   };
 
   // Sort: pinned first (preserve pin order), then unread first, then by created_at
+  // TODO: persist pin order on backend so multi-device ordering stays consistent.
   const sortedChats = [...chats].sort((a, b) => {
     const ia = pinnedChatIds.indexOf(a.id);
     const ib = pinnedChatIds.indexOf(b.id);
@@ -311,7 +311,7 @@ export default function MessengerPage() {
     const startW = sidebarWidth;
     const onMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
-      setSidebarWidth((prev) => Math.min(520, Math.max(220, startW + dx)));
+      setSidebarWidth(Math.min(520, Math.max(220, startW + dx)));
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -760,7 +760,7 @@ export default function MessengerPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               {isPinned && (
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" title="Закреплён">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label="Закреплён">
                                   <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
                                 </svg>
                               )}

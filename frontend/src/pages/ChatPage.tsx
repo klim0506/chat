@@ -33,6 +33,39 @@ const INPUT_EMOJIS = [
   "🎉", "🎊", "✅", "❌", "⚠️", "💯",
 ];
 
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  0?: { transcript?: string };
+};
+
+type SpeechRecognitionResultListLike = {
+  length: number;
+  [index: number]: SpeechRecognitionResultLike;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: SpeechRecognitionResultListLike;
+};
+
+type SpeechRecognitionErrorEventLike = {
+  error: string;
+};
+
+type BrowserSpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort?: () => void;
+};
+
+type SpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
+
 /* ================================================================
    Helpers
    ================================================================ */
@@ -52,9 +85,10 @@ function copyToClipboard(text: string): Promise<void> {
 
 /** Сжатие изображения для экономии памяти (скрепка / нижняя зона). Качество умеренное, без сильной потери. */
 async function compressImage(file: File): Promise<File> {
+  // TODO: move image compression to a Web Worker to avoid UI jank on low-end devices.
   const maxDim = 1920;
   const quality = 0.82;
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const img = document.createElement("img");
     const url = URL.createObjectURL(file);
     img.onload = () => {
@@ -386,7 +420,7 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
   if (!Array.isArray(files)) files = [];
   if (files.length === 0 && msg.file) files = [msg.file];
   // Оставляем только объекты с id (API мог вернуть сырые id или неполные данные)
-  const safeFiles = files.filter((f): f is Record<string, unknown> => f != null && typeof f === "object" && "id" in f);
+  const safeFiles = files.filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
   const file = msg.file != null && typeof msg.file === "object" && "id" in msg.file ? msg.file : (safeFiles[0] ?? null);
   const myReactions = msg.my_reactions ?? (msg.my_reaction ? [msg.my_reaction] : []);
   const readBy = (msg as Message & { read_by?: User[] }).read_by;
@@ -406,7 +440,7 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
    ================================================================ */
 
 /** Превью сообщения для списка чатов (совпадает с логикой бэкенда). */
-function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } }): string {
+function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } | null }): string {
   if (!msg) return "";
   const mime = (msg.file && msg.file.mime_type) || "";
   if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
@@ -508,7 +542,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Линия «Непрочитанные» скрыта после того, как все initialUnreadIds прочитаны и вызван markRead */
   const [unreadLineDismissed, setUnreadLineDismissed] = useState(false);
   const sentinelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const inputEditableRef = useRef<HTMLDivElement>(null);
   const savedFormatRangeRef = useRef<Range | null>(null);
   const undoStackRef = useRef<string[]>([""]);
@@ -533,19 +566,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     undoStackRef.current = [""];
     undoIndexRef.current = 0;
   }, []);
-
-  const applyInputFormat = useCallback((replacement: string, start: number, end: number, currentValue: string) => {
-    const before = currentValue.slice(0, start);
-    const after = currentValue.slice(end);
-    const newValue = before + replacement + after;
-    pushUndoState(currentValue);
-    setInputAndEditable(newValue);
-    setFormatMenuPos(null);
-    setTimeout(() => {
-      inputEditableRef.current?.focus();
-      setEditableCursorOffset(inputEditableRef.current!, start + replacement.length);
-    }, 0);
-  }, [pushUndoState, setInputAndEditable]);
 
   /** Применить формат через execCommand в contenteditable (сохранённая выделение в savedFormatRangeRef) */
   const applyFormatInEditable = useCallback((cmd: string, value?: string) => {
@@ -631,7 +651,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [leaveError, setLeaveError] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  const [setAdminLoading, setSetAdminLoading] = useState<string | null>(null);
   const [approveRejectLoading, setApproveRejectLoading] = useState<string | null>(null);
   const [showInfoMenu, setShowInfoMenu] = useState(false);
   const infoMenuRef = useRef<HTMLDivElement>(null);
@@ -684,7 +703,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
-  const speechRecognitionRef = useRef<InstanceType<typeof window.SpeechRecognition> | null>(null);
+  const speechRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(null);
 
   const scrollToBottomInstant = useCallback(() => {
     const el = messagesScrollRef.current;
@@ -1476,28 +1495,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (backgroundInputRef.current) backgroundInputRef.current.value = "";
   };
 
-  const handleRemoveBackground = async () => {
-    if (!chatId || !chat) return;
-    setBackgroundUploading(true);
-    try {
-      const { data: updated } = await chatsApi.removeBackground(chatId);
-      const next = { ...chat, background_url: updated.background_url };
-      setChat(next);
-      onChatUpdated?.(next);
-    } catch { /* ignore */ } finally { setBackgroundUploading(false); }
-  };
-
-  const handleSetAdmin = (memberId: string) => {
-    if (!chatId) return;
-    setSetAdminLoading(memberId);
-    setLeaveError("");
-    chatsApi
-      .setAdmin(chatId, memberId)
-      .then((res) => { setMembers(res.data); })
-      .catch(() => setLeaveError("Не удалось назначить администратора"))
-      .finally(() => setSetAdminLoading(null));
-  };
-
   const handleApproveMember = (memberId: string) => {
     if (!chatId) return;
     setApproveRejectLoading(memberId);
@@ -1723,9 +1720,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
   /* ---------- AI voice input: распознавание речи в текст (Web Speech API) ---------- */
-  const getSpeechRecognition = (): (new () => SpeechRecognition) | null => {
+  const getSpeechRecognition = (): SpeechRecognitionCtor | null => {
     if (typeof window === "undefined") return null;
-    const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition };
+    const w = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
     return w.SpeechRecognition || w.webkitSpeechRecognition || null;
   };
 
@@ -1741,7 +1741,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "ru-RU";
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
       let transcript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
@@ -1755,7 +1755,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         return prev + sep + transcript;
       });
     };
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
       if (event.error === "no-speech" || event.error === "aborted") return;
       setUploadError(`Ошибка распознавания: ${event.error}`);
       setTimeout(() => setUploadError(""), 4000);
@@ -1779,7 +1779,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const stopAiListening = useCallback(() => {
     if (speechRecognitionRef.current) {
       try {
-        speechRecognitionRef.current.abort();
+        speechRecognitionRef.current.abort?.();
       } catch { /* ignore */ }
       speechRecognitionRef.current = null;
     }
@@ -2028,7 +2028,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               </div>
           <h1 className="font-semibold text-slate-800">{chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}</h1>
               {isMuted && (
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" title="Беззвучный">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label="Беззвучный">
                   <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
               )}
@@ -3387,63 +3387,6 @@ function isOnlyEmoji(str: string): boolean {
   return /^[\p{Emoji}\s]+$/u.test(t) && /[\p{Emoji}]/u.test(t);
 }
 
-/** 15 стикеров для реакций (синхронно с бэкендом), прикольные и разнообразные */
-const REACTION_STICKERS = ["🔥", "💫", "✨", "❤️", "🥰", "😂", "😎", "🎉", "🙌", "👏", "💪", "🤩", "🌟", "😮", "😢"];
-
-/** Один стикер с анимацией (для пикера и для бейджа) */
-function StickerIcon({ code, className = "", animated = false }: { code: string; className?: string; animated?: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center justify-center ${animated ? "sticker-float sticker-glow" : ""} ${className}`}
-      style={{ fontSize: "inherit" }}
-    >
-      {code}
-    </span>
-  );
-}
-
-/** Прокручиваемая панель стикеров (листать влево/вправо) */
-function StickerPicker({
-  stickers,
-  myReactions,
-  canAddReaction,
-  reactionLoading,
-  onPick,
-  title,
-}: {
-  stickers: string[];
-  myReactions: string[];
-  canAddReaction: boolean;
-  reactionLoading: boolean;
-  onPick: (code: string) => void;
-  title?: string;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg px-2 py-2 max-w-[280px] overflow-hidden">
-      <p className="text-xs text-slate-500 px-1 pb-1 truncate">{title ?? "Стикеры"}</p>
-      <div
-        className="sticker-picker flex gap-1 overflow-x-auto overflow-y-hidden pb-0.5"
-        style={{ scrollbarWidth: "thin" }}
-      >
-        {stickers.map((code) => (
-          <button
-            key={code}
-            type="button"
-            disabled={reactionLoading || (!myReactions.includes(code) && !canAddReaction)}
-            onClick={() => onPick(code)}
-            className={`flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl text-xl transition-transform hover:scale-110 active:scale-95 select-none ${
-              myReactions.includes(code) ? "bg-blue-100 ring-2 ring-blue-400 scale-105" : "hover:bg-slate-100"
-            }`}
-            title={myReactions.includes(code) ? `Снять ${code}` : canAddReaction ? code : "Макс. 3 реакции"}
-          >
-            <StickerIcon code={code} animated />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 const MESSAGE_TEXT_BASE_PX = 13;
 const MESSAGE_EMOJI_BASE_PX = 28;
 
@@ -3563,7 +3506,6 @@ function MessageBubble({
   /** Вызов после закрепления/открепления (обновить чат) */
   onPinChange?: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   const [hoverDelayPassed, setHoverDelayPassed] = useState(false);
   const hoverDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickerHover, setPickerHover] = useState(false);
@@ -3606,7 +3548,6 @@ function MessageBubble({
   const fileIsImage = isImageByMime || (message.file && !fileMime && isImageByExt);
   const fileIsVideo = isVideoByMime || (message.file && !fileMime && isVideoByExt);
   // Показывать как ссылку только для не-медиа; картинки и видео — всегда с превью
-  const asFileNoPreview = message.msg_type === "file" && !fileIsImage && !fileIsVideo;
   const isImage = message.file && fileIsImage;
   const filePreviewUrl = fileUrl && isImage ? withPreviewParams(fileUrl, 900) : fileUrl;
   const isAudio = message.msg_type === "audio" || (message.file && (message.file as { mime_type?: string }).mime_type?.startsWith("audio/"));
@@ -3614,7 +3555,7 @@ function MessageBubble({
   const isVideoCircle = message.msg_type === "video_circle" && message.file;
 
   // Несколько изображений — плитка; учитываем mime и расширение
-  const allFiles = (message.files ?? []).filter((f): f is { id: string; url?: string | null; mime_type?: string; original_name?: string } => f != null && typeof f === "object" && "id" in f);
+  const allFiles = (message.files ?? []).filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
   const imageFiles = allFiles.filter((f) => (f.mime_type || "").startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|svg|heic)$/i.test(f.original_name || ""));
   const isMultiImage = imageFiles.length > 1;
   const isImageBubble = isVideoCircle || isMultiImage || (isFile && isImage);
@@ -3724,12 +3665,10 @@ function MessageBubble({
   );
 
   const handleMouseEnter = () => {
-    setHover(true);
     if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
     hoverDelayTimerRef.current = setTimeout(() => setHoverDelayPassed(true), 1000);
   };
   const handleMouseLeave = () => {
-    setHover(false);
     setPickerHover(false);
     if (hoverDelayTimerRef.current) {
       clearTimeout(hoverDelayTimerRef.current);

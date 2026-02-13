@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -32,6 +32,7 @@ export default function CreateChatPage() {
   const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
       setAvatarFile(file);
       setAvatarPreview(URL.createObjectURL(file));
     } else {
@@ -41,12 +42,11 @@ export default function CreateChatPage() {
     }
   };
 
-  const removeAvatar = () => {
-    setAvatarFile(null);
-    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-    setAvatarPreview(null);
-    if (avatarInputRef.current) avatarInputRef.current.value = "";
-  };
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    };
+  }, [avatarPreview]);
 
   const copyInviteLink = (url: string) => {
     if (navigator.clipboard?.writeText) {
@@ -70,6 +70,7 @@ export default function CreateChatPage() {
     try {
       const { data: chat } = await chatsApi.create(payload);
       if (avatarFile) {
+        // TODO: resize/compress avatar before upload to reduce bandwidth and TTFB.
         await chatsApi.uploadAvatar(chat.id, avatarFile);
       }
       if (chat.invite_link) {

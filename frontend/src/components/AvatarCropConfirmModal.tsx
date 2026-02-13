@@ -80,16 +80,6 @@ export function AvatarCropConfirmModal({
     setScale((s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s + delta)));
   };
 
-  const getPoint = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const r = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - r.left,
-      y: e.clientY - r.top,
-    };
-  };
-
   const onMouseDown = (e: React.MouseEvent) => {
     if (!image) return;
     setDrag({ startX: e.clientX, startY: e.clientY, startOffset: { ...offset } });
@@ -162,6 +152,7 @@ export function AvatarCropConfirmModal({
             style={{ width: VIEW_SIZE, height: VIEW_SIZE }}
             onWheel={handleWheel}
           >
+            {/* TODO: add touch drag + pinch zoom for mobile cropping. */}
             <canvas
               ref={canvasRef}
               width={VIEW_SIZE}
