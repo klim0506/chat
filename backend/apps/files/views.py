@@ -1,0 +1,184 @@
+import hashlib
+import hmac
+import mimetypes
+from io import BytesIO
+import os
+import time
+import uuid
+from pathlib import Path
+from uuid import UUID
+
+from django.conf import settings
+from django.http import FileResponse, Http404, HttpResponse
+from rest_framework import status
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+from apps.chats.models import ChatMember
+from .models import FileAttachment
+from .serializers import FileAttachmentSerializer
+from PIL import Image
+
+MAX_FILE_SIZE = 512 * 1024 * 1024  # 0.5 ГБ
+FILE_TOKEN_TTL_SECONDS = 60 * 60
+ALLOWED_UPLOAD_MIME_PREFIXES = (
+    "image/",
+    "audio/",
+    "video/",
+    "application/pdf",
+    "text/plain",
+    "application/zip",
+    "application/x-zip-compressed",
+)
+INLINE_BLOCKED_MIME_TYPES = {
+    "image/svg+xml",
+    "text/html",
+    "application/xhtml+xml",
+    "application/xml",
+    "text/xml",
+}
+
+
+def make_file_token(file_id: str, expires_at: int | None = None) -> str:
+    """Generate HMAC token with embedded expiration timestamp."""
+    if expires_at is None:
+        expires_at = int(time.time()) + FILE_TOKEN_TTL_SECONDS
+    payload = f"{file_id}:{expires_at}"
+    key = settings.SECRET_KEY.encode()
+    sig = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{expires_at}.{sig}"
+
+
+def verify_file_token(file_id: str, token: str) -> bool:
+    try:
+        expires_raw, sig = token.split(".", 1)
+        expires_at = int(expires_raw)
+    except (ValueError, TypeError):
+        return False
+    now_ts = int(time.time())
+    if expires_at < now_ts:
+        return False
+    payload = f"{file_id}:{expires_at}"
+    expected_sig = hmac.new(settings.SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected_sig, sig)
+
+
+class FileUploadView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
+        if file_obj.size > MAX_FILE_SIZE:
+            return Response({"detail": "Файл больше 0,5 ГБ."}, status=status.HTTP_400_BAD_REQUEST)
+        clean_original_name = os.path.basename(file_obj.name or "file")
+        guessed_mime = mimetypes.guess_type(clean_original_name)[0] or ""
+        mime_type = guessed_mime or file_obj.content_type or "application/octet-stream"
+        if mime_type == "image/svg+xml":
+            return Response({"detail": "SVG-файлы запрещены из соображений безопасности."}, status=status.HTTP_400_BAD_REQUEST)
+        if not any(
+            mime_type.startswith(prefix) if prefix.endswith("/") else mime_type == prefix
+            for prefix in ALLOWED_UPLOAD_MIME_PREFIXES
+        ):
+            return Response({"detail": "Неподдерживаемый тип файла."}, status=status.HTTP_400_BAD_REQUEST)
+        chat_id_raw = request.data.get("chat_id")
+        chat_id = None
+        if chat_id_raw:
+            try:
+                chat_id = UUID(str(chat_id_raw))
+            except (ValueError, TypeError):
+                return Response({"detail": "Некорректный chat_id."}, status=status.HTTP_400_BAD_REQUEST)
+            if not ChatMember.objects.filter(chat_id=chat_id, user=request.user, status=ChatMember.Status.ACTIVE).exists():
+                return Response({"detail": "Нет доступа к чату."}, status=status.HTTP_403_FORBIDDEN)
+
+        subdir = f"chat_{chat_id}" if chat_id else "uploads"
+        rel_dir = os.path.join("chat_uploads", subdir)
+        save_dir = os.path.join(settings.MEDIA_ROOT, rel_dir)
+        os.makedirs(save_dir, exist_ok=True)
+        ext = os.path.splitext(clean_original_name)[1] or ""
+        new_name = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(rel_dir, new_name).replace("\\", "/")
+        full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+        with open(full_path, "wb+") as dest:
+            for chunk in file_obj.chunks():
+                dest.write(chunk)
+        att = FileAttachment.objects.create(
+            uploader=request.user,
+            original_name=clean_original_name,
+            file_path=file_path,
+            mime_type=mime_type,
+            size_bytes=file_obj.size,
+            storage_type=FileAttachment.StorageType.LOCAL,
+        )
+        return Response(FileAttachmentSerializer(att, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class SecureFileServeView(APIView):
+    """Serve files securely — URL hides file name and requires HMAC token."""
+    permission_classes = [AllowAny]  # Token-based auth, not JWT
+
+    def get(self, request, file_id):
+        token = request.query_params.get("t", "")
+        if not token or not verify_file_token(str(file_id), token):
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            att = FileAttachment.objects.get(pk=file_id)
+        except FileAttachment.DoesNotExist:
+            raise Http404
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        full_path = (media_root / att.file_path).resolve()
+        if media_root not in full_path.parents and full_path != media_root:
+            raise Http404
+        if not full_path.is_file():
+            raise Http404
+        content_type = att.mime_type or mimetypes.guess_type(att.original_name)[0] or "application/octet-stream"
+
+        # Optional lightweight preview for images
+        try:
+            w_raw = request.query_params.get("w")
+            h_raw = request.query_params.get("h")
+            w = int(w_raw) if w_raw else 0
+            h = int(h_raw) if h_raw else 0
+        except (TypeError, ValueError):
+            w, h = 0, 0
+
+        if content_type.startswith("image/") and (w or h):
+            w = max(16, min(2000, w or 0))
+            h = max(16, min(2000, h or 0))
+            with Image.open(full_path) as img:
+                if not w or not h:
+                    # Preserve aspect ratio if only one side provided
+                    if w and not h:
+                        ratio = w / float(img.width)
+                        h = max(16, int(img.height * ratio))
+                    elif h and not w:
+                        ratio = h / float(img.height)
+                        w = max(16, int(img.width * ratio))
+                img.thumbnail((w, h), Image.LANCZOS)
+                buf = BytesIO()
+                has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+                if has_alpha:
+                    img.save(buf, format="PNG", optimize=True)
+                    out_type = "image/png"
+                else:
+                    img = img.convert("RGB")
+                    img.save(buf, format="WEBP", quality=70, method=6)
+                    out_type = "image/webp"
+                buf.seek(0)
+                resp = HttpResponse(buf.read(), content_type=out_type)
+                resp["Cache-Control"] = "private, max-age=3600"
+                return resp
+
+        response = FileResponse(open(full_path, "rb"), content_type=content_type)
+        # Inline for images/audio/video, attachment for others
+        if content_type.startswith(("image/", "audio/", "video/")) and content_type not in INLINE_BLOCKED_MIME_TYPES:
+            response["Content-Disposition"] = f'inline; filename="{att.original_name}"'
+        else:
+            response["Content-Disposition"] = f'attachment; filename="{att.original_name}"'
+        response["Cache-Control"] = "private, max-age=3600"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response

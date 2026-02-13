@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' ws: wss: http: https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:;"
+    />
+    <title>Приватные чаты — свой мессенджер без VPN и блокировок</title>
+    <meta name="description" content="Чаты, которые работают всегда. Свой мессенджер без VPN: регистрация по SMS, файлы до 0,5 ГБ, до 300 участников. Личный чат бесплатно." />
+    <meta name="keywords" content="приватные чаты, мессенджер без VPN, чат по SMS, чаты Россия, свой чат" />
+    <!-- canonical задаётся на сервере или в nginx, href="/" ломает Vite build (EISDIR) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Приватные чаты — свой мессенджер без VPN" />
+    <meta property="og:description" content="Чаты без блокировок. Регистрация по SMS, файлы до 0,5 ГБ. Личный чат бесплатно." />
+    <meta property="og:locale" content="ru_RU" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/x-icon" href="/ТЕЛЕГА.ico" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

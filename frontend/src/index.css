@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; margin: 0; }
+body { font-family: 'Outfit', system-ui, -apple-system, sans-serif; }
+
+:root[data-theme="dark"] body {
+  background: #0b1220;
+  color: #dbe4f0;
+}
+
+:root[data-theme="dark"] .bg-white {
+  background-color: #0f172a !important;
+}
+
+:root[data-theme="dark"] .bg-slate-50 {
+  background-color: #0b1220 !important;
+}
+
+:root[data-theme="dark"] .bg-slate-100 {
+  background-color: #162133 !important;
+}
+
+:root[data-theme="dark"] .border-slate-100,
+:root[data-theme="dark"] .border-slate-200,
+:root[data-theme="dark"] .border-slate-300 {
+  border-color: #273449 !important;
+}
+
+:root[data-theme="dark"] .text-slate-900,
+:root[data-theme="dark"] .text-slate-800,
+:root[data-theme="dark"] .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+:root[data-theme="dark"] .text-slate-600,
+:root[data-theme="dark"] .text-slate-500,
+:root[data-theme="dark"] .text-slate-400 {
+  color: #9fb0c9 !important;
+}
+
+/* Landing animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.animate-fade-up {
+  animation: fade-up 0.6s ease-out forwards;
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+.gradient-bg {
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}
+
+/* Анимация стикеров */
+@keyframes sticker-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.05); }
+}
+@keyframes sticker-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(0,0,0,0.1)); }
+  50% { filter: drop-shadow(0 0 6px rgba(255,200,100,0.4)); }
+}
+.sticker-float {
+  animation: sticker-float 2.5s ease-in-out infinite;
+}
+.sticker-glow {
+  animation: sticker-glow 2s ease-in-out infinite;
+}
+.sticker-picker::-webkit-scrollbar {
+  height: 4px;
+}
+.sticker-picker::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* Скрыть ползунок, прокрутка вниз/вверх остаётся (колёсико, тач) */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Ссылки в сообщениях: перенос по символам, чтобы длинные URL и имена файлов не обрезались */
+.markdown-message a {
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+/* Лёгкая вибрация «вы уже здесь» при клике по юзернейму в текущем чате */
+@keyframes username-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+.animate-username-shake {
+  animation: username-shake 0.4s ease-in-out;
+}
+
+/* Быстрое плавное появление реакций у сообщения */
+@keyframes reactions-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-reactions-appear {
+  animation: reactions-appear 0.22s ease-out forwards;
+}

@@ -1,0 +1,1 @@
+[      74ms] [ERROR] State loaded from storage couldn't be migrated since no migrate function was provided @ http://localhost/node_modules/.vite/deps/zustand_middleware.js?v=35dd938e:506
