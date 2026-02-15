@@ -88,6 +88,10 @@ class SendCodeView(APIView):
         ser = SendCodeSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         phone = _normalize_phone(ser.validated_data["phone"])
+
+        # Check if the phone is already registered (for referral banner on frontend)
+        user_exists = User.objects.filter(phone=phone, username__isnull=False).exclude(username="").exists()
+
         if not can_send_sms(phone):
             return Response({"detail": "РЎР»РµРґСѓСЋС‰РµРµ SMS РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ С‡РµСЂРµР· РјРёРЅСѓС‚Сѓ."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
@@ -96,7 +100,7 @@ class SendCodeView(APIView):
             if not debug_code:
                 return Response({"detail": "AUTH_DEBUG РІРєР»СЋС‡С‘РЅ Р±РµР· AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             set_otp(phone, debug_code)
-            return Response({"detail": "Р РµР¶РёРј РѕС‚Р»Р°РґРєРё: РєРѕРґ РЅРµ РѕС‚РїСЂР°РІР»РµРЅ.", "method": "debug"})
+            return Response({"detail": "Р РµР¶РёРј РѕС‚Р»Р°РґРєРё: РєРѕРґ РЅРµ РѕС‚РїСЂР°РІР»РµРЅ.", "method": "debug", "is_new": not user_exists})
 
         code = generate_code(6)
         set_otp(phone, code)
@@ -104,11 +108,11 @@ class SendCodeView(APIView):
         # 1) Try Telegram verification first; fallback to SMS
         tg_result = send_telegram_verification(phone, code)
         if tg_result:
-            return Response({"detail": "Код отправлен в Telegram.", "method": "telegram"})
+            return Response({"detail": "Код отправлен в Telegram.", "method": "telegram", "is_new": not user_exists})
 
         # 2) Fallback: SMS via RedSMS HTTP
         if send_sms(phone, f"MyChat: Код для входа: {code}"):
-            return Response({"detail": "РљРѕРґ РѕС‚РїСЂР°РІР»РµРЅ РїРѕ SMS.", "method": "sms"})
+            return Response({"detail": "РљРѕРґ РѕС‚РїСЂР°РІР»РµРЅ РїРѕ SMS.", "method": "sms", "is_new": not user_exists})
 
         return Response(
             {"detail": "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєРѕРґ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ."},
@@ -232,6 +236,22 @@ class RefreshTokenView(APIView):
             if not UserSession.objects.filter(id=sid, is_active=True).exists():
                 return Response({"detail": "Сессия завершена."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response({"access": make_access_token(user.id, sid)})
+
+
+class CheckUsernameView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        raw = (request.data.get("username") or "").strip()
+        if not raw:
+            return Response({"available": False, "detail": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            normalized = validate_username_format(raw)
+        except SerializerValidationError as e:
+            msg = e.detail[0] if isinstance(e.detail, list) else str(e.detail)
+            return Response({"available": False, "detail": str(msg)})
+        taken = User.objects.filter(username__iexact=normalized).exclude(pk=request.user.pk).exists()
+        return Response({"available": not taken})
 
 
 class MeView(APIView):

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { gifApi, type GifResult } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { AnimatedReaction } from "./AnimatedReaction";
+import { LottieSticker } from "./LottieSticker";
 
 const DEBOUNCE_MS = 300;
 
@@ -21,7 +22,7 @@ const BUNDLED_STICKERS = [
   { id: "smile", path: "/stickers/default/smile.svg", label: "Smile" },
   { id: "heart", path: "/stickers/default/heart.svg", label: "Heart" },
   { id: "thumbsup", path: "/stickers/default/thumbsup.svg", label: "Thumbs up" },
-  { id: "fire", path: "/stickers/default/fire.svg", label: "Fire" },
+  { id: "fire", path: "/stickers/default/fire.svg", label: "Fire", animationUrl: "/animations/reactions/fire.json" },
   { id: "party", path: "/stickers/default/party.svg", label: "Party" },
   { id: "wave", path: "/stickers/default/wave.svg", label: "Wave" },
 ];
@@ -114,7 +115,7 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, c
                 className="w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors"
                 title={emoji}
               >
-                {emoji === "🔥" ? <AnimatedReaction emoji={emoji} size={22} loop preferEmoji /> : emoji}
+                {emoji === "🔥" ? <AnimatedReaction emoji={emoji} size={22} loop /> : emoji}
               </button>
             ))}
           </div>
@@ -132,7 +133,11 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, c
                 className="w-14 h-14 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors p-1"
                 title={s.label}
               >
-                <img src={s.path} alt={s.label} className="w-10 h-10 object-contain" />
+                {s.animationUrl ? (
+                  <LottieSticker animationUrl={s.animationUrl} size={40} />
+                ) : (
+                  <img src={s.path} alt={s.label} className="w-10 h-10 object-contain" />
+                )}
               </button>
             ))}
           </div>

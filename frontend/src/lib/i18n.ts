@@ -242,10 +242,12 @@ const translations = {
   },
   "messenger.welcomeInviteFriends": { en: "Invite friends", ru: "Пригласить друзей" },
   "messenger.welcomeInviteFriendsDesc": {
-    en: "Share a link to this messenger with friends",
-    ru: "Поделитесь ссылкой на этот мессенджер с друзьями",
+    en: "Friend gets 2 weeks free, you get 10 stars",
+    ru: "Друг получит 2 недели бесплатно, вы — 10 звёзд",
   },
   "messenger.welcomeInviteCopied": { en: "Link copied!", ru: "Ссылка скопирована!" },
+  "messenger.inviteCopyLink": { en: "Copy link", ru: "Скопировать" },
+  "messenger.inviteShare": { en: "Share", ru: "Поделиться" },
   "messenger.welcomeFavorites": { en: "Try Favorites", ru: "Попробовать Избранное" },
   "messenger.welcomeFavoritesDesc": {
     en: "Test messaging, save notes and files for yourself",
@@ -430,7 +432,7 @@ const translations = {
   "chat.scheduleLabelWeekday": { en: "Weekday", ru: "День недели" },
   "chat.featureInDev": { en: "Feature under development", ru: "Функционал в разработке" },
   "chat.messageDeleted": { en: "Message deleted", ru: "Сообщение удалено" },
-  "chat.conversationStart": { en: "Start of conversation", ru: "Начало беседы" },
+  "chat.conversationStart": { en: "Start of chat", ru: "Начало чата" },
   "chat.favoritesTitle": { en: "Favorites", ru: "Избранное" },
   "chat.favoritesHint": {
     en: "Your personal space for notes. Save messages, links, files — only you can see them.",
@@ -505,6 +507,41 @@ const translations = {
   "auth.invalidCode": { en: "Invalid code", ru: "Неверный код" },
   "auth.usernameTaken": { en: "This username is taken or unavailable", ru: "Этот юзернейм занят или недоступен" },
   "auth.logo": { en: "Logo", ru: "Логотип" },
+  "auth.createAccount": { en: "Create account", ru: "Создание аккаунта" },
+  "auth.login": { en: "Log in", ru: "Вход" },
+  "auth.referralBonus": {
+    en: "You are signing up via referral link! For this we give you 2 weeks of free service use and ⭐ 10 stars. We also give ⭐ 10 stars to the person who invited you.",
+    ru: "Вы регистрируетесь по реферальной ссылке! За это мы дарим вам 2 недели бесплатного использования сервиса и ⭐ 10 звёзд. А тому, кто вас пригласил, мы тоже начислим ⭐ 10 звёзд.",
+  },
+  "auth.referralAlreadyRegistered": {
+    en: "You already have an account. Referral bonuses are only available for new users.",
+    ru: "У вас уже есть аккаунт. Реферальные бонусы доступны только для новых пользователей.",
+  },
+  "auth.phoneNumber": { en: "Phone number", ru: "Номер телефона" },
+  "auth.codeDeliveryMethod": { en: "Code delivery method", ru: "Способ получения кода" },
+  "auth.codeHint": {
+    en: "Confirmation code will arrive via Telegram or SMS",
+    ru: "Код подтверждения придёт в Telegram или по SMS",
+  },
+  "auth.usernameHint": {
+    en: "Choose a username. Others can find and message you by it. You can set your name and avatar now or later in settings.",
+    ru: "Придумайте юзернейм. По нему вас смогут найти и написать. Имя и аватарку можно задать сейчас или позже в профиле.",
+  },
+  "auth.nameLabel": { en: "Name", ru: "Имя" },
+  "auth.usernameLabel": { en: "Username", ru: "Юзернейм" },
+  "auth.usernameRules": {
+    en: "Latin letters, digits and underscore, 3–30 characters",
+    ru: "Латиница, цифры и подчёркивание, 3–30 символов",
+  },
+  "auth.codeSentTelegram": { en: "Code sent to Telegram at", ru: "Код отправлен в Telegram на" },
+  "auth.codeSentTelegramFrom": { en: "from", ru: "от" },
+  "auth.codeSentSms": { en: "Code sent via SMS to", ru: "Код отправлен по SMS на" },
+  "auth.changePhone": { en: "Change", ru: "Изменить" },
+  "auth.didntReceiveCode": { en: "Didn't receive the code?", ru: "Не пришёл код?" },
+  "auth.sendViaSms": { en: "Send via SMS", ru: "Отправить по SMS" },
+  "auth.usernameAvailable": { en: "Username is available", ru: "Юзернейм свободен" },
+  "auth.usernameTakenLive": { en: "This username is already taken", ru: "Этот юзернейм уже занят" },
+  "auth.usernameChecking": { en: "Checking...", ru: "Проверка..." },
 
   // ─── JoinChat page ────────────────────────────────────────
   "joinPage.missingParams": { en: "Link is missing slug or code parameters.", ru: "В ссылке отсутствуют параметры slug или code." },

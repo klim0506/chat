@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -39,6 +39,7 @@ export default function AuthPage() {
   const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "">("");
   const [preferredMethod, setPreferredMethod] = useState<"telegram" | "sms">("telegram");
   const [isNewAccount, setIsNewAccount] = useState(false);
+  const [isNewPhone, setIsNewPhone] = useState<boolean | null>(null); // null = not yet checked
 
   // If already authenticated but missing username, skip straight to username step
   useEffect(() => {
@@ -57,6 +58,42 @@ export default function AuthPage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
+  // Live username availability check
+  const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const [usernameDetail, setUsernameDetail] = useState("");
+  const checkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCheckedRef = useRef("");
+
+  const checkUsernameAvailability = useCallback((value: string) => {
+    if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed || trimmed.length < 3 || !/^[a-zA-Z0-9_]+$/.test(trimmed)) {
+      setUsernameStatus("idle");
+      setUsernameDetail("");
+      lastCheckedRef.current = "";
+      return;
+    }
+    if (trimmed === lastCheckedRef.current) return;
+    setUsernameStatus("checking");
+    setUsernameDetail("");
+    checkTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await authApi.checkUsername(trimmed);
+        lastCheckedRef.current = trimmed;
+        if (res.data.available) {
+          setUsernameStatus("available");
+          setUsernameDetail("");
+        } else {
+          setUsernameStatus("taken");
+          setUsernameDetail(res.data.detail || "");
+        }
+      } catch {
+        setUsernameStatus("idle");
+        setUsernameDetail("");
+      }
+    }, 400);
+  }, []);
+
   const onSendCode = async (data: PhoneForm) => {
     setError("");
     setLoading(true);
@@ -65,8 +102,9 @@ export default function AuthPage() {
       const res = await authApi.sendCode(data.phone, preferredMethod === "sms" ? "sms" : undefined);
       setPhone(data.phone);
       setStep("code");
-      const method = (res.data as { method?: string }).method;
-      setCodeMethod(method === "telegram" ? "telegram" : "sms");
+      const resData = res.data as { method?: string; is_new?: boolean };
+      setCodeMethod(resData.method === "telegram" ? "telegram" : "sms");
+      setIsNewPhone(resData.is_new ?? null);
     } catch (e: unknown) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("common.error"));
     } finally {
@@ -79,7 +117,7 @@ export default function AuthPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await authApi.verifyCode(phone, data.code, refCode || undefined);
+      const res = await authApi.verifyCode(phone, data.code, isNewPhone !== false ? (refCode || undefined) : undefined);
       setTokens(res.data.access, res.data.refresh, res.data.user);
       const created = !!(res.data as { created?: boolean }).created;
       setIsNewAccount(created);
@@ -146,19 +184,19 @@ export default function AuthPage() {
       <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-md p-6">
         <h1 className="text-xl font-semibold text-center mb-6">
-          {isNewAccount ? "Создание аккаунта" : "Вход"}
+          {isNewAccount ? t("auth.createAccount") : t("auth.login")}
         </h1>
 
-        {refCode && (
+        {refCode && isNewPhone === true && (
           <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-            Вы регистрируетесь по реферальной ссылке — 2 недели бесплатно + ⭐ 10 звёзд!
+            {t("auth.referralBonus")}
           </div>
         )}
 
         {step === "phone" ? (
           <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Номер телефона</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.phoneNumber")}</label>
               <input
                 type="tel"
                 placeholder="+7 999 123-45-67"
@@ -170,7 +208,7 @@ export default function AuthPage() {
               )}
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-2">Способ получения кода</label>
+              <label className="block text-xs font-medium text-gray-600 mb-2">{t("auth.codeDeliveryMethod")}</label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -193,7 +231,7 @@ export default function AuthPage() {
               </div>
             </div>
             <p className="text-xs text-gray-400">
-              Код подтверждения придёт в Telegram или по SMS
+              {t("auth.codeHint")}
             </p>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button
@@ -207,7 +245,7 @@ export default function AuthPage() {
         ) : step === "username" ? (
           <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="space-y-4">
             <p className="text-sm text-gray-600 mb-4">
-              Придумайте юзернейм. По нему вас смогут найти и написать. Имя и аватарку можно задать сейчас или позже в профиле.
+              {t("auth.usernameHint")}
             </p>
             <div className="flex gap-4 items-start mb-4">
               <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
@@ -221,7 +259,7 @@ export default function AuthPage() {
                 </span>
               </label>
               <div className="flex-1 min-w-0">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Имя</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.nameLabel")}</label>
                 <input
                   type="text"
                   autoComplete="name"
@@ -232,25 +270,36 @@ export default function AuthPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Юзернейм</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.usernameLabel")}</label>
               <input
                 type="text"
                 autoComplete="username"
                 placeholder="ivan_petrov"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent lowercase"
-                {...usernameForm.register("username")}
+                {...usernameForm.register("username", {
+                  onChange: (e) => checkUsernameAvailability(e.target.value),
+                })}
               />
               <p className="text-xs text-gray-400 mt-1">
-                Латиница, цифры и подчёркивание, 3–30 символов
+                {t("auth.usernameRules")}
               </p>
               {usernameForm.formState.errors.username && (
                 <p className="text-red-500 text-sm mt-1">{usernameForm.formState.errors.username.message}</p>
+              )}
+              {!usernameForm.formState.errors.username && usernameStatus === "checking" && (
+                <p className="text-xs text-gray-400 mt-1">{t("auth.usernameChecking")}</p>
+              )}
+              {!usernameForm.formState.errors.username && usernameStatus === "available" && (
+                <p className="text-xs text-green-600 mt-1">{t("auth.usernameAvailable")}</p>
+              )}
+              {!usernameForm.formState.errors.username && usernameStatus === "taken" && (
+                <p className="text-xs text-red-500 mt-1">{usernameDetail || t("auth.usernameTakenLive")}</p>
               )}
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || usernameStatus === "taken" || usernameStatus === "checking"}
               className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {loading ? t("auth.saving") : t("auth.continue")}
@@ -260,16 +309,16 @@ export default function AuthPage() {
           <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="space-y-4">
             <p className="text-sm text-gray-600">
               {codeMethod === "telegram" ? (
-                <>Код отправлен в Telegram на {phone} (от <strong>@VerificationCodes</strong>)</>
+                <>{t("auth.codeSentTelegram")} {phone} ({t("auth.codeSentTelegramFrom")} <strong>@VerificationCodes</strong>)</>
               ) : (
-                <>Код отправлен по SMS на {phone}</>
+                <>{t("auth.codeSentSms")} {phone}</>
               )}
               <button
                 type="button"
-                onClick={() => { setStep("phone"); setError(""); }}
+                onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); }}
                 className="ml-2 text-blue-600 hover:underline"
               >
-                Изменить
+                {t("auth.changePhone")}
               </button>
             </p>
             <div>
@@ -291,7 +340,7 @@ export default function AuthPage() {
             {error && <p className="text-red-500 text-sm">{error}</p>}
             {codeMethod === "telegram" && (
               <p className="text-sm text-gray-500">
-                Не пришёл код?{" "}
+                {t("auth.didntReceiveCode")}{" "}
                 <button
                   type="button"
                   onClick={async () => {
@@ -309,7 +358,7 @@ export default function AuthPage() {
                   disabled={loading}
                   className="text-blue-600 hover:underline disabled:opacity-50"
                 >
-                  Отправить по SMS
+                  {t("auth.sendViaSms")}
                 </button>
               </p>
             )}

@@ -111,6 +111,8 @@ export const authApi = {
       ...(ref ? { ref } : {}),
       ...(username ? { username } : {}),
     }),
+  checkUsername: (username: string) =>
+    api.post<{ available: boolean; detail?: string }>("/auth/check-username/", { username }),
   me: () => api.get<User>("/auth/me/"),
   updateMe: (data: Partial<User>) => api.patch<User>("/auth/me/", data),
   uploadAvatar: (file: File) => {

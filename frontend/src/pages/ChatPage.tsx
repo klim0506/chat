@@ -28,6 +28,7 @@ import * as e2eeKeyStorage from "../lib/e2ee/key-storage";
 import { useCachedMediaUrl } from "../hooks/useCachedMediaUrl";
 import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AnimatedReaction } from "../components/AnimatedReaction";
+import { LottieSticker, getStickerAnimationUrl } from "../components/LottieSticker";
 import { StickerGifPanel } from "../components/StickerGifPanel";
 import { REACTIONS } from "../lib/reaction-animations";
 import { switchLayout } from "../lib/layout-switcher";
@@ -2665,7 +2666,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             </button>
           )}
           <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <div className="relative shrink-0">
                 {chat.is_favorites ? (
                   <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
@@ -5034,7 +5035,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
         <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`}>
-        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-6 pr-5 py-2" : "px-3 py-1"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? (isMine ? "rounded-br-[4px]" : "rounded-bl-[4px]") : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-6 pr-5 py-2" : "px-3 py-1"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? (isMine ? "rounded-br-[4px]" : "rounded-bl-[4px]") : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
           {/* Forwarded header */}
           {message.forwarded_from && (
             <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-0.5 -mt-0.5">
@@ -5137,7 +5138,13 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           ) : isSticker ? (
             <div className="min-w-0 max-w-full">
-              <img src={content.startsWith("/") ? content : `/${content.replace(/^\/+/, "")}`} alt="" className="w-14 h-14 object-contain" />
+              {(() => {
+                const stickerPath = content.startsWith("/") ? content : `/${content.replace(/^\/+/, "")}`;
+                const stickerAnim = getStickerAnimationUrl(stickerPath);
+                return stickerAnim
+                  ? <LottieSticker animationUrl={stickerAnim} size={112} />
+                  : <img src={stickerPath} alt="" className="w-28 h-28 object-contain" />;
+              })()}
               <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
@@ -5224,7 +5231,7 @@ const MessageBubble = memo(function MessageBubble({
             </>
           )}
         </div>
-        {isLastInGroup && (
+        {isLastInGroup && !isSticker && !isImageBubble && (
           <div
             className={`absolute w-0 h-0 border-[6px] border-transparent bottom-[10px] ${isMine ? "right-0 -mr-px border-l-blue-100" : "left-0 -ml-px border-r-white"}`}
             aria-hidden
