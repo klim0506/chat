@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation } from "../lib/i18n";
 
 const CANVAS_SIZE = 320;
 const EXPORT_SIZE = 256;
@@ -26,6 +27,7 @@ interface AvatarEditorModalProps {
 }
 
 export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorModalProps) {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<Mode>(imageUrl ? "crop" : "draw");
   const [baseDataUrl, setBaseDataUrl] = useState<string | null>(null);
@@ -274,9 +276,9 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
     if (mode !== "text") return;
     const [x, y] = getCanvasPoint(e);
     const id = getNextTextId();
-    setTexts((prev) => [...prev, { id, text: "Текст", x, y, fontSize: textFontSize }]);
+    setTexts((prev) => [...prev, { id, text: t("avatar.defaultText"), x, y, fontSize: textFontSize }]);
     setEditingTextId(id);
-    setNewTextValue("Текст");
+    setNewTextValue(t("avatar.defaultText"));
   };
 
   const updateText = (id: string, updates: Partial<TextItem>) => {
@@ -312,7 +314,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
       <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-3 flex items-center justify-between border-b border-slate-200">
           <h3 className="font-semibold text-slate-800">Редактирование аватарки</h3>
-          <button type="button" onClick={onCancel} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" aria-label="Закрыть">
+          <button type="button" onClick={onCancel} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" aria-label={t("avatar.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -380,7 +382,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
                 <path d="M10 4v16" />
                 <path d="M14 4v16" />
               </svg>
-              Текст
+              {t("avatar.defaultText")}
             </button>
           </div>
 

@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Prefetch
@@ -12,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from .models import Chat, ChatMember, DEFAULT_MAX_MEMBERS
+from .models import Chat, ChatMember, Message, DEFAULT_MAX_MEMBERS
 from .serializers import ChatSerializer, ChatCreateSerializer, ChatMemberSerializer, JoinChatSerializer
 from .utils import verify_invite_code, generate_slug, make_verification_code
 from apps.payments.permissions import HasActiveSubscription
@@ -43,24 +44,41 @@ class ChatViewSet(viewsets.ModelViewSet):
     permission_classes = [HasActiveSubscription]
 
     def get_queryset(self):
+        user = self.request.user
+
         current_user_membership = Prefetch(
             "members",
             queryset=ChatMember.objects.filter(
-                user=self.request.user,
+                user=user,
                 status=ChatMember.Status.ACTIVE,
-            ).only("id", "chat_id", "user_id", "status", "last_read_at", "is_muted", "pin_order"),
+            ).only("id", "chat_id", "user_id", "status", "last_read_at", "muted_until", "pin_order", "is_archived"),
             to_attr="current_user_membership",
         )
+
+        # Prefetch последнего не-удалённого сообщения для превью в списке чатов
+        last_message_prefetch = Prefetch(
+            "messages",
+            queryset=Message.objects.filter(is_deleted=False).order_by("-created_at")[:1].select_related("file"),
+            to_attr="_prefetched_last_message",
+        )
+
         return (
             Chat.objects.filter(
                 is_active=True,
-                members__user=self.request.user,
+                members__user=user,
                 members__status=ChatMember.Status.ACTIVE,
             )
             .distinct()
+            .annotate(
+                # Аннотация: количество активных участников (вместо N+1 count() в сериализаторе)
+                _members_count=Count(
+                    "members",
+                    filter=Q(members__status=ChatMember.Status.ACTIVE),
+                ),
+            )
             .order_by("-created_at")
             .select_related("owner")
-            .prefetch_related("members__user", current_user_membership)
+            .prefetch_related("members__user", current_user_membership, last_message_prefetch)
         )
 
     @action(detail=False, methods=["post"], url_path="pins")
@@ -139,18 +157,56 @@ class ChatViewSet(viewsets.ModelViewSet):
         _broadcast_mark_read(chat.id, request.user.id, None)
         return Response({"last_read_at": None})
 
-    @action(detail=True, methods=["post"], url_path="toggle-mute")
-    def toggle_mute(self, request, pk=None):
-        """Переключить беззвучный режим."""
+    @action(detail=True, methods=["post"], url_path="mute")
+    def mute(self, request, pk=None):
+        """Установить или снять беззвучный режим. duration: 1h, 3h, 8h, forever, off."""
+        from django.utils import timezone
+
         chat = self.get_object()
         membership = ChatMember.objects.filter(
             chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
         ).first()
         if not membership:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
-        membership.is_muted = not membership.is_muted
-        membership.save(update_fields=["is_muted"])
-        return Response({"is_muted": membership.is_muted})
+
+        duration = (request.data.get("duration") or "off").strip().lower()
+        now = timezone.now()
+        forever = timezone.datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.get_current_timezone())
+
+        if duration == "off":
+            membership.muted_until = None
+        elif duration == "1h":
+            membership.muted_until = now + timedelta(hours=1)
+        elif duration == "3h":
+            membership.muted_until = now + timedelta(hours=3)
+        elif duration == "8h":
+            membership.muted_until = now + timedelta(hours=8)
+        elif duration == "forever":
+            membership.muted_until = forever
+        else:
+            return Response(
+                {"detail": "Недопустимый duration. Допустимо: 1h, 3h, 8h, forever, off."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        membership.save(update_fields=["muted_until"])
+        return Response({
+            "is_muted": membership.is_muted,
+            "muted_until": membership.muted_until.isoformat() if membership.muted_until else None,
+        })
+
+    @action(detail=True, methods=["post"], url_path="toggle-archive")
+    def toggle_archive(self, request, pk=None):
+        """Переключить статус «в архиве» для чата."""
+        chat = self.get_object()
+        membership = ChatMember.objects.filter(
+            chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
+        ).first()
+        if not membership:
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        membership.is_archived = not membership.is_archived
+        membership.save(update_fields=["is_archived"])
+        return Response({"is_archived": membership.is_archived})
 
     @action(detail=True, methods=["post"], url_path="leave")
     def leave(self, request, pk=None):
@@ -350,6 +406,60 @@ class CreateOrGetDMView(APIView):
             if existing and existing.id != chat.id:
                 return Response(ChatSerializer(existing, context={"request": request}).data)
         return Response(ChatSerializer(chat, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class JoinChatPreviewView(APIView):
+    """Предпросмотр чата по инвайт-ссылке (без вступления). Возвращает разный объём данных для open/closed."""
+    permission_classes = [HasActiveSubscription]
+
+    def post(self, request):
+        ser = JoinChatSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        slug, code = ser.validated_data["slug"], ser.validated_data["code"]
+        if not verify_invite_code(slug, code):
+            return Response({"detail": "Неверная ссылка или код."}, status=status.HTTP_400_BAD_REQUEST)
+        chat = get_object_or_404(Chat, slug=slug, is_active=True)
+        if getattr(chat, "is_personal", False) or getattr(chat, "is_favorites", False):
+            return Response({"detail": "Неверная ссылка или код."}, status=status.HTTP_400_BAD_REQUEST)
+
+        membership = ChatMember.objects.filter(chat=chat, user=request.user).first()
+        if membership:
+            if membership.status == ChatMember.Status.ACTIVE:
+                return Response({
+                    "chat_type": chat.chat_type or "open",
+                    "title": chat.title,
+                    "already_member": True,
+                    "chat_id": str(chat.id),
+                })
+            if membership.status == ChatMember.Status.KICKED:
+                return Response({"detail": "Вы были исключены из чата.", "is_kicked": True}, status=status.HTTP_403_FORBIDDEN)
+            if membership.status == ChatMember.Status.PENDING:
+                return Response({
+                    "chat_type": chat.chat_type or "open",
+                    "title": chat.title,
+                    "is_pending": True,
+                })
+
+        active_count = chat.members.filter(status=ChatMember.Status.ACTIVE).count()
+        if active_count >= chat.effective_max_members:
+            return Response({"detail": "Чат заполнен."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if chat.chat_type == Chat.ChatType.CLOSED:
+            return Response({
+                "chat_type": "closed",
+                "title": chat.title,
+            })
+
+        avatar_url = None
+        if chat.avatar:
+            avatar_url = request.build_absolute_uri(chat.avatar.url)
+        return Response({
+            "chat_type": "open",
+            "title": chat.title,
+            "description": chat.description or "",
+            "avatar_url": avatar_url,
+            "members_count": active_count,
+        })
 
 
 class JoinChatView(APIView):

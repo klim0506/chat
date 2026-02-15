@@ -309,7 +309,7 @@ class MultiImageAPITest(TestCase):
         fid = self._upload_image("single.jpg")
         res = self.client.post(
             f"/api/chats/{self.chat.id}/messages/",
-            {"msg_type": "file", "content": "single.jpg", "file": fid},
+            {"msg_type": "file", "content": "single.jpg", "file_id": fid},
             format="json",
         )
         self.assertEqual(res.status_code, 201)

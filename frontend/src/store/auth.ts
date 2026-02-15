@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { db } from "../lib/db";
 
 interface AuthUser {
   id: string;
@@ -7,6 +8,8 @@ interface AuthUser {
   display_name: string;
   username?: string | null;
   telegram_username?: string;
+  avatar?: string | null;
+  avatar_url?: string | null;
 }
 
 interface AuthState {
@@ -44,10 +47,30 @@ export const useAuthStore = create<AuthState>()(
         const payload = decodeJwtPayload(access);
         const userId = payload?.user_id as string | undefined;
         const sessionId = (payload?.sid as string) || null;
-        const resolved: AuthUser | null = user ?? (userId ? { id: userId, phone: "", display_name: "" } : null);
+        // Preserve existing user data (including avatar) when no user param provided (e.g. token refresh)
+        const existing = useAuthStore.getState().user;
+        const resolved: AuthUser | null = user ?? existing ?? (userId ? { id: userId, phone: "", display_name: "" } : null);
         set({ accessToken: access, refreshToken: refresh, user: resolved, sessionId, isAuthenticated: true });
       },
-      clearTokens: () => set({ accessToken: null, refreshToken: null, user: null, sessionId: null, isAuthenticated: false }),
+      clearTokens: () => {
+        // Clear all user-specific cached data to prevent cross-account leaks
+        // Use lazy imports to avoid circular dependency with other stores
+        import("./chatList").then(({ useChatListStore }) => useChatListStore.getState().reset()).catch(() => {});
+        import("./messages").then(({ useMessagesStore }) => useMessagesStore.getState().reset()).catch(() => {});
+        import("./outbox").then(({ useOutboxStore }) => useOutboxStore.getState().reset()).catch(() => {});
+        // Also clear IndexedDB directly as a safety net (all user-specific tables)
+        db.chats.clear().catch(() => {});
+        db.messages.clear().catch(() => {});
+        db.syncMeta.clear().catch(() => {});
+        db.outbox.clear().catch(() => {});
+        db.identityKeyPair.clear().catch(() => {});
+        db.signedPreKeys.clear().catch(() => {});
+        db.preKeys.clear().catch(() => {});
+        db.sessions.clear().catch(() => {});
+        db.trustedIdentities.clear().catch(() => {});
+        // Clear auth state
+        set({ accessToken: null, refreshToken: null, user: null, sessionId: null, isAuthenticated: false });
+      },
     }),
     {
       name: "auth-storage",

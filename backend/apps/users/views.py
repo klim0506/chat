@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.serializers import ValidationError as SerializerValidationError
@@ -148,6 +149,15 @@ class VerifyCodeView(APIView):
             if referrer and _normalize_phone(referrer.phone) == phone:
                 referrer = None
 
+        # Delete incomplete registration (phone claimed but no username set)
+        # so the user can start fresh on re-verification.
+        try:
+            existing = User.objects.get(phone=phone)
+            if not existing.username:
+                existing.delete()  # CASCADE cleans up sessions, subscription, favorites, etc.
+        except User.DoesNotExist:
+            pass
+
         user, created = User.objects.get_or_create(
             phone=phone,
             defaults={
@@ -164,7 +174,7 @@ class VerifyCodeView(APIView):
             if raw_username and raw_username.strip():
                 try:
                     normalized = validate_username_format(raw_username)
-                    if User.objects.filter(username=normalized).exists():
+                    if User.objects.filter(username__iexact=normalized).exists():
                         return Response(
                             {"detail": "Р­С‚РѕС‚ СЋР·РµСЂРЅРµР№Рј СѓР¶Рµ Р·Р°РЅСЏС‚."},
                             status=status.HTTP_400_BAD_REQUEST,
@@ -196,7 +206,7 @@ class VerifyCodeView(APIView):
             except Exception:
                 pass  # Don't block login if notification fails
 
-        return Response({"access": access, "refresh": refresh, "user": UserSerializer(user).data})
+        return Response({"access": access, "refresh": refresh, "user": UserSerializer(user).data, "created": created})
 
 
 class RefreshTokenView(APIView):
@@ -353,7 +363,7 @@ class MeAvatarsReorderView(APIView):
 
 
 class UserSearchView(APIView):
-    """РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ username РґР»СЏ РґРѕР±Р°РІР»РµРЅРёСЏ РІ С‡Р°С‚ / В«РќР°РїРёСЃР°С‚СЊВ»."""
+    """Поиск пользователей по username/display_name для добавления в чат / «Написать»."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -362,11 +372,14 @@ class UserSearchView(APIView):
             return Response({"results": []})
         if len(q) > 30:
             return Response({"results": []})
+        # Ищем по username (содержит) и display_name
         queryset = (
-            User.objects.filter(username__istartswith=q)
+            User.objects.filter(
+                Q(username__icontains=q) | Q(display_name__icontains=q)
+            )
             .exclude(pk=request.user.pk)
-            .exclude(username__isnull=True)
-            .exclude(username="")[:20]
+            .filter(Q(username__isnull=False) & ~Q(username=""))
+            .distinct()[:20]
         )
         results = []
         for u in queryset:
@@ -377,7 +390,16 @@ class UserSearchView(APIView):
                 "avatar_url": None,
             }
             if u.avatar:
-                data["avatar_url"] = request.build_absolute_uri(u.avatar.url)
+                try:
+                    url = u.avatar.url
+                    if getattr(request, "build_absolute_uri", None):
+                        try:
+                            url = request.build_absolute_uri(url)
+                        except Exception:
+                            pass
+                    data["avatar_url"] = url
+                except (ValueError, OSError):
+                    pass
             results.append(data)
         return Response({"results": results})
 

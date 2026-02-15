@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation } from "../lib/i18n";
 
 const VIEW_SIZE = 280;
 const EXPORT_SIZE = 256;
@@ -16,6 +17,7 @@ export function AvatarCropConfirmModal({
   onConfirm,
   onCancel,
 }: AvatarCropConfirmModalProps) {
+  const { t } = useTranslation();
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -135,7 +137,7 @@ export function AvatarCropConfirmModal({
             type="button"
             onClick={onCancel}
             className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-            aria-label="Закрыть"
+            aria-label={t("avatar.close")}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6 6 18" /><path d="m6 6 12 12" />
@@ -177,7 +179,7 @@ export function AvatarCropConfirmModal({
               type="button"
               disabled
               className="w-10 h-10 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center shrink-0 cursor-not-allowed"
-              aria-label="Редактировать с ИИ (скоро)"
+              aria-label={t("avatar.editWithAi")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
@@ -194,7 +196,7 @@ export function AvatarCropConfirmModal({
             type="button"
             onClick={handleConfirm}
             className="w-10 h-10 rounded-full bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center shrink-0"
-            aria-label="Использовать фото"
+            aria-label={t("avatar.usePhoto")}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 6 9 17l-5-5" />

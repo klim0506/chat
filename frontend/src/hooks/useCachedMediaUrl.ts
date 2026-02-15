@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCachedMediaUrl } from "../lib/media-cache";
+import { toSameOriginMediaUrl } from "../lib/media-url";
 import { useNetworkStore } from "../store/network";
 
 /**
@@ -23,18 +24,18 @@ export function useCachedMediaUrl(originalUrl: string | null | undefined): strin
       return;
     }
 
+    const url = toSameOriginMediaUrl(originalUrl);
     let cancelled = false;
 
     if (isOnline) {
-      // Online: use original URL immediately, cache in background
-      setResolvedUrl(originalUrl);
-      getCachedMediaUrl(originalUrl).catch(() => {});
+      setResolvedUrl(url);
+      getCachedMediaUrl(url).catch(() => {});
     } else {
       // Offline: try to load from cache
-      getCachedMediaUrl(originalUrl).then((url) => {
-        if (!cancelled) setResolvedUrl(url);
+      getCachedMediaUrl(url).then((cached) => {
+        if (!cancelled) setResolvedUrl(cached);
       }).catch(() => {
-        if (!cancelled) setResolvedUrl(originalUrl);
+        if (!cancelled) setResolvedUrl(url);
       });
     }
 

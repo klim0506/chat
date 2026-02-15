@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { chatsApi } from "../api/client";
+import { useTranslation } from "../lib/i18n";
 import logoUrl from "../../../ТЕЛЕГА.ico?url";
 
 export default function JoinChatPage() {
+  const { t } = useTranslation();
   const { slug: slugParam } = useParams<{ slug: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -15,7 +17,7 @@ export default function JoinChatPage() {
 
   const join = () => {
     if (!slug || !code) {
-      setMessage("В ссылке отсутствуют параметры slug или code.");
+      setMessage(t("joinPage.missingParams"));
       setStatus("error");
       return;
     }
@@ -27,10 +29,10 @@ export default function JoinChatPage() {
         const detail = data?.detail;
         if (detail?.includes("Ожидайте подтверждения")) {
           setStatus("pending");
-          setMessage("Запрос отправлен. Ожидайте подтверждения от владельца чата.");
+          setMessage(t("joinChat.pendingApproval"));
         } else {
           setStatus("joined");
-          setMessage(data.already_member ? "Вы уже в чате." : "Вы вступили в чат.");
+          setMessage(data.already_member ? t("joinPage.alreadyInChat") : t("joinChat.joined"));
           setTimeout(() => navigate(`/chat/${data.id}`), 1500);
         }
       })
@@ -69,12 +71,12 @@ export default function JoinChatPage() {
             <p className="text-slate-500 text-sm">
               Скопируйте полную ссылку и откройте её в браузере — вы вернётесь на эту страницу, и вступление произойдёт автоматически.
             </p>
-            <Link to="/dashboard" className="inline-block text-blue-600 hover:underline text-sm font-medium">
+            <Link to="/chats" className="inline-block text-blue-600 hover:underline text-sm font-medium">
               ← Вернуться в чаты
             </Link>
           </div>
         ) : status === "loading" ? (
-          <p className="text-slate-600">Загрузка…</p>
+          <p className="text-slate-600">{t("common.loading")}</p>
         ) : status === "joined" || status === "pending" ? (
           <p className="text-green-600">{message}</p>
         ) : status === "error" ? (

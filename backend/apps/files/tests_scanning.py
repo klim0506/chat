@@ -185,9 +185,10 @@ class OptimizeAfterScanTest(TestCase):
                 subdir.mkdir(parents=True, exist_ok=True)
                 file_path = subdir / "large.jpg"
 
-                # Create a large JPEG image (> 250 KB) using PIL
+                # Create a large JPEG image (> 250 KB) using PIL with random noise
                 from PIL import Image
-                img = Image.new("RGB", (3000, 2000), color="red")
+                raw = os.urandom(3000 * 2000 * 3)
+                img = Image.frombytes("RGB", (3000, 2000), raw)
                 img.save(str(file_path), format="JPEG", quality=95)
                 original_size = file_path.stat().st_size
                 self.assertGreater(original_size, 250 * 1024, "Test image should be > 250KB")

@@ -12,7 +12,7 @@
 
 ## Бэкенд
 - [ ] Добавить уникальный индекс в БД для username (без учёта регистра) и тест отката миграции.
-- [ ] Добавить задачу очистки хранилища idempotency-ключей для платежей и реферальных событий.
+- [ ] Добавить задачу очистки хранилища idempotency-ключей для платежей и реферальных событий, которые уже не нужны для работы поддержки (старше 30 дней).
 - [ ] Добавить экспорт метрик rate-limit (Prometheus/OpenTelemetry) для auth и join-by-link эндпоинтов.
 - [x] Добавить очередь антивирусной проверки медиа до публикации файла пользователям.
   > **Реализовано:** Celery-задача `scan_uploaded_file()` в `backend/apps/files/tasks.py`. Модель `FileAttachment` расширена полями `scan_status` (pending/clean/infected/error), `scanned_at`, `scan_details` (миграция `0002`). Файлы недоступны пользователям до получения статуса `CLEAN`. Базовая детекция EICAR-сигнатуры, архитектура расширяема до ClamAV. После успешной проверки запускается `optimize_uploaded_image()` для оптимизации изображений.
@@ -29,12 +29,10 @@
 - [ ] Стикеры + GIF-поиск: интеграция Giphy/Tenor, панель в инпуте рядом с emoji-picker.
 - [ ] Прогрессивная загрузка медиа: blur-placeholder → полноразмерное изображение (как Telegram).
 - [ ] Разделители дат в ленте сообщений + плавающая дата при скролле (sticky date header).
-- [x] Анимированные Lottie-реакции: статичные emoji заменены на Lottie-стикеры (анимация один раз при появлении, loop в пикере).
-  > **Реализовано:** Компонент `AnimatedReaction`, маппинг 15 эмодзи → Lottie JSON в `frontend/public/animations/reactions/`, кэширование JSON, fallback на unicode при ошибке. Пикеры (hover + mobile) и пузырьки под сообщениями — всё анимировано.
+- [ ] Анимированные Lottie-реакции: статичные emoji заменены на Lottie-стикеры (анимация один раз при появлении, loop в пикере).
 - [ ] Анимированные emoji: при отправке одного emoji показывать крупную анимацию в чате.
 - [ ] Emoji-подсказки при вводе: «:thu» → предложение :thumbsup: (autocomplete).
 - [ ] Автовоспроизведение GIF/коротких видео инлайн (без клика).
-- [ ] Компактный / пузырьковый режимы отображения сообщений (выбор в настройках).
 
 ### Навигация и управление
 - [ ] Папки/табы чатов (по аналогии с Telegram): «Все», «Личные», «Группы», «Непрочитанные», пользовательские фильтры.
@@ -46,7 +44,7 @@
   > **Реализовано:** Двухзонный drop в `ChatPage.tsx` — верхняя зона отправляет как файл, нижняя — как изображение с превью. Визуальная обратная связь оверлеем при перетаскивании, валидация размера (лимит 0.5 ГБ), поддержка множественных файлов. **Вставка из буфера (Ctrl+V):** обработчик `handlePaste` на contentEditable-инпуте извлекает файлы из `clipboardData.files`, проверяет размер и передаёт в `FilePreviewModal` — тот же конвейер, что и drag & drop / кнопка прикрепления. Обычная текстовая вставка не затрагивается.
 - [x] Scroll-to-unread: при открытии чата автоматически прокручивать к первому непрочитанному, показывая разделитель «Новые сообщения».
   > **Реализовано:** Загрузка данных чата (`chatsApi.get`) и сообщений (`storeLoadMessages`) координируется через `Promise.all` — решение о точке прокрутки принимается только когда доступны и `chat.unread_count`, и массив сообщений. Если `unread_count > 0`, вычисляется набор `initialUnreadIds` (с клампингом `Math.min(unread, msgs.length)`) и устанавливается до прокрутки, чтобы React отрисовал разделитель «Непрочитанные сообщения» (`data-unread-line`) в том же цикле. Затем через двойной `requestAnimationFrame` выполняется `scrollIntoView({ block: 'start' })` к разделителю с небольшим отступом вверх (-12px) для визуального комфорта. Если разделитель не найден в DOM — fallback на `scrollToBottomInstant()`. Для чатов без непрочитанных — прокрутка вниз как раньше. `IntersectionObserver` на sentinel-элементах отслеживает просмотр непрочитанных; когда все `initialUnreadIds` попали в viewport — вызывается `markRead()` и разделитель скрывается.
-- [ ] Кнопка «↓ N new messages» при получении новых сообщений, если пользователь скроллил вверх.
+- [x] Кнопка «↓ N new messages» при получении новых сообщений, если пользователь скроллил вверх.
 
 ### Звук и уведомления
 - [ ] Звуки уведомлений: отправка, получение, упоминание (с возможностью отключить).
@@ -54,10 +52,10 @@
 - [ ] Счётчик непрочитанных в favicon/title вкладки браузера (badge).
 
 ### Профиль и медиа
-- [ ] Панель профиля пользователя: bio, общие чаты, галерея общих медиа / файлов / ссылок.
-- [ ] Shared Media галерея внутри чата: вкладки «Медиа», «Файлы», «Ссылки», «Голосовые».
-- [ ] «Избранное» (Saved Messages): личный чат-закладка для сохранённых сообщений.
-- [ ] Кастомный фон чата: выбор из набора или загрузка пользовательского изображения.
+- [x] Панель профиля пользователя: bio, общие чаты, галерея общих медиа / файлов / ссылок.
+- [x] Shared Media галерея внутри чата: вкладки «Медиа», «Файлы», «Ссылки», «Голосовые».
+- [x] «Избранное» (Saved Messages): личный чат-закладка для сохранённых сообщений.
+- [x] Кастомный фон чата: выбор из набора или загрузка пользовательского изображения.
 
 ### Платформа и доступность
 - [ ] PWA: manifest.json, service worker, push-уведомления, установка на рабочий стол.
@@ -78,6 +76,30 @@
 - [ ] Самоудаляющиеся сообщения (TTL): таймер на сообщение или авто-удаление всего чата через N дней.
 - [ ] Polls / голосования в чатах: одиночный/множественный выбор, анонимные, quiz-режим.
 - [ ] Описание группы с rich-text (Markdown) и ссылками.
+
+## Производительность и оптимизация
+
+### Фронтенд
+- [x] Code Splitting: `React.lazy()` для всех маршрутов в `App.tsx` + `manualChunks` в `vite.config.ts` (vendor-react, vendor-crypto, vendor-markdown, vendor-lottie, vendor-zustand).
+- [x] `React.memo` на `MessageBubble` в `ChatPage.tsx` — предотвращает ре-рендер всех пузырьков при обновлении одного сообщения.
+- [ ] Декомпозиция `ChatPage.tsx` (~6000 строк): разбить на `ChatHeader`, `MessageList`, `MessageInput`, `ChatInfoPanel` и т.д. Каждый компонент подписывается только на свой срез стора через селекторы Zustand.
+- [ ] Улучшить виртуализацию: снизить `VIRTUALIZATION_THRESHOLD` с 120 до 40–60, рассмотреть `@tanstack/react-virtual` для точного измерения переменной высоты строк через `ResizeObserver`.
+- [x] Курсорная пагинация сообщений: бэкенд отдаёт по 50 (limit/before/X-Has-More), фронт автоматически подгружает старые при скролле вверх (IntersectionObserver + сохранение scrollTop).
+- [ ] Предзагрузка аватаров в списке чатов через `<link rel="preload">`.
+- [ ] Анализ бандла через `vite-bundle-visualizer` — выявить и устранить неожиданные зависимости.
+
+### Бэкенд
+- [x] N+1 в `ChatSerializer`: аннотация `_members_count` (Count в SQL), Prefetch `_prefetched_last_message` для превью, `get_other_member` итерирует prefetch'нутые данные.
+- [x] Курсорная пагинация для списка сообщений в `MessageListCreateView`: параметры `before`/`limit`, заголовок `X-Has-More`, `CORS_EXPOSE_HEADERS`.
+- [ ] Добавить `GZipMiddleware` в `MIDDLEWARE` (после `SecurityMiddleware`). Для production — сжатие на уровне nginx.
+- [ ] Установить `CONN_MAX_AGE = 600` для persistent DB connections (критично при WebSocket-нагрузке).
+- [ ] Добавить составные индексы в БД:
+  - `Message`: `(chat, -created_at)`, `(chat, is_deleted, -created_at)`, `(sender, -created_at)`.
+  - `ChatMember`: `(user, status)`, `(chat, status)`.
+- [ ] Кэширование в Redis: результаты поиска пользователей (5–10 сек), количество участников чата (инвалидировать при join/leave).
+- [ ] WebSocket: группировать `group_send` через `asyncio.gather()`, использовать `only()` для минимизации полей, уменьшить payload (отправлять только изменившиеся поля).
+- [ ] Оптимизация `_other_members_read()` в `ChatSerializer`: кэшировать результат на время сериализации одного чата (вызывается 3 раза: pinned_message, pinned_messages, my_pinned_messages).
+- [ ] Заменить `.count()` на `.exists()` там, где нужна булева проверка (views.py: ~10 мест).
 
 ## Telegram-Level план
 - [x] Offline-first в чатах: локальный кэш диалогов/медиа + очередь отправки при оффлайне с авто-sync после reconnect.
@@ -187,7 +209,7 @@
 
 **Файлы:** `frontend/src/lib/image-compression.ts`, `frontend/src/workers/image-compression.worker.ts`
 
-- [ ] **[A]** Unit-тест: изображение 4000×3000 → на выходе ≤ 1920px по длинной стороне.
+- [x] **[A]** Unit-тест: изображение 4000×3000 → на выходе ≤ 1920px по длинной стороне. ✅ `frontend/src/lib/__tests__/image-compression.test.ts`
 - [x] **[A]** Unit-тест: файл < 300 КБ пропускается без сжатия (passthrough). ✅ `frontend/src/lib/__tests__/image-compression.test.ts`
 - [x] **[A]** Unit-тест: выходной формат — WebP (проверить magic bytes или MIME). ✅ `frontend/src/lib/__tests__/image-compression.test.ts`
 - [ ] **[M]** Загрузить JPEG с EXIF orientation=6 (повёрнутый на 90°) — в чате отображается правильно, без поворота.
@@ -215,7 +237,7 @@
 
 **Файлы:** `backend/apps/chats/models.py` (ChatMember.pin_order), миграция `0019`
 
-- [ ] **[A]** API-тест: POST pin chat → `ChatMember.pin_order` записывается, GET chats возвращает чат в закреплённых.
+- [x] **[A]** API-тест: POST pin chat → `ChatMember.pin_order` записывается, GET chats возвращает чат в закреплённых. ✅ `backend/apps/chats/tests_pins.py` + `backend/apps/chats/tests.py`
 - [x] **[A]** API-тест: Изменить `pin_order` нескольких чатов → GET chats возвращает чаты в правильном порядке. ✅ `backend/apps/chats/tests_pins.py`
 - [x] **[A]** API-тест: Unpin chat → `pin_order = null`, чат убирается из закреплённых. ✅ `backend/apps/chats/tests_pins.py`
 - [ ] **[M]** Закрепить 3 чата на устройстве A, открыть на устройстве B — порядок совпадает.
@@ -242,7 +264,7 @@
 - [x] **[A]** Unit-тест: загрузить нормальный файл → `scan_status` переходит `pending → clean`, файл доступен. ✅ `backend/apps/files/tests_scanning.py`
 - [x] **[A]** Unit-тест: загрузить EICAR test string → `scan_status = infected`, файл заблокирован (403/404 при запросе). ✅ `backend/apps/files/tests_scanning.py`
 - [x] **[A]** Unit-тест: сканер возвращает ошибку → `scan_status = error`, файл недоступен. ✅ `backend/apps/files/tests_scanning.py`
-- [ ] **[A]** Integration-тест: после `clean` запускается `optimize_uploaded_image()` для изображений.
+- [x] **[A]** Integration-тест: после `clean` запускается `optimize_uploaded_image()` для изображений. ✅ `backend/apps/files/tests_scanning.py`
 - [ ] **[M]** Загрузить изображение в чат — файл появляется только после прохождения проверки (не мгновенно, с задержкой Celery).
 - [x] **[A]** Проверить, что `scanned_at` и `scan_details` заполняются корректно. ✅ `backend/apps/files/tests_scanning.py`
 - [x] **[A]** Проверить, что файл со статусом `pending` недоступен через API скачивания. ✅ `backend/apps/files/tests_scanning.py`
@@ -264,7 +286,7 @@
 ### 8.1 IndexedDB + stale-while-revalidate
 - [ ] **[M]** Открыть приложение → перейти в Offline (DevTools: Network → Offline) → перезагрузить — список чатов и последние сообщения отображаются из кэша.
 - [ ] **[M]** Вернуть Online — данные ревалидируются с сервера, новые сообщения появляются.
-- [ ] **[A]** Unit-тест: `AppDatabase` создаёт таблицы `chats`, `messages`, `outbox`, `syncMeta`.
+- [x] **[A]** Unit-тест: `AppDatabase` создаёт таблицы `chats`, `messages`, `outbox`, `syncMeta`. ✅ `frontend/src/lib/__tests__/db.test.ts`
 - [ ] **[M]** Application → IndexedDB в DevTools: проверить, что данные записываются после загрузки чатов.
 
 ### 8.2 Outbox-очередь
@@ -421,7 +443,7 @@
 
 ### 13.4 Multi-device
 - [ ] **[M]** Войти с двух устройств (вкладок) → E2EE-сообщения расшифровываются на обоих.
-- [ ] **[A]** API-тест: `encrypted_keys` содержит ключ для каждого зарегистрированного устройства получателя.
+- [x] **[A]** API-тест: `encrypted_keys` содержит ключ для каждого зарегистрированного устройства получателя. ✅ `backend/apps/e2ee/tests.py`
 
 ### 13.5 Safety numbers
 - [ ] **[M]** Открыть E2EE-чат → меню → «Проверить собеседника» → отображается safety number / QR.
@@ -472,10 +494,10 @@
 
 - [ ] **[M]** Настройки → установить username `test_user_1` → сохраняется.
 - [ ] **[M]** Попытка занять чужой username → ошибка «username уже занят».
-- [ ] **[A]** Unit-тест: username `Ab_123` — валиден (regex `^[A-Za-z0-9_]{3,30}$`).
-- [ ] **[A]** Unit-тест: username `ab` (2 символа) → ошибка валидации (мин. 3).
-- [ ] **[A]** Unit-тест: username `ab!cd` (спецсимвол) → ошибка валидации.
-- [ ] **[A]** Unit-тест: username с 31 символом → ошибка валидации (макс. 30).
+- [x] **[A]** Unit-тест: username `Ab_123` — валиден (regex `^[A-Za-z0-9_]{3,30}$`). ✅ `backend/apps/users/tests_username.py`
+- [x] **[A]** Unit-тест: username `ab` (2 символа) → ошибка валидации (мин. 3). ✅ `backend/apps/users/tests_username.py`
+- [x] **[A]** Unit-тест: username `ab!cd` (спецсимвол) → ошибка валидации. ✅ `backend/apps/users/tests_username.py`
+- [x] **[A]** Unit-тест: username с 31 символом → ошибка валидации (макс. 30). ✅ `backend/apps/users/tests_username.py`
 - [x] **[A]** Unit-тест: `Alice_1` и `alice_1` — оба допустимы (case-sensitive uniqueness), constraint `users_username_unique_cs`. ✅ `backend/apps/users/tests_username.py`
 - [ ] **[M]** Удалить username (null) → поле очищается, пользователь доступен по другим идентификаторам.
 
@@ -617,24 +639,24 @@
 **Файлы:** `backend/apps/users/models.py` (UserSession), `backend/apps/users/jwt_utils.py`, `backend/apps/users/auth.py`, `backend/apps/users/views.py`, `backend/apps/users/session_views.py`, `backend/apps/users/services.py`, `backend/apps/users/urls.py`, `backend/apps/chats/middleware.py`, `backend/apps/chats/consumers.py`, `frontend/src/store/auth.ts`, `frontend/src/api/client.ts`, `frontend/src/pages/MessengerPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
 
 ### 20.1 Модель UserSession и создание сессии
-- [ ] **[A]** API-тест: POST `/api/auth/verify/` с валидным OTP → в ответе JWT содержит claim `sid` (UUID).
-- [ ] **[A]** API-тест: после логина в БД создаётся `UserSession` с корректными `ip_address`, `user_agent`, `device_label`, `is_active=True`.
-- [ ] **[A]** Unit-тест: `_parse_device_label("Mozilla/5.0 ... Chrome/120.0.0.0 ... Windows NT 10.0")` → `"Chrome 120, Windows 10"`.
-- [ ] **[A]** Unit-тест: `_parse_device_label("")` → `"Unknown device"`.
-- [ ] **[A]** Unit-тест: `_get_client_ip()` корректно парсит `X-Forwarded-For` (несколько IP через запятую → первый).
+- [x] **[A]** API-тест: POST `/api/auth/verify/` с валидным OTP → в ответе JWT содержит claim `sid` (UUID). ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: после логина в БД создаётся `UserSession` с корректными `ip_address`, `user_agent`, `device_label`, `is_active=True`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** Unit-тест: `_parse_device_label("Mozilla/5.0 ... Chrome/120.0.0.0 ... Windows NT 10.0")` → `"Chrome 120, Windows 10"`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** Unit-тест: `_parse_device_label("")` → `"Unknown device"`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** Unit-тест: `_get_client_ip()` корректно парсит `X-Forwarded-For` (несколько IP через запятую → первый). ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Залогиниться → проверить в Django Admin / DB, что `UserSession` создалась с правильным device_label.
 
 ### 20.2 JWT с session_id
-- [ ] **[A]** Unit-тест: `make_access_token(user_id, session_id)` → декодированный payload содержит `"sid"`.
-- [ ] **[A]** Unit-тест: `make_refresh_token(user_id, session_id)` → payload содержит `"sid"`.
-- [ ] **[A]** Unit-тест: `make_access_token(user_id)` без session_id → payload НЕ содержит `"sid"` (backward-compatible).
+- [x] **[A]** Unit-тест: `make_access_token(user_id, session_id)` → декодированный payload содержит `"sid"`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** Unit-тест: `make_refresh_token(user_id, session_id)` → payload содержит `"sid"`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** Unit-тест: `make_access_token(user_id)` без session_id → payload НЕ содержит `"sid"` (backward-compatible). ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Декодировать JWT из ответа `/api/auth/verify/` через jwt.io → убедиться, что поле `sid` присутствует.
 
 ### 20.3 Валидация сессии (HTTP)
-- [ ] **[A]** API-тест: запрос с валидным JWT (активная сессия) → 200 OK.
-- [ ] **[A]** API-тест: деактивировать сессию в БД (`is_active=False`) → запрос с тем же JWT → 401 «Session revoked».
-- [ ] **[A]** API-тест: JWT без claim `sid` (legacy-токен) → запрос проходит успешно (backward-compatible).
-- [ ] **[A]** API-тест: `last_active` обновляется при запросах (с троттлингом ~5 мин, проверить, что первый запрос обновляет).
+- [x] **[A]** API-тест: запрос с валидным JWT (активная сессия) → 200 OK. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: деактивировать сессию в БД (`is_active=False`) → запрос с тем же JWT → 401 «Session revoked». ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: JWT без claim `sid` (legacy-токен) → запрос проходит успешно (backward-compatible). ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: `last_active` обновляется при запросах (с троттлингом ~5 мин, проверить, что первый запрос обновляет). ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Завершить сессию через Settings → попробовать обновить страницу → редирект на /auth.
 
 ### 20.4 Валидация сессии (WebSocket)
@@ -644,27 +666,27 @@
 - [ ] **[M]** Открыть мессенджер → в DevTools видно WS-подключение. Завершить сессию с другого устройства → WS разрывается.
 
 ### 20.5 Refresh token с session_id
-- [ ] **[A]** API-тест: POST `/api/auth/refresh/` с валидным refresh → новый access содержит тот же `sid`.
-- [ ] **[A]** API-тест: POST `/api/auth/refresh/` с revoked сессией → 401.
-- [ ] **[A]** API-тест: POST `/api/auth/refresh/` с legacy refresh (без `sid`) → работает (backward-compatible).
+- [x] **[A]** API-тест: POST `/api/auth/refresh/` с валидным refresh → новый access содержит тот же `sid`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: POST `/api/auth/refresh/` с revoked сессией → 401. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: POST `/api/auth/refresh/` с legacy refresh (без `sid`) → работает (backward-compatible). ✅ `backend/apps/users/tests_sessions.py`
 
 ### 20.6 API: список сессий
-- [ ] **[A]** API-тест: GET `/api/auth/sessions/` → массив активных сессий с полями `id`, `device_label`, `ip_address`, `created_at`, `last_active`, `is_current`.
-- [ ] **[A]** API-тест: одна из сессий имеет `is_current: true` (текущая), остальные `false`.
-- [ ] **[A]** API-тест: неактивные сессии (`is_active=False`) НЕ отображаются в списке.
-- [ ] **[A]** API-тест: неавторизованный запрос → 401.
+- [x] **[A]** API-тест: GET `/api/auth/sessions/` → массив активных сессий с полями `id`, `device_label`, `ip_address`, `created_at`, `last_active`, `is_current`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: одна из сессий имеет `is_current: true` (текущая), остальные `false`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: неактивные сессии (`is_active=False`) НЕ отображаются в списке. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: неавторизованный запрос → 401. ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Залогиниться с двух браузеров → GET sessions → в списке 2 записи с разными device_label.
 
 ### 20.7 API: завершение конкретной сессии
-- [ ] **[A]** API-тест: DELETE `/api/auth/sessions/<uuid>/` → 204, сессия `is_active=False`.
-- [ ] **[A]** API-тест: DELETE текущей сессии → 400 «Нельзя завершить текущую сессию».
-- [ ] **[A]** API-тест: DELETE несуществующей сессии → 404.
-- [ ] **[A]** API-тест: DELETE чужой сессии (другого пользователя) → 404.
+- [x] **[A]** API-тест: DELETE `/api/auth/sessions/<uuid>/` → 204, сессия `is_active=False`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: DELETE текущей сессии → 400 «Нельзя завершить текущую сессию». ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: DELETE несуществующей сессии → 404. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: DELETE чужой сессии (другого пользователя) → 404. ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** В Settings завершить одну из сессий → она исчезает из списка.
 
 ### 20.8 API: logout all
-- [ ] **[A]** API-тест: POST `/api/auth/sessions/logout-all/` → все сессии кроме текущей деактивированы, ответ `{"terminated": N}`.
-- [ ] **[A]** API-тест: после logout-all → GET sessions возвращает только 1 (текущую).
+- [x] **[A]** API-тест: POST `/api/auth/sessions/logout-all/` → все сессии кроме текущей деактивированы, ответ `{"terminated": N}`. ✅ `backend/apps/users/tests_sessions.py`
+- [x] **[A]** API-тест: после logout-all → GET sessions возвращает только 1 (текущую). ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Залогиниться с 3 браузеров → «Завершить все» → 2 из 3 сессий завершены, текущая остаётся.
 
 ### 20.9 WebSocket: force_logout
@@ -680,13 +702,13 @@
 - [ ] **[M]** Toast исчезает автоматически через ~8 секунд.
 
 ### 20.11 Уведомление о новом входе (SMS fallback)
-- [ ] **[A]** Integration-тест: пользователь офлайн → логин → вызывается `send_sms()` с текстом «Новый вход: {device}, {time}. Не вы? ...».
+- [x] **[A]** Integration-тест: пользователь офлайн → логин → вызывается `send_sms()` с текстом «Новый вход: {device}, {time}. Не вы? ...». ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** Закрыть все вкладки мессенджера → залогиниться с нового устройства → SMS приходит на телефон.
-- [ ] **[A]** Unit-тест: первая регистрация (`created=True`) → `notify_new_login` НЕ вызывается.
+- [x] **[A]** Unit-тест: первая регистрация (`created=True`) → `notify_new_login` НЕ вызывается. ✅ `backend/apps/users/tests_sessions.py`
 
 ### 20.12 Фронтенд: auth store
-- [ ] **[A]** Unit-тест: `setTokens(access, refresh)` → `sessionId` извлекается из JWT payload (`sid`).
-- [ ] **[A]** Unit-тест: `clearTokens()` → `sessionId = null`.
+- [x] **[A]** Unit-тест: `setTokens(access, refresh)` → `sessionId` извлекается из JWT payload (`sid`). ✅ `frontend/src/store/__tests__/auth.test.ts`
+- [x] **[A]** Unit-тест: `clearTokens()` → `sessionId = null`. ✅ `frontend/src/store/__tests__/auth.test.ts`
 - [ ] **[M]** В DevTools → React DevTools → `useAuthStore` → проверить, что `sessionId` не null после логина.
 
 ### 20.13 Фронтенд: UI «Активные сессии» в SettingsPage
@@ -702,5 +724,59 @@
 
 ### 20.14 Backward-compatibility
 - [ ] **[M]** Существующие пользователи с токенами без `sid` — продолжают работать после деплоя (не разлогиниваются).
-- [ ] **[A]** API-тест: legacy-токен (без `sid`) → запросы проходят, сессий в списке 0 (нет привязки).
+- [x] **[A]** API-тест: legacy-токен (без `sid`) → запросы проходят, сессий в списке 0 (нет привязки). ✅ `backend/apps/users/tests_sessions.py`
 - [ ] **[M]** После re-login — новый токен содержит `sid`, сессия появляется в списке.
+
+---
+
+## 21. Юридические документы (Legal pages)
+
+**Файлы:** `frontend/src/components/LegalMarkdown.tsx`, `frontend/src/lib/legal.ts`, `frontend/src/content/legal/*.md`
+
+**Инфраструктура:** 8 markdown-файлов (4 документа × 2 языка), компонент `LegalMarkdown` (рендер markdown → styled HTML через `react-markdown` + `remark-gfm`), утилита `applyLegalTemplate()` для подстановки токенов `{{service_name}}`, `{{operator_name}}`, `{{contact_email}}`, `{{last_updated_human}}`, `{{last_updated}}`.
+
+### 21.1 Контент и шаблонизация
+- [ ] **[A]** Unit-тест: `getLegalTokens("ru")` возвращает объект с ключами `service_name`, `operator_name`, `contact_email`, `last_updated`, `last_updated_human`.
+- [ ] **[A]** Unit-тест: `getLegalTokens("en")` — аналогичные ключи, но на английском (напр. `service_name = "Private Chats"`).
+- [ ] **[A]** Unit-тест: `applyLegalTemplate("Hello {{service_name}}", "ru")` → `"Hello Приватные чаты"`.
+- [ ] **[A]** Unit-тест: `applyLegalTemplate()` с неизвестным токеном `{{unknown_key}}` → оставляет как есть.
+- [ ] **[A]** Unit-тест: `formatLastUpdatedHuman("ru", "2026-02-13")` → строка с «13 февраля 2026 г.» (или аналогичная локализованная дата).
+- [ ] **[A]** Unit-тест: `formatLastUpdatedHuman("en", "2026-02-13")` → строка с «February 13, 2026» (или аналогичная).
+- [ ] **[A]** Unit-тест: все 8 markdown-файлов загружаются без ошибок (import/fetch не кидает исключения).
+- [ ] **[A]** Unit-тест: после `applyLegalTemplate(termsRu, "ru")` не остаётся ни одного `{{...}}` (все токены подставлены).
+- [ ] **[A]** Unit-тест: после `applyLegalTemplate(termsEn, "en")` не остаётся ни одного `{{...}}`.
+- [ ] **[A]** Unit-тест: аналогичная проверка для `privacy`, `cookies`, `payments` на обоих языках.
+
+### 21.2 Компонент LegalMarkdown — рендеринг
+- [ ] **[M]** Открыть страницу с Пользовательским соглашением (RU) → отображается заголовок `h1`, секции `h2`, списки, ссылки.
+- [ ] **[M]** Текст читабелен: шрифт не слишком мелкий, межстрочный интервал достаточный, абзацы разделены.
+- [ ] **[M]** Ссылки в документе: внешние (`mailto:`, `https://`) — открываются в новой вкладке (`target="_blank"`).
+- [ ] **[M]** Ссылки в документе: внутренние (`/...`, `#...`) — навигация без перезагрузки страницы (React Router `Link`).
+- [ ] **[M]** Таблицы (в `payments.*.md` — глоссарий) отображаются корректно: заголовки жирные, ячейки выровнены, горизонтальный скролл при узком экране.
+- [ ] **[M]** Блоки кода (если есть) — тёмный фон, моноширинный шрифт, скролл при переполнении.
+- [ ] **[M]** `<hr>` (горизонтальная линия) — отображается как тонкая серая полоса с отступами.
+
+### 21.3 Переключение языков
+- [ ] **[M]** Переключить язык в Settings на English → юридический документ показывается на английском.
+- [ ] **[M]** Переключить обратно на Русский → документ на русском.
+- [ ] **[M]** При смене языка: дата обновления локализуется (`13 февраля 2026 г.` ↔ `February 13, 2026`).
+- [ ] **[M]** Названия сервиса и оператора соответствуют текущему языку (`Приватные чаты` ↔ `Private Chats`).
+
+### 21.4 Навигация и доступность
+- [ ] **[M]** Из Settings / footer / другого UI есть ссылки на все 4 документа: Соглашение, Конфиденциальность, Cookies, Оплата.
+- [ ] **[M]** Каждый документ доступен по прямому URL (напр. `/terms`, `/privacy`, `/cookies`, `/payments`) — при вводе URL в адресную строку страница рендерится.
+- [ ] **[M]** 404 для несуществующего документа (напр. `/legal/nonexistent`) — fallback или редирект.
+- [ ] **[M]** Кнопка «назад» (или стрелка) из юридического документа возвращает на предыдущую страницу.
+
+### 21.5 Адаптивность
+- [ ] **[M]** Viewport 375×812 (мобильный): документ читабелен, заголовки не обрезаются, таблица скроллится горизонтально.
+- [ ] **[M]** Viewport 1440×900 (десктоп): контент центрирован, ширина ограничена (max-width), не растянут на весь экран.
+- [ ] **[P]** Viewport 375×812: открыть каждый из 4 документов → нет горизонтального переполнения страницы.
+
+### 21.6 Полнота документов
+- [ ] **[M]** **Пользовательское соглашение (terms)**: содержит секции — принятие условий, аккаунт и доступ, допустимое использование, модерация, подписка/оплата, ответственность, изменения.
+- [ ] **[M]** **Конфиденциальность (privacy)**: содержит секции — какие данные, цели обработки, правовые основания, передача третьим лицам, сроки хранения, безопасность, права пользователя, контакт.
+- [ ] **[M]** **Cookies (cookies)**: содержит секции — что такое cookie, зачем используются, управление, контакт.
+- [ ] **[M]** **Оплата (payments)**: содержит секции — подписка, пробный период, отмена, возвраты, виртуальные «звёзды», глоссарий, контакт.
+- [ ] **[M]** В каждом документе указана дата обновления и контактный email.
+- [ ] **[M]** Подстановленные данные соответствуют `LEGAL_CONFIG` в `legal.ts` (название сервиса, оператор, email).

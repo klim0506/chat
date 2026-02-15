@@ -149,6 +149,28 @@ body {
   user-select: none;
 }
 
+@keyframes swipe-bounce-back {
+  0%   { transform: translateX(var(--swipe-from, 60px)); }
+  45%  { transform: translateX(-8px); }
+  75%  { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+
+.swipe-bounce {
+  animation: swipe-bounce-back 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes msg-highlight-flash {
+  0%   { background-color: transparent; }
+  15%  { background-color: rgba(59, 130, 246, 0.4); }
+  100% { background-color: transparent; }
+}
+
+.msg-highlight-flash {
+  animation: msg-highlight-flash 3s ease-out;
+  border-radius: 1rem;
+}
+
 /* Context menu: bottom sheet on mobile */
 @media (max-width: 767px) {
   .context-menu-bottom-sheet {

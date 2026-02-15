@@ -60,27 +60,65 @@ def _get_other_members_read(chat, request):
 
 
 class MessageListCreateView(APIView):
+    """
+    GET: список сообщений с курсорной пагинацией.
+    Параметры:
+      - limit (int, default=50, max=100): количество сообщений
+      - before (ISO datetime): загрузить сообщения СТАРШЕ этой даты (скролл вверх)
+      - since  (ISO datetime): загрузить сообщения НОВЕЕ этой даты (delta-sync)
+    Ответ включает заголовок X-Has-More: true/false для индикации наличия более старых сообщений.
+    """
+
     def get(self, request, chat_id):
         chat, err = _check_chat_member(request, chat_id)
         if err is not None:
             return err
         other_members_read = _get_other_members_read(chat, request)
+
+        # Parse limit
+        try:
+            limit = min(int(request.query_params.get("limit", 50)), 100)
+        except (TypeError, ValueError):
+            limit = 50
+
         qs = (
             Message.objects.filter(chat=chat, is_deleted=False)
             .select_related("sender", "file", "reply_to", "reply_to__sender", "reply_to__file", "forwarded_from", "forwarded_from_chat", "sender_device")
             .prefetch_related("reactions", "files")
-            .order_by("created_at")
         )
+
+        from django.utils.dateparse import parse_datetime
+
         # Delta-sync: only return messages created after the given ISO timestamp
         since = request.query_params.get("since")
+        before = request.query_params.get("before")
+
         if since:
-            from django.utils.dateparse import parse_datetime
             since_dt = parse_datetime(since)
             if since_dt:
                 qs = qs.filter(created_at__gt=since_dt)
-        messages = qs[:100]
+            # Delta-sync всегда отдаёт от старых к новым, без пагинации
+            messages = list(qs.order_by("created_at")[:limit])
+            has_more = False
+        elif before:
+            before_dt = parse_datetime(before)
+            if before_dt:
+                qs = qs.filter(created_at__lt=before_dt)
+            # Курсорная пагинация: берём N+1 самых новых из тех, что СТАРШЕ before,
+            # чтобы определить has_more, затем отдаём в хронологическом порядке
+            messages_desc = list(qs.order_by("-created_at")[:limit + 1])
+            has_more = len(messages_desc) > limit
+            messages = list(reversed(messages_desc[:limit]))
+        else:
+            # Первая загрузка: самые свежие N сообщений
+            messages_desc = list(qs.order_by("-created_at")[:limit + 1])
+            has_more = len(messages_desc) > limit
+            messages = list(reversed(messages_desc[:limit]))
+
         context = {"request": request, "other_members_read": other_members_read}
-        return Response(MessageSerializer(messages, many=True, context=context).data)
+        response = Response(MessageSerializer(messages, many=True, context=context).data)
+        response["X-Has-More"] = "true" if has_more else "false"
+        return response
 
     def post(self, request, chat_id):
         chat, err = _check_chat_member(request, chat_id)

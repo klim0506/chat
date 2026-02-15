@@ -1,6 +1,9 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 import uuid
+
+from .fields import EncryptedTextField
 
 # Лимиты участников: базовый 10, прокачка 50 звёзд → 100, 100 звёзд → 1000
 DEFAULT_MAX_MEMBERS = 10
@@ -103,9 +106,9 @@ class ChatMember(models.Model):
         null=True, blank=True,
         help_text="Когда пользователь последний раз прочитал чат",
     )
-    is_muted = models.BooleanField(
-        default=False,
-        help_text="Беззвучный режим — уведомления не приходят",
+    muted_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Беззвучный режим до указанного времени. null = не замьючен; дата в прошлом = отключено; дата в будущем = замьючен.",
     )
 
     pin_order = models.PositiveSmallIntegerField(
@@ -114,11 +117,23 @@ class ChatMember(models.Model):
         db_index=True,
         help_text="Pinned chat order for current user (1..N). Null means not pinned.",
     )
+    is_archived = models.BooleanField(
+        default=False,
+        help_text="Чат убран в архив (скрыт из основного списка)",
+    )
+
+    @property
+    def is_muted(self) -> bool:
+        if not self.muted_until:
+            return False
+        return self.muted_until > timezone.now()
 
     class Meta:
         unique_together = ("chat", "user")
         verbose_name = "Участник чата"
         verbose_name_plural = "Участники чатов"
+
+
 class Message(models.Model):
     class MsgType(models.TextChoices):
         TEXT = "text", "Текст"
@@ -127,12 +142,14 @@ class Message(models.Model):
         VIDEO = "video", "Видео"
         VIDEO_CIRCLE = "video_circle", "Видео-кружочек"
         EMOJI = "emoji", "Эмодзи"
+        GIF = "gif", "GIF"
+        STICKER = "sticker", "Стикер"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_messages")
     msg_type = models.CharField(max_length=20, choices=MsgType.choices, default=MsgType.TEXT)
-    content = models.TextField(blank=True)
+    content = EncryptedTextField(blank=True)
     file = models.ForeignKey("files.FileAttachment", on_delete=models.SET_NULL, null=True, blank=True, related_name="messages")
     files = models.ManyToManyField(
         "files.FileAttachment", blank=True, related_name="multi_messages",
@@ -243,7 +260,7 @@ class ScheduledMessage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="scheduled_messages")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="scheduled_messages")
-    content = models.TextField()
+    content = EncryptedTextField()
     scheduled_at = models.DateTimeField(help_text="Когда отправить (или следующий запуск для рекуррентных)")
     recurrence = models.CharField(max_length=10, choices=Recurrence.choices, default=Recurrence.NONE)
     recurrence_time = models.TimeField(null=True, blank=True, help_text="Время суток для daily/weekly")

@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
+import { useTranslation } from "../lib/i18n";
 
 export default function NotFoundPage() {
+  const { t } = useTranslation();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   return (
@@ -14,10 +16,10 @@ export default function NotFoundPage() {
         </p>
         <div className="flex items-center justify-center gap-3">
           <Link
-            to={isAuthenticated ? "/dashboard" : "/"}
+            to={isAuthenticated ? "/chats" : "/"}
             className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
           >
-            {isAuthenticated ? "К чатам" : "На главную"}
+            {isAuthenticated ? t("notFound.toChats") : t("notFound.toHome")}
           </Link>
           <button
             onClick={() => window.history.back()}

@@ -13,7 +13,7 @@
     "docker:logs": "docker compose logs -f --tail=200",
     "docker:ps": "docker compose ps",
     "run": "concurrently -k -n backend,frontend -c yellow,blue \"npm run run:backend\" \"npm run run:frontend\"",
-    "run:backend": "cd backend && python manage.py migrate && python manage.py runserver 0.0.0.0:8000",
+    "run:backend": "cd backend && set DJANGO_SETTINGS_MODULE=config.settings.dev&& python manage.py migrate && python manage.py runserver 0.0.0.0:8000",
     "run:frontend": "cd frontend && npm run dev",
     "run:worker": "cd backend && celery -A config.celery worker -l info",
     "run:beat": "cd backend && celery -A config.celery beat -l info",

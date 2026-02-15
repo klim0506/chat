@@ -1,10 +1,10 @@
 import { useState, useCallback } from "react";
 
-const BLUR_PLACEHOLDER_WIDTH = 40;
+const BLUR_PLACEHOLDER_WIDTH = 280;
 
-/** URL для крошечного превью (blur placeholder). Только для http(s). */
+/** URL для крошечного превью (blur placeholder). Работает для http(s) и относительных путей. */
 function getThumbnailUrl(url: string, width: number = BLUR_PLACEHOLDER_WIDTH): string {
-  if (!url || url.startsWith("blob:") || url.startsWith("data:")) return url;
+  if (!url || url === "#" || url.startsWith("blob:") || url.startsWith("data:")) return url;
   try {
     const u = new URL(url, window.location.origin);
     u.searchParams.set("w", String(width));
@@ -26,6 +26,8 @@ export interface ProgressiveImageProps {
   onClick?: () => void;
   /** Ширина полноразмерного превью (передаётся в withPreviewParams) */
   fullWidth?: number;
+  /** Не добавлять w= к URL — загружать оригинал без сжатия (для лайтбокса) */
+  useOriginalQuality?: boolean;
   /** Оборачивающий элемент: button | a | div */
   wrapper?: "button" | "a" | "div";
   href?: string;
@@ -48,13 +50,17 @@ export function ProgressiveImage({
   wrapper = "div",
   href,
   preserveAnimation = false,
+  useOriginalQuality = false,
 }: ProgressiveImageProps) {
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
 
-  const useThumbnail = src && (src.startsWith("http://") || src.startsWith("https://"));
+  const isValidUrl = !!src && src !== "#" && (src.startsWith("http") || src.startsWith("/") || src.startsWith("blob:") || src.startsWith("data:"));
+  const useThumbnail = isValidUrl && (src.startsWith("http") || src.startsWith("/"));
+  const showErrorPlaceholder = !isValidUrl || error;
   const thumbnailUrl = useThumbnail ? getThumbnailUrl(src) : null;
   const fullUrl = useThumbnail
-    ? preserveAnimation
+    ? preserveAnimation || useOriginalQuality
       ? src
       : (() => {
           try {
@@ -68,7 +74,11 @@ export function ProgressiveImage({
         })()
     : src;
 
-  const handleLoad = useCallback(() => setLoaded(true), []);
+  const handleLoad = useCallback(() => {
+    setLoaded(true);
+    setError(false);
+  }, []);
+  const handleError = useCallback(() => setError(true), []);
 
   const imgProps = {
     alt,
@@ -77,28 +87,43 @@ export function ProgressiveImage({
   };
 
   const content = (
-    <span className="relative block overflow-hidden rounded-lg [&>img:last-child]:relative">
-      {/* Blur placeholder — крошечное превью, размытое и растянутое */}
-      {thumbnailUrl && (
-        <img
-          src={thumbnailUrl}
-          alt=""
-          aria-hidden
-          className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${
-            objectFit === "cover" ? "object-cover" : "object-contain"
-          } ${loaded ? "opacity-0" : "opacity-100"}`}
-          style={{ filter: "blur(12px)", transform: "scale(1.05)" }}
-        />
+    <span className="relative block overflow-hidden rounded-lg bg-slate-100 [&>img:last-child]:relative">
+      {showErrorPlaceholder ? (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-slate-200/80 text-slate-600 text-sm p-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+          </svg>
+          <span>Не удалось загрузить</span>
+        </div>
+      ) : (
+        <>
+          {/* Blur placeholder */}
+          {thumbnailUrl && (
+            <img
+              src={thumbnailUrl}
+              alt=""
+              aria-hidden
+              className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${
+                objectFit === "cover" ? "object-cover" : "object-contain"
+              } ${loaded ? "opacity-0" : "opacity-100"}`}
+              style={{ filter: "blur(12px)", transform: "scale(1.05)" }}
+              onError={() => {}}
+            />
+          )}
+          {/* Полноразмерное изображение */}
+          <img
+            src={fullUrl}
+            {...imgProps}
+            onLoad={handleLoad}
+            onError={handleError}
+            className={`block transition-opacity duration-300 ${
+              objectFit === "cover" ? "w-full h-full object-cover" : "object-contain"
+            } ${loaded ? "opacity-100" : "opacity-0"} ${className}`}
+          />
+        </>
       )}
-      {/* Полноразмерное изображение */}
-      <img
-        src={fullUrl}
-        {...imgProps}
-        onLoad={handleLoad}
-        className={`block transition-opacity duration-300 ${
-          objectFit === "cover" ? "w-full h-full object-cover" : "object-contain"
-        } ${loaded ? "opacity-100" : "opacity-0"} ${className}`}
-      />
     </span>
   );
 

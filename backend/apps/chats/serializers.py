@@ -20,7 +20,9 @@ class ChatSerializer(serializers.ModelSerializer):
     chat_type = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     is_muted = serializers.SerializerMethodField()
+    muted_until = serializers.SerializerMethodField()
     pin_order = serializers.SerializerMethodField()
+    is_archived = serializers.SerializerMethodField()
     is_expanded = serializers.SerializerMethodField()
     expanded_until = serializers.DateTimeField(read_only=True)
     effective_max_members = serializers.SerializerMethodField()
@@ -38,8 +40,8 @@ class ChatSerializer(serializers.ModelSerializer):
         fields = (
             "id", "title", "description", "slug", "chat_type", "is_personal", "is_favorites", "max_members", "owner",
             "members_count", "invite_link", "is_active", "created_at",
-            "unread_count", "is_muted",
-            "pin_order",
+            "unread_count", "is_muted", "muted_until",
+            "pin_order", "is_archived",
             "is_expanded", "expanded_until", "effective_max_members",
             "avatar_url", "background_url", "other_member",
             "pinned_message", "pinned_messages", "max_pins", "my_pinned_messages",
@@ -64,6 +66,10 @@ class ChatSerializer(serializers.ModelSerializer):
         return obj.effective_max_members
 
     def get_members_count(self, obj):
+        # Используем аннотацию из queryset, если доступна (избегаем N+1)
+        annotated = getattr(obj, "_members_count", None)
+        if annotated is not None:
+            return annotated
         return obj.members.filter(status=ChatMember.Status.ACTIVE).count()
 
     def get_chat_type(self, obj):
@@ -94,7 +100,6 @@ class ChatSerializer(serializers.ModelSerializer):
         if not membership:
             return 0
         if not membership.last_read_at:
-            # Никогда не открывал — все сообщения непрочитаны
             return obj.messages.filter(is_deleted=False).count()
         return obj.messages.filter(
             created_at__gt=membership.last_read_at, is_deleted=False
@@ -107,9 +112,22 @@ class ChatSerializer(serializers.ModelSerializer):
         membership = self._get_membership(obj)
         return membership.is_muted if membership else False
 
+    def get_muted_until(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        membership = self._get_membership(obj)
+        if not membership or not membership.muted_until:
+            return None
+        return membership.muted_until.isoformat()
+
     def get_pin_order(self, obj):
         membership = self._get_membership(obj)
         return membership.pin_order if membership else None
+
+    def get_is_archived(self, obj):
+        membership = self._get_membership(obj)
+        return membership.is_archived if membership else False
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -132,7 +150,12 @@ class ChatSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
-        active = list(obj.members.filter(status=ChatMember.Status.ACTIVE))
+        # Используем уже prefetch'нутые members (через members__user), чтобы избежать доп. запроса
+        try:
+            all_members = obj.members.all()
+        except Exception:
+            return None
+        active = [m for m in all_members if m.status == ChatMember.Status.ACTIVE]
         if len(active) != 2:
             return None
         other = next((m.user for m in active if m.user_id != request.user.id), None)
@@ -205,7 +228,12 @@ class ChatSerializer(serializers.ModelSerializer):
 
     def get_last_message_preview(self, obj):
         """Превью последнего сообщения для списка чатов (текст до ~60 символов или метка типа)."""
-        msg = obj.messages.filter(is_deleted=False).order_by("-created_at").first()
+        # Используем prefetch из queryset, если доступен (избегаем N+1)
+        prefetched = getattr(obj, "_prefetched_last_message", None)
+        if prefetched is not None:
+            msg = prefetched[0] if prefetched else None
+        else:
+            msg = obj.messages.filter(is_deleted=False).order_by("-created_at").first()
         if not msg:
             return ""
         if getattr(msg, "is_encrypted", False):
@@ -213,6 +241,10 @@ class ChatSerializer(serializers.ModelSerializer):
         mime = (msg.file and getattr(msg.file, "mime_type", None)) or ""
         if msg.msg_type == "audio":
             return "(голосовое)"
+        if msg.msg_type == "gif":
+            return "(GIF)"
+        if msg.msg_type == "sticker":
+            return "(стикер)"
         if msg.msg_type == "video" or msg.msg_type == "video_circle" or str(mime).startswith("video/"):
             return "(видео)"
         if str(mime).startswith("image/"):

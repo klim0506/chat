@@ -9,12 +9,16 @@ import type { Chat, Message } from "../api/client";
 export type CachedChat = Chat & {
   /** ISO timestamp of last sync from server for this chat entry */
   _cachedAt?: string;
+  /** Owner user ID — prevents cross-account cache leaks */
+  _userId?: string;
 };
 
 /** Message row cached in IndexedDB — same shape as API Message + chatId for indexing. */
 export type CachedMessage = Message & {
   /** Denormalised from Message.chat for compound-index queries */
   chatId: string;
+  /** Owner user ID — prevents cross-account cache leaks */
+  _userId?: string;
 };
 
 /** Pending message queued for send when offline. */
@@ -124,6 +128,18 @@ class AppDatabase extends Dexie {
       sessions: "id, [remoteUserId+remoteDeviceId]",
       trustedIdentities: "userId",
     });
+
+    this.version(3).stores({
+      chats: "id, _userId",
+      messages: "id, chatId, [chatId+created_at]",
+      outbox: "id, chatId, status",
+      syncMeta: "chatId",
+      identityKeyPair: "id",
+      signedPreKeys: "keyId",
+      preKeys: "keyId",
+      sessions: "id, [remoteUserId+remoteDeviceId]",
+      trustedIdentities: "userId",
+    });
   }
 }
 
@@ -134,8 +150,8 @@ export const db = new AppDatabase();
 /* ------------------------------------------------------------------ */
 
 /** Convert a Message from the API into a CachedMessage with denormalised chatId. */
-export function toCachedMessage(msg: Message): CachedMessage {
-  return { ...msg, chatId: msg.chat };
+export function toCachedMessage(msg: Message, userId?: string): CachedMessage {
+  return { ...msg, chatId: msg.chat, _userId: userId };
 }
 
 /** Generate a client-side UUID (uses crypto.randomUUID where available). */

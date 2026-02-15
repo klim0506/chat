@@ -9,7 +9,7 @@ if errorlevel 1 ( echo Ошибка миграций. & cd .. & pause & exit /b 
 cd ..
 
 echo [2/3] Запускаю бэкенд на http://127.0.0.1:8000 ...
-start "Backend" cmd /k "cd /d "%~dp0backend" && python manage.py runserver 0.0.0.0:8000"
+start "Backend" cmd /k "cd /d "%~dp0backend" && set DJANGO_SETTINGS_MODULE=config.settings.dev && python manage.py runserver 0.0.0.0:8000"
 
 echo [3/3] Запускаю фронтенд на http://localhost:5173 ...
 start "Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"

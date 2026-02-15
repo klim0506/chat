@@ -1,21 +1,26 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { chatsApi } from "../api/client";
+import { useTranslation, type TranslationKey } from "../lib/i18n";
 
 const TITLE_MAX = 50;
 const DESCRIPTION_MAX = 300;
 
-const schema = z.object({
-  title: z.string().min(1, "Введите название").max(TITLE_MAX, `Максимум ${TITLE_MAX} символов`),
-  description: z.string().max(DESCRIPTION_MAX, `Максимум ${DESCRIPTION_MAX} символов`).optional(),
-  chat_type: z.enum(["open", "closed"]),
-});
-type FormData = z.infer<typeof schema>;
+function getSchema(t: (key: TranslationKey) => string) {
+  return z.object({
+    title: z.string().min(1, t("createChat.enterName")).max(TITLE_MAX, t("createChat.maxChars").replace("%s", String(TITLE_MAX))),
+    description: z.string().max(DESCRIPTION_MAX, t("createChat.maxChars").replace("%s", String(DESCRIPTION_MAX))).optional(),
+    chat_type: z.enum(["open", "closed"]),
+  });
+}
+type FormData = z.infer<ReturnType<typeof getSchema>>;
 
 export default function CreateChatPage() {
+  const { t } = useTranslation();
+  const schema = useMemo(() => getSchema(t), [t]);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -89,13 +94,13 @@ export default function CreateChatPage() {
         msg = "";
       }
       if (status === 401) {
-        setError("Сессия истекла или вы вышли. Войдите снова.");
+        setError(t("createChat.sessionExpired"));
       } else if (status === 403 && (msg.includes("подписк") || msg.includes("subscription"))) {
-        setError("Для создания чатов нужна активная подписка. Оформите подписку в настройках.");
+        setError(t("createChat.needsSubscription"));
       } else if (!err.response) {
-        setError("Не удалось подключиться к серверу. Запустите бэкенд: в папке backend выполните python manage.py runserver 0.0.0.0:8000");
+        setError(t("createChat.serverError"));
       } else {
-        setError(msg || "Ошибка создания чата");
+        setError(msg || t("createChat.genericError"));
       }
     } finally {
       setLoading(false);
@@ -106,15 +111,15 @@ export default function CreateChatPage() {
     <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4">
-          <a href="/dashboard" className="text-slate-600 hover:text-slate-900">
-            &larr; Назад
+          <a href="/chats" className="text-slate-600 hover:text-slate-900">
+            &larr; {t("common.back")}
           </a>
         </div>
       </header>
       <main className="container mx-auto px-4 py-8 max-w-md">
-        <h1 className="text-2xl font-semibold text-slate-800 mb-2">Создать чат</h1>
+        <h1 className="text-2xl font-semibold text-slate-800 mb-2">{t("createChat.title")}</h1>
         <p className="text-slate-500 text-sm mb-6">
-          Создайте личный или групповой чат. После создания вы сможете пригласить участников по ссылке (в информации о чате).
+          {t("createChat.afterCreateHint")}
         </p>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 bg-white p-6 rounded-xl border">
           <div className="flex gap-4 items-start">
@@ -129,16 +134,16 @@ export default function CreateChatPage() {
               type="button"
               onClick={() => avatarInputRef.current?.click()}
               className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-slate-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-              title="Добавить фото"
+              title={t("createChat.addPhoto")}
             >
               {avatarPreview ? (
                 <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-slate-400 text-xs font-medium">Нет</span>
+                <span className="text-slate-400 text-xs font-medium">—</span>
               )}
             </button>
             <div className="flex-1 min-w-0">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Название чата</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.chatName")}</label>
               <input
                 type="text"
                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
@@ -154,28 +159,28 @@ export default function CreateChatPage() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Описание</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.description")}</label>
             <textarea
               className="w-full border border-slate-300 rounded-lg px-3 py-2 resize-none"
               rows={3}
               maxLength={DESCRIPTION_MAX}
-              placeholder="О чём этот чат? (необязательно)"
+              placeholder={t("createChat.descPlaceholder")}
               {...register("description")}
             />
             <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionValue.length}/{DESCRIPTION_MAX}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Тип чата</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">{t("createChat.chatType")}</label>
             <div className="flex gap-4">
               <label className="flex items-center gap-2">
-                <input type="radio" value="open" {...register("chat_type")} /> Открытый
+                <input type="radio" value="open" {...register("chat_type")} /> {t("createChat.open")}
               </label>
               <label className="flex items-center gap-2">
-                <input type="radio" value="closed" {...register("chat_type")} /> Закрытый
+                <input type="radio" value="closed" {...register("chat_type")} /> {t("createChat.closed")}
               </label>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              В открытый чат может войти любой по ссылке. В закрытый — только после одобрения.
+              {t("createChat.typeHint")}
             </p>
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -184,7 +189,7 @@ export default function CreateChatPage() {
             disabled={loading}
             className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "Создание…" : "Создать чат"}
+            {loading ? t("createChat.creating") : t("createChat.create")}
           </button>
         </form>
       </main>

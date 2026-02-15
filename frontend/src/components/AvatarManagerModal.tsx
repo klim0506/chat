@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { authApi, type UserAvatar } from "../api/client";
+import { useTranslation } from "../lib/i18n";
+import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AvatarCropConfirmModal } from "./AvatarCropConfirmModal";
 
 const MAX_AVATARS = 30;
@@ -17,6 +19,7 @@ export function AvatarManagerModal({
   onUpdated,
   onUserUpdate,
 }: AvatarManagerModalProps) {
+  const { t } = useTranslation();
   const [avatars, setAvatars] = useState<UserAvatar[]>(initialAvatars);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +55,7 @@ export function AvatarManagerModal({
       fetchAvatars();
       onUserUpdate?.();
     } catch (err: unknown) {
-      setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Не удалось добавить");
+      setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("avatar.addError"));
     } finally {
       setPendingFile(null);
       setLoading(false);
@@ -72,7 +75,7 @@ export function AvatarManagerModal({
       fetchAvatars();
       onUserUpdate?.();
     } catch {
-      setError("Не удалось удалить");
+      setError(t("avatar.deleteError"));
     } finally {
       setLoading(false);
     }
@@ -102,7 +105,7 @@ export function AvatarManagerModal({
       fetchAvatars();
       onUserUpdate?.();
     } catch {
-      setError("Не удалось изменить порядок");
+      setError(t("avatar.reorderError"));
     } finally {
       setLoading(false);
     }
@@ -120,7 +123,7 @@ export function AvatarManagerModal({
       >
         <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">Аватарки</h2>
-          <button type="button" onClick={onClose} className="p-2 text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100">
+          <button type="button" onClick={onClose} className="p-2 text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100" title={t("avatar.close")} aria-label={t("avatar.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
@@ -131,7 +134,7 @@ export function AvatarManagerModal({
             {avatars.map((a, i) => (
               <div key={a.id} className="relative group">
                 <div className="aspect-square rounded-full overflow-hidden bg-slate-100 border-2 border-slate-200">
-                  <img src={a.url} alt="" className="w-full h-full object-cover" />
+                  <img src={toSameOriginMediaUrl(a.url)} alt="" className="w-full h-full object-cover" />
                 </div>
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 bg-black/50 rounded-full transition-opacity p-1">
                   {(a.id !== "legacy") && (
@@ -141,7 +144,7 @@ export function AvatarManagerModal({
                         onClick={(e) => { e.stopPropagation(); moveUp(i); }}
                         disabled={loading || i === 0}
                         className="w-6 h-6 bg-white/90 rounded flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="Выше"
+                        title={t("avatar.moveUp")}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6"/></svg>
                       </button>
@@ -150,7 +153,7 @@ export function AvatarManagerModal({
                         onClick={(e) => { e.stopPropagation(); moveDown(i); }}
                         disabled={loading || i === avatars.length - 1}
                         className="w-6 h-6 bg-white/90 rounded flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="Ниже"
+                        title={t("avatar.moveDown")}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
                       </button>
@@ -161,7 +164,7 @@ export function AvatarManagerModal({
                     onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }}
                     disabled={loading}
                     className="w-6 h-6 bg-red-500/90 rounded flex items-center justify-center text-white hover:bg-red-600 disabled:opacity-40"
-                    title="Удалить"
+                    title={t("avatar.delete")}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
                   </button>

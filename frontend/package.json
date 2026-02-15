@@ -15,7 +15,8 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "create-fixtures": "node scripts/create-e2e-fixtures.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.0",

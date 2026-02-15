@@ -107,6 +107,33 @@ npm run run:all
 - `TELEGRAM_BOT_USERNAME`, `TELEGRAM_BOT_SECRET`
 - `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`
 
+## E2E тестирование и скрипты
+
+### Создание фикстур
+```bash
+cd frontend
+npm run create-fixtures
+```
+Создаёт `public/e2e-fixtures/`: photo1–3.png, doc.pdf, audio.webm, video.webm.
+
+### Отправка тестовых сообщений (fallback при отсутствии setInputFiles в MCP)
+```bash
+python scripts/send-test-messages.py [--api-url http://localhost:8000]
+```
+Требует в backend .env: `AUTH_DEBUG=1`, `AUTH_DEBUG_PHONES=+71234567890,+71111111111`, `AUTH_DEBUG_CODE=123456`.
+
+### Playwright E2E
+```bash
+cd frontend
+npm run test:e2e
+```
+Двухаккаунтные тесты: `E2E_USER_1_PHONE`, `E2E_USER_2_PHONE`, `E2E_USER_1_CODE`, `E2E_USER_2_CODE` (опционально).
+
+Включает тесты пригласительных ссылок:
+- вступление по ссылке (залогиненный пользователь);
+- редирект на auth при неавторизованном;
+- страница-подсказка при `/chat/join` без slug/code.
+
 ## Полезные команды
 
 ```bash

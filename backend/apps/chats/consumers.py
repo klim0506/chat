@@ -118,6 +118,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 msg.save(update_fields=["file"])
         sender = getattr(msg, "sender", None)
         display_name = (sender.display_name or sender.phone) if sender else str(user_id)
+        sender_avatar_url = sender.get_avatar_url() if sender else None
         # Build reply_to snapshot if replying
         reply_to_data = None
         if msg.reply_to_id:
@@ -146,6 +147,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "chat_id": str(msg.chat_id),
             "sender_id": str(msg.sender_id),
             "sender_display_name": display_name,
+            "sender_avatar_url": sender_avatar_url,
             "msg_type": msg.msg_type,
             "content": msg.content,
             "file_id": str(msg.file_id) if msg.file_id else None,
@@ -183,6 +185,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             result["files"] = [result["file"]]
         else:
             result["files"] = []
+        # Реакции — для единообразия с REST API (новое сообщение: пустые)
+        result["reactions"] = {}
+        result["my_reactions"] = []
         return result
 
     @database_sync_to_async
@@ -191,10 +196,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         members = ChatMember.objects.filter(
             chat_id=self.chat_id,
             status=ChatMember.Status.ACTIVE,
-        ).exclude(user_id=sender_id).select_related("chat").values_list(
-            "user_id", "is_muted", "chat__title"
-        )
-        return list(members)
+        ).exclude(user_id=sender_id).select_related("chat")
+        return [(m.user_id, m.is_muted, m.chat.title) for m in members]
 
     async def _notify_members(self, sender_id, msg):
         """Send new-message notification to personal groups of chat members."""
@@ -278,16 +281,48 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         last_seen_display = None
         if not is_online:
             last_seen_display = await self._get_last_seen_display()
+        payload = {
+            "type": "user.online.status",
+            "user_id": self.user_id,
+            "is_online": is_online,
+            "last_seen_display": last_seen_display,
+        }
         for chat_id in chat_ids:
+            await self.channel_layer.group_send(f"chat_{chat_id}", payload)
+        # Also notify DM partners via their personal notification groups
+        # so the chat list sidebar updates the green dot in real-time
+        dm_partner_ids = await self._get_dm_partner_ids()
+        for partner_id in dm_partner_ids:
             await self.channel_layer.group_send(
-                f"chat_{chat_id}",
+                f"user_{partner_id}",
                 {
-                    "type": "user.online.status",
+                    "type": "notify.online.status",
                     "user_id": self.user_id,
                     "is_online": is_online,
                     "last_seen_display": last_seen_display,
                 },
             )
+
+    @database_sync_to_async
+    def _get_dm_partner_ids(self):
+        """Get user IDs of all DM (personal chat) partners."""
+        dm_chat_ids = list(
+            ChatMember.objects.filter(
+                user_id=self.user_id,
+                status=ChatMember.Status.ACTIVE,
+                chat__is_personal=True,
+            ).values_list("chat_id", flat=True)
+        )
+        if not dm_chat_ids:
+            return []
+        return list(
+            ChatMember.objects.filter(
+                chat_id__in=dm_chat_ids,
+                status=ChatMember.Status.ACTIVE,
+            ).exclude(user_id=self.user_id)
+            .values_list("user_id", flat=True)
+            .distinct()
+        )
 
     async def receive(self, text_data):
         # Client can send mark-read events
@@ -335,6 +370,15 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             "type": "e2ee.prekeys_low",
             "device_id": event.get("device_id"),
             "remaining": event.get("remaining"),
+        }))
+
+    async def notify_online_status(self, event):
+        """Forward DM partner online/offline status to client (for chat list sidebar)."""
+        await self.send(text_data=json.dumps({
+            "type": "user.online.status",
+            "user_id": event.get("user_id"),
+            "is_online": event.get("is_online", False),
+            "last_seen_display": event.get("last_seen_display"),
         }))
 
     @database_sync_to_async

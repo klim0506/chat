@@ -6,7 +6,7 @@ USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 
 
 def normalize_username(value: str) -> str:
-    return (value or "").strip()
+    return (value or "").strip().lower()
 
 
 def validate_username_format(value: str) -> str:
@@ -76,7 +76,7 @@ class UserSerializer(serializers.ModelSerializer):
         if value is None or (isinstance(value, str) and not value.strip()):
             return value
         normalized = validate_username_format(value)
-        qs = User.objects.filter(username=normalized)
+        qs = User.objects.filter(username__iexact=normalized)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
@@ -93,13 +93,27 @@ class UserSerializer(serializers.ModelSerializer):
         request_uri = getattr(request, "build_absolute_uri", None) if request else None
         result = []
         for a in avatars:
-            url = a.image.url
+            try:
+                url = a.image.url if a.image else None
+            except (ValueError, OSError):
+                continue
+            if not url:
+                continue
             if request_uri:
-                url = request_uri(url)
+                try:
+                    url = request_uri(url)
+                except Exception:
+                    pass
             result.append({"id": a.id, "url": url, "order": a.order})
         if not result and obj.avatar:
-            url = obj.avatar.url
-            if request_uri:
-                url = request_uri(url)
-            result.append({"id": "legacy", "url": url, "order": 0})
+            try:
+                url = obj.avatar.url
+                if request_uri:
+                    try:
+                        url = request_uri(url)
+                    except Exception:
+                        pass
+                result.append({"id": "legacy", "url": url, "order": 0})
+            except (ValueError, OSError):
+                pass
         return result

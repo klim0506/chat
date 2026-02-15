@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 import secrets
 import uuid
@@ -107,20 +108,35 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def get_avatar_url(self, request=None):
         """Первая аватарка из галереи или legacy User.avatar."""
-        first = self.avatars.order_by("order").first()
-        if first and first.image:
-            url = first.image.url
-            return request.build_absolute_uri(url) if request else url
-        if self.avatar:
-            url = self.avatar.url
-            return request.build_absolute_uri(url) if request else url
+        try:
+            first = self.avatars.order_by("order").first()
+            if first and first.image:
+                url = first.image.url
+                if request and getattr(request, "build_absolute_uri", None):
+                    try:
+                        return request.build_absolute_uri(url)
+                    except Exception:
+                        return url
+                return url
+            if self.avatar:
+                url = self.avatar.url
+                if request and getattr(request, "build_absolute_uri", None):
+                    try:
+                        return request.build_absolute_uri(url)
+                    except Exception:
+                        return url
+                return url
+        except (ValueError, OSError):
+            pass  # missing file
         return None
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
             self.referral_code = _generate_referral_code()
         if self.username is not None:
-            self.username = self.username.strip() or None
+            self.username = (self.username.strip() or None)
+            if self.username:
+                self.username = self.username.lower()
         super().save(*args, **kwargs)
 
     class Meta:
@@ -128,9 +144,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name_plural = "Users"
         constraints = [
             models.UniqueConstraint(
-                fields=["username"],
+                Lower("username"),
                 condition=Q(username__isnull=False),
-                name="users_username_unique_cs",
+                name="users_username_unique_ci",
             )
         ]
 

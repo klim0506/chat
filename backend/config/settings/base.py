@@ -13,6 +13,35 @@ SECRET_KEY = env("SECRET_KEY", default="")
 
 DEBUG = env("DEBUG")
 
+# ── Шифрование сообщений (encryption at rest) ──────────────────────────────
+#
+# DEV-режим:  задайте MESSAGE_ENCRYPTION_KEY напрямую в .env
+#   MESSAGE_ENCRYPTION_KEY=<fernet-key>
+#   Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#
+# PROD-режим: ключ расшифровывается через KMS при старте (открытый ключ только в памяти)
+#   KMS_PROVIDER=aws|yandex|vault
+#   MESSAGE_ENCRYPTION_KEY_ENCRYPTED=<base64 зашифрованного DEK>
+#   + настройки конкретного провайдера (KMS_AWS_*, KMS_YANDEX_*, KMS_VAULT_*)
+#
+MESSAGE_ENCRYPTION_KEY = env("MESSAGE_ENCRYPTION_KEY", default="")
+KMS_PROVIDER = env("KMS_PROVIDER", default="")
+MESSAGE_ENCRYPTION_KEY_ENCRYPTED = env("MESSAGE_ENCRYPTION_KEY_ENCRYPTED", default="")
+
+# AWS KMS
+KMS_AWS_KEY_ID = env("KMS_AWS_KEY_ID", default="")
+KMS_AWS_REGION = env("KMS_AWS_REGION", default="us-east-1")
+
+# Yandex Cloud KMS
+KMS_YANDEX_KEY_ID = env("KMS_YANDEX_KEY_ID", default="")
+KMS_YANDEX_IAM_TOKEN = env("KMS_YANDEX_IAM_TOKEN", default="")
+
+# HashiCorp Vault Transit
+KMS_VAULT_ADDR = env("KMS_VAULT_ADDR", default="")
+KMS_VAULT_TOKEN = env("KMS_VAULT_TOKEN", default="")
+KMS_VAULT_KEY_NAME = env("KMS_VAULT_KEY_NAME", default="")
+KMS_VAULT_MOUNT = env("KMS_VAULT_MOUNT", default="transit")
+
 # Р РµР¶РёРј РѕС‚Р»Р°РґРєРё Р°РІС‚РѕСЂРёР·Р°С†РёРё: РґР»СЏ РЅРѕРјРµСЂРѕРІ РёР· AUTH_DEBUG_PHONES РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ SMS,
 # РІС…РѕРґ РїРѕ РєРѕРґСѓ РёР· AUTH_DEBUG_CODE. РўРѕР»СЊРєРѕ РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚РєРё.
 AUTH_DEBUG = env.bool("AUTH_DEBUG", default=False)
@@ -133,9 +162,12 @@ REST_FRAMEWORK = {
 if DEBUG:
     REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["auth_send_code"] = env("AUTH_SEND_CODE_RATE", default="1000/min")
 
+TENOR_API_KEY = env("TENOR_API_KEY", default="")
+
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173", "http://127.0.0.1:5173"])
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
+CORS_EXPOSE_HEADERS = ["X-Has-More"]
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 if not DEBUG:

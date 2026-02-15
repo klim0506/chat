@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ChatViewSet, JoinChatView, ChatMemberViewSet, CreateOrGetDMView
+from .views import ChatViewSet, JoinChatView, JoinChatPreviewView, ChatMemberViewSet, CreateOrGetDMView
 from .message_views import MessageListCreateView, MessageDetailView, MessageReactionView, MessagePinView, ForwardMessageView
 from .scheduled_views import ScheduledMessageListCreateView, ScheduledMessageDetailView
 
@@ -8,6 +8,7 @@ router = DefaultRouter()
 router.register(r"", ChatViewSet, basename="chat")
 
 urlpatterns = [
+    path("join/preview/", JoinChatPreviewView.as_view(), name="chat-join-preview"),
     path("join/", JoinChatView.as_view(), name="chat-join"),
     path("dm/", CreateOrGetDMView.as_view(), name="chat-dm"),
     path("", include(router.urls)),

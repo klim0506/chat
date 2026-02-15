@@ -30,7 +30,7 @@ function requireEnv(): void {
 }
 
 async function loginByCode(api: APIRequestContext, phone: string, code: string): Promise<AuthResult> {
-  await api.post(`${API_BASE}/auth/send-code/`, { data: { phone, method: "sms" } });
+  await api.post(`${API_BASE}/auth/send-code/`, { data: { phone } });
   const verify = await api.post(`${API_BASE}/auth/verify-code/`, { data: { phone, code } });
   expect(verify.ok()).toBeTruthy();
   return (await verify.json()) as AuthResult;
@@ -39,6 +39,14 @@ async function loginByCode(api: APIRequestContext, phone: string, code: string):
 async function authApiPost<T>(api: APIRequestContext, token: string, path: string, data: unknown): Promise<T> {
   const res = await api.post(`${API_BASE}${path}`, {
     data,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()) as T;
+}
+
+async function authApiGet<T>(api: APIRequestContext, token: string, path: string): Promise<T> {
+  const res = await api.get(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(res.ok()).toBeTruthy();
@@ -87,6 +95,40 @@ async function topChatTitles(page: Page, count = 3): Promise<string[]> {
 }
 
 test.describe("Real-time communication between two accounts", () => {
+  test("reactions and read status work between two users", async ({ browser, request }) => {
+    requireEnv();
+    const a = await loginByCode(request, USER_1_PHONE!, USER_1_CODE);
+    const b = await loginByCode(request, USER_2_PHONE!, USER_2_CODE);
+
+    const nonce = Date.now();
+    const dm = await authApiPost<ChatDto>(request, a.access, "/chats/dm/", { user_id: b.user.id });
+    const msgRes = await authApiPost<{ id: string }>(request, a.access, `/chats/${dm.id}/messages/`, {
+      msg_type: "text",
+      content: `Reaction-${nonce}`,
+    });
+    const msgId = msgRes.id;
+
+    // User B adds reaction (use allowed emoji from REACTION_EMOJIS)
+    const emoji = "❤️";
+    await authApiPost(request, b.access, `/chats/${dm.id}/messages/${msgId}/reactions/`, { emoji });
+    const msgWithReaction = await authApiGet<{ reactions: Record<string, number> }>(
+      request,
+      a.access,
+      `/chats/${dm.id}/messages/${msgId}/`
+    );
+    expect(msgWithReaction.reactions).toBeDefined();
+    expect(msgWithReaction.reactions[emoji]).toBe(1);
+
+    // User B marks chat as read
+    await authApiPost(request, b.access, `/chats/${dm.id}/mark-read/`, {});
+    const msgAfterRead = await authApiGet<{ read_status: string }>(
+      request,
+      a.access,
+      `/chats/${dm.id}/messages/${msgId}/`
+    );
+    expect(msgAfterRead.read_status).toBe("read");
+  });
+
   test("new chat appears, unread badge updates, pinned order remains stable", async ({ browser, request }) => {
     requireEnv();
     const a = await loginByCode(request, USER_1_PHONE!, USER_1_CODE);
@@ -146,6 +188,75 @@ test.describe("Real-time communication between two accounts", () => {
 
     await ctxA.close();
     await ctxB.close();
+  });
+
+  test("invite link: User B joins via browser navigation", async ({ browser, request }) => {
+    requireEnv();
+    const a = await loginByCode(request, USER_1_PHONE!, USER_1_CODE);
+    const b = await loginByCode(request, USER_2_PHONE!, USER_2_CODE);
+
+    const nonce = Date.now();
+    const openChat = await authApiPost<ChatDto>(request, a.access, "/chats/", {
+      title: `E2E-Invite-${nonce}`,
+      chat_type: "open",
+      description: "invite link test",
+    });
+    expect(openChat.invite_link).toBeTruthy();
+    const invite = parseInvite(openChat.invite_link!);
+
+    const ctxB = await browser.newContext();
+    const pageB = await seedSession(ctxB, b);
+
+    // User B navigates to invite URL (frontend path)
+    const joinPath = `/chat/join/${encodeURIComponent(invite.slug)}?code=${encodeURIComponent(invite.code)}`;
+    await pageB.goto(joinPath);
+    await pageB.waitForLoadState("networkidle");
+
+    // JoinChatPage auto-joins; expect success message
+    await expect(
+      pageB.locator("text=Вы вступили в чат").or(pageB.locator("text=Вы уже в чате"))
+    ).toBeVisible({ timeout: 8000 });
+
+    // Redirect to chat
+    await expect(pageB).toHaveURL(new RegExp(`/chat/${openChat.id}`), { timeout: 5000 });
+
+    // Chat page loaded (message area or chat header)
+    const inChat = pageB.locator("[contenteditable=true]").or(pageB.locator("[data-message-id]"));
+    await expect(inChat.first()).toBeVisible({ timeout: 5000 });
+
+    await ctxB.close();
+  });
+
+  test("invite link without slug/code shows help", async ({ page }) => {
+    await page.goto("/chat/join");
+    await page.waitForLoadState("networkidle");
+    await expect(
+      page.locator("text=пригласительной ссылке").or(page.locator("text=Вступление в чат"))
+    ).toBeVisible();
+  });
+
+  test("invite link redirects unauthenticated user to auth", async ({ browser, request }) => {
+    requireEnv();
+    const a = await loginByCode(request, USER_1_PHONE!, USER_1_CODE);
+    const nonce = Date.now();
+    const openChat = await authApiPost<ChatDto>(request, a.access, "/chats/", {
+      title: `E2E-Invite-Auth-${nonce}`,
+      chat_type: "open",
+      description: "invite auth redirect",
+    });
+    const invite = parseInvite(openChat.invite_link!);
+
+    // Fresh context, no session
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto(`/chat/join/${encodeURIComponent(invite.slug)}?code=${encodeURIComponent(invite.code)}`);
+    await page.waitForLoadState("networkidle");
+
+    // Should redirect to auth with next param
+    await expect(page).toHaveURL(/\/auth/);
+    expect(page.url()).toContain("next=");
+
+    await ctx.close();
   });
 });
 

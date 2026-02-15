@@ -1,6 +1,6 @@
 import { useEffect } from "react";
+import { useLang, t } from "../lib/i18n";
 
-const DEFAULT_TITLE = "Приватные чаты";
 const DEFAULT_DESCRIPTION = "Свой мессенджер без VPN и блокировок. Чаты на 2–300 человек, файлы до 0,5 ГБ. Регистрация по SMS, личный чат бесплатно.";
 
 /**
@@ -8,6 +8,8 @@ const DEFAULT_DESCRIPTION = "Свой мессенджер без VPN и бло�
  * При размонтировании возвращает дефолтные title/description.
  */
 export function useDocumentHead(title: string, description?: string, setCanonical = true) {
+  const lang = useLang();
+  const defaultTitle = t("landing.brand", lang);
   useEffect(() => {
     const prevTitle = document.title;
     document.title = title;
@@ -36,7 +38,7 @@ export function useDocumentHead(title: string, description?: string, setCanonica
     }
 
     return () => {
-      document.title = prevTitle || DEFAULT_TITLE;
+      document.title = prevTitle || defaultTitle;
       if (meta && description) meta.setAttribute("content", prevContent || DEFAULT_DESCRIPTION);
       if (linkCanonical && setCanonical) linkCanonical.setAttribute("href", prevHref || window.location.origin + "/");
     };

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, Fragment } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, memo, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { useParams, Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -10,9 +10,11 @@ import { usePreferencesStore } from "../store/preferences";
 import { useMessagesStore, normalizeMessage as storeNormalizeMessage } from "../store/messages";
 import { useOutboxStore } from "../store/outbox";
 import { useNetworkStore } from "../store/network";
+import { useChatListStore } from "../store/chatList";
 import { getAvatarInitials } from "../lib/avatar-initials";
-import { compressImageForUpload } from "../lib/image-compression";
+// import { compressImageForUpload } from "../lib/image-compression";
 import { showMessageNotification } from "../lib/notifications";
+import { playSound } from "../lib/sounds";
 import { AvatarEditorModal } from "../components/AvatarEditorModal";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 import { FilePreviewModal } from "../components/FilePreviewModal";
@@ -23,10 +25,13 @@ import { db } from "../lib/db";
 import { prepareEncryptedMessage } from "../lib/e2ee/prepare-message";
 import { decryptFromDevice } from "../lib/e2ee/session-manager";
 import * as e2eeKeyStorage from "../lib/e2ee/key-storage";
-import { computeSafetyNumber, formatSafetyNumber } from "../lib/e2ee/safety-number";
 import { useCachedMediaUrl } from "../hooks/useCachedMediaUrl";
+import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AnimatedReaction } from "../components/AnimatedReaction";
+import { StickerGifPanel } from "../components/StickerGifPanel";
 import { REACTIONS } from "../lib/reaction-animations";
+import { switchLayout } from "../lib/layout-switcher";
+import { useTranslation, formatLastSeenI18n, formatDateLabelI18n, formatMembersCount, getLocale, getWeekdays, t as tI18n } from "../lib/i18n";
 // Фон по умолчанию для всех чатов (файл из public или алиас в vite.config)
 import defaultChatBackground from "@default-chat-bg";
 
@@ -39,13 +44,6 @@ const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
 const VIRTUAL_OVERSCAN = 10;
 
-/** Эмодзи для вставки в текст сообщения (пикер у поля ввода) */
-const INPUT_EMOJIS = [
-  "😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊", "😇", "🙂", "😉", "😍", "🥰", "😘", "😋",
-  "😎", "🤩", "🥳", "😢", "😭", "😤", "😡", "🤔", "😶", "🙄", "❤️", "🧡", "💛", "💚", "💙",
-  "💜", "🖤", "🤍", "💕", "💪", "👍", "👎", "👏", "🙌", "🤝", "🙏", "🔥", "✨", "💫", "🌟",
-  "🎉", "🎊", "✅", "❌", "⚠️", "💯",
-];
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean;
@@ -94,30 +92,7 @@ function isSameDay(isoA: string | undefined, isoB: string | undefined): boolean 
 
 /** Форматирование даты для разделителей: «Сегодня», «Вчера» или «15 февраля [2025]» */
 function formatDateLabel(iso: string | undefined, lang: "en" | "ru"): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const thisYear = today.getFullYear();
-
-  const day = d.getDate();
-  const month = d.getMonth();
-  const year = d.getFullYear();
-
-  const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-  const isYesterday = day === yesterday.getDate() && month === yesterday.getMonth() && year === yesterday.getFullYear();
-
-  if (lang === "ru") {
-    if (isToday) return "Сегодня";
-    if (isYesterday) return "Вчера";
-    const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-    return year !== thisYear ? `${day} ${months[month]} ${year}` : `${day} ${months[month]}`;
-  }
-  if (isToday) return "Today";
-  if (isYesterday) return "Yesterday";
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  return year !== thisYear ? `${months[month]} ${day}, ${year}` : `${months[month]} ${day}`;
+  return formatDateLabelI18n(iso, lang);
 }
 
 function copyToClipboard(text: string): Promise<void> {
@@ -133,9 +108,14 @@ function copyToClipboard(text: string): Promise<void> {
   return Promise.resolve();
 }
 
-/** Сжатие изображения для экономии памяти (скрепка / нижняя зона). Качество умеренное, без сильной потери. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Сжатие изображения для экономии памяти (скрепка / нижняя зона). Пока отключено — храним в полном размере. */
 async function compressImage(file: File): Promise<File> {
-  return compressImageForUpload(file, { maxDim: 2560, quality: 0.92 });
+  // return compressImageForUpload(file, { maxDim: 2560, quality: 0.92 });
+  return file;
 }
 
 /** Убирает Markdown-разметку для вставки в Word и т.п.: жирный, курсив, ссылки [текст](url)→текст, код `...`, заголовки #. */
@@ -159,22 +139,8 @@ function stripMarkdown(text: string): string {
 }
 
 /** Форматирование «был в сети» */
-function formatLastSeen(value: string | null | undefined): string {
-  if (!value) return "";
-  if (value === "recently") return "был(а) в сети недавно";
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return "";
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "был(а) в сети только что";
-  if (diffMin < 60) return `был(а) в сети ${diffMin} мин. назад`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `был(а) в сети ${diffH} ч. назад`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD === 1) return "был(а) в сети вчера";
-  if (diffD < 7) return `был(а) в сети ${diffD} дн. назад`;
-  return `был(а) в сети ${d.toLocaleDateString("ru-RU")}`;
+function formatLastSeen(value: string | null | undefined, lang: "en" | "ru"): string {
+  return formatLastSeenI18n(value, lang);
 }
 
 function getSenderId(msg: Message): string {
@@ -361,6 +327,51 @@ function splitContentWithMentions(content: string): { type: "text" | "mention"; 
   return segments.length > 0 ? segments : [{ type: "text", value: content }];
 }
 
+/**
+ * Создаёт обработчики touch-событий для long-press на мобильных устройствах.
+ * callback вызывается после удержания ≥ delay мс без перемещения пальца.
+ * firedRef.current будет true, если long-press сработал (позволяет подавить onClick).
+ */
+function makeLongPressHandlers(
+  timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
+  firedRef: React.MutableRefObject<boolean>,
+  callback: (e: React.TouchEvent) => void,
+  delay = 500,
+) {
+  const startRef: { x: number; y: number }[] = [];
+  return {
+    onTouchStart(e: React.TouchEvent) {
+      if (e.touches.length !== 1) return;
+      firedRef.current = false;
+      const touch = e.touches[0];
+      startRef[0] = { x: touch.clientX, y: touch.clientY };
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        firedRef.current = true;
+        if (navigator.vibrate) navigator.vibrate(15);
+        callback(e);
+      }, delay);
+    },
+    onTouchMove(e: React.TouchEvent) {
+      if (!timerRef.current || e.touches.length !== 1) return;
+      const start = startRef[0];
+      if (!start) return;
+      const dx = Math.abs(e.touches[0].clientX - start.x);
+      const dy = Math.abs(e.touches[0].clientY - start.y);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    },
+    onTouchEnd() {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    },
+    onTouchCancel() {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    },
+  };
+}
+
 /** Рендер текста сообщения с поддержкой Markdown и упоминаний @... */
 function MarkdownMessageContent({
   content,
@@ -457,13 +468,26 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
    ================================================================ */
 
 /** Превью сообщения для списка чатов (совпадает с логикой бэкенда). */
-function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } | null }): string {
+function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } | null }, lang?: "en" | "ru"): string {
   if (!msg) return "";
   const mime = (msg.file && msg.file.mime_type) || "";
+  if (lang !== undefined) {
+    if (msg.msg_type === "audio") return tI18n("common.voice", lang);
+    if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return tI18n("common.video", lang);
+    if (String(mime).startsWith("image/")) return tI18n("common.photo", lang);
+    if (msg.msg_type === "file") return tI18n("common.fileMsg", lang);
+    if (msg.msg_type === "gif") return "(GIF)";
+    if (msg.msg_type === "sticker") return tI18n("common.stickerMsg", lang);
+    const text = (msg.content || "").trim();
+    if (!text) return tI18n("common.message", lang);
+    return text.length > 60 ? text.slice(0, 60) + "…" : text;
+  }
   if (msg.msg_type === "audio") return "(голосовое)";
   if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
   if (String(mime).startsWith("image/")) return "(фото)";
   if (msg.msg_type === "file") return "(файл)";
+  if (msg.msg_type === "gif") return "(GIF)";
+  if (msg.msg_type === "sticker") return "(стикер)";
   const text = (msg.content || "").trim();
   if (!text) return "(сообщение)";
   return text.length > 60 ? text.slice(0, 60) + "…" : text;
@@ -523,65 +547,6 @@ function InlineAutoplayVideo({ src, className = "" }: { src: string; className?:
   );
 }
 
-function SafetyNumberButton({ otherUserId, otherUserName, myUserId }: { otherUserId: string; otherUserName: string; myUserId: string }) {
-  const [show, setShow] = useState(false);
-  const [code, setCode] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const identity = await e2eeKeyStorage.getIdentityKeyPair();
-      const { e2eeApi } = await import("../api/client");
-      const { data } = await e2eeApi.getKeyBundle(otherUserId);
-      const bundle = data.devices?.[0];
-      if (!identity || !bundle) {
-        setCode(null);
-        return;
-      }
-      const num = computeSafetyNumber(
-        (await import("../lib/e2ee/crypto")).toBase64(identity.publicKey),
-        myUserId,
-        bundle.identity_key,
-        otherUserId
-      );
-      setCode(num);
-    } catch {
-      setCode(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [otherUserId, myUserId]);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => { setShow(true); load(); }}
-        className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium"
-      >
-        Проверить шифрование
-      </button>
-      {show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShow(false)}>
-          <div className="bg-white rounded-xl p-6 max-w-sm mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-slate-800 mb-2">Код верификации с {otherUserName}</h3>
-            {loading ? (
-              <p className="text-sm text-slate-500">Загрузка…</p>
-            ) : code ? (
-              <p className="text-sm font-mono text-slate-800 break-all">{formatSafetyNumber(code)}</p>
-            ) : (
-              <p className="text-sm text-slate-500">Не удалось вычислить код.</p>
-            )}
-            <p className="text-xs text-slate-500 mt-2">Сравните этот код при личной встрече.</p>
-            <button type="button" onClick={() => setShow(false)} className="mt-4 w-full py-2 bg-slate-100 rounded-lg text-sm font-medium hover:bg-slate-200">
-              Закрыть
-            </button>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
 function normalizeInviteLink(link: string): string {
   if (!link) return link;
   try {
@@ -595,7 +560,7 @@ function normalizeInviteLink(link: string): string {
   }
 }
 
-export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, onChatLeft, onOpenDmWithUserId, onMessageSent }: { chatId?: string; onBack?: () => void; onChatUpdated?: (chat: Chat) => void; onChatLeft?: (chatId: string) => void; onOpenDmWithUserId?: (userId: string) => void; onMessageSent?: (chatId: string, preview: string) => void } = {}) {
+export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, onChatLeft, onOpenDmWithUserId, onMessageSent, onNavigateToChat }: { chatId?: string; onBack?: () => void; onChatUpdated?: (chat: Chat) => void; onChatLeft?: (chatId: string) => void; onOpenDmWithUserId?: (userId: string) => void; onMessageSent?: (chatId: string, preview: string) => void; onNavigateToChat?: (chatId: string) => void } = {}) {
   const { chatId: paramChatId } = useParams<{ chatId: string }>();
   const chatId = propChatId || paramChatId;
   const token = useAuthStore((s) => s.accessToken);
@@ -603,19 +568,25 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const myUserId = currentUser?.id || "";
   const textScale = usePreferencesStore((s) => s.messageTextScale);
   const language = usePreferencesStore((s) => s.language);
+  const { t, lang } = useTranslation();
 
   const [chat, setChat] = useState<Chat | null>(null);
   const [members, setMembers] = useState<ChatMember[]>([]);
   const messages = useMessagesStore((s) => s.byChat[chatId ?? ""] ?? []);
   const storeUpsertMessage = useMessagesStore((s) => s.upsertMessage);
   const storeLoadMessages = useMessagesStore((s) => s.loadMessages);
+  const storeLoadOlderMessages = useMessagesStore((s) => s.loadOlderMessages);
   const storeUpdateMessage = useMessagesStore((s) => s.updateMessage);
+  const hasOlderMessages = useMessagesStore((s) => s.hasMoreByChat[chatId ?? ""] ?? true);
+  const loadingOlder = useMessagesStore((s) => s.loadingOlderChats[chatId ?? ""] ?? false);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [showInfo, setShowInfo] = useState(false);
+  /** User ID to show in the info panel (profile view); null = show chat info */
+  const [infoUserId, setInfoUserId] = useState<string | null>(null);
   const [usernameShake, setUsernameShake] = useState(false);
   const [mediaLinksFilesTab, setMediaLinksFilesTab] = useState<"media" | "links" | "files" | "participants">("media");
   const [copiedState, setCopiedState] = useState(false);
@@ -640,12 +611,16 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Онлайн-статусы пользователей: userId → { is_online, last_seen_display } */
   const [onlineStatus, setOnlineStatus] = useState<Record<string, { is_online: boolean; last_seen_display?: string | null }>>({});
   const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(false);
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
   const [muteLoading, setMuteLoading] = useState(false);
   const [scheduledList, setScheduledList] = useState<ScheduledMessageType[]>([]);
   const [scheduleMenuPos, setScheduleMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const [showStickerGifPanel, setShowStickerGifPanel] = useState(false);
+  const stickerGifPickerRef = useRef<HTMLDivElement>(null);
   /** Редактирование сообщения в поле ввода (для сообщений только из эмодзи) */
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [formatMenuPos, setFormatMenuPos] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
@@ -669,11 +644,22 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Линия «Непрочитанные» скрыта после того, как все initialUnreadIds прочитаны и вызван markRead */
   const [unreadLineDismissed, setUnreadLineDismissed] = useState(false);
   const sentinelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const inputEditableRef = useRef<HTMLDivElement>(null);
   const savedFormatRangeRef = useRef<Range | null>(null);
   const undoStackRef = useRef<string[]>([""]);
   const undoIndexRef = useRef(0);
+  /** Cache: ciphertext → plaintext for own sent encrypted messages (so we can display them when the WS echo arrives). */
+  const sentPlaintextCacheRef = useRef<Map<string, string>>(new Map());
   // upsertMessageChronologically is now handled by useMessagesStore.upsertMessage
+
+  /* ── Long-press refs for mobile context actions ── */
+  const lpSendRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpSendFiredRef = useRef(false);
+  const lpVoiceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpVoiceFiredRef = useRef(false);
+  const lpInputRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lpInputFiredRef = useRef(false);
 
   /** Установить и markdown-состояние, и отображение в contenteditable (при программной смене контента) */
   const setInputAndEditable = useCallback((markdown: string) => {
@@ -727,7 +713,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   };
   const handleFormatLink = () => {
     if (!formatMenuPos) return;
-    const url = window.prompt("Введите URL:", "https://");
+    const url = window.prompt(t("chat.enterUrl"), "https://");
     if (url == null) return;
     applyFormatInEditable("createLink", url);
   };
@@ -758,6 +744,38 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setInput(htmlToMarkdown(el.innerHTML));
     setTimeout(() => el.focus(), 0);
   }, [pushUndoState]);
+
+  /** Переключение раскладки EN↔RU: для выделенного текста или всего поля ввода. */
+  const handleSwitchLayout = useCallback(() => {
+    const el = inputEditableRef.current;
+    if (!el) return;
+    const sel = window.getSelection();
+    // Если есть выделение внутри поля — конвертируем только выделенный текст
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && el.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
+      const selectedText = range.toString();
+      if (selectedText) {
+        pushUndoState(htmlToMarkdown(el.innerHTML));
+        const converted = switchLayout(selectedText);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(converted));
+        // Восстановим выделение на конвертированный текст
+        sel.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(range.startContainer);
+        sel.addRange(newRange);
+        setInput(htmlToMarkdown(el.innerHTML));
+        return;
+      }
+    }
+    // Иначе — конвертируем всё содержимое
+    const md = htmlToMarkdown(el.innerHTML);
+    if (!md.trim()) return;
+    pushUndoState(md);
+    const converted = switchLayout(md);
+    setInputAndEditable(converted);
+    setTimeout(() => el.focus(), 0);
+  }, [pushUndoState, setInputAndEditable]);
 
   const [expandLoading, setExpandLoading] = useState(false);
   const [expandError, setExpandError] = useState("");
@@ -859,12 +877,24 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     };
   }, [messages, messagesScrollTop, messagesViewportHeight, virtualMeasureTick]);
 
+  const flashHighlightMessage = useCallback((anchor: Element | null) => {
+    const msgEl = anchor?.previousElementSibling as HTMLElement | null;
+    if (!msgEl) return;
+    msgEl.classList.remove("msg-highlight-flash");
+    // force reflow so re-adding the class restarts the animation
+    void msgEl.offsetWidth;
+    msgEl.classList.add("msg-highlight-flash");
+    const onEnd = () => { msgEl.classList.remove("msg-highlight-flash"); msgEl.removeEventListener("animationend", onEnd); };
+    msgEl.addEventListener("animationend", onEnd);
+  }, []);
+
   const scrollToMessageId = useCallback((messageId: string) => {
     const scrollRoot = messagesScrollRef.current;
     const anchor = document.querySelector(`[data-message-id="${messageId}"]`);
     if (anchor) {
       (anchor.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-      setShowInfo(false);
+      setTimeout(() => flashHighlightMessage(anchor), 350);
+      setShowInfo(false); setInfoUserId(null);
       return;
     }
     const idx = messageIndexById.get(messageId);
@@ -874,10 +904,11 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       requestAnimationFrame(() => {
         const delayedAnchor = document.querySelector(`[data-message-id="${messageId}"]`);
         (delayedAnchor?.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        setTimeout(() => flashHighlightMessage(delayedAnchor), 350);
       });
     }
-    setShowInfo(false);
-  }, [messageIndexById, virtualState.offsets]);
+    setShowInfo(false); setInfoUserId(null);
+  }, [messageIndexById, virtualState.offsets, flashHighlightMessage]);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const handleMessagesScroll = useCallback(() => {
@@ -910,6 +941,36 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  /* ---------- Load older messages on scroll up (pagination) ---------- */
+  useEffect(() => {
+    if (!chatId) return;
+    const sentinel = loadMoreSentinelRef.current;
+    const scrollRoot = messagesScrollRef.current;
+    if (!sentinel || !scrollRoot) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting && hasOlderMessages && !loadingOlder) {
+          // Save scroll position before prepending older messages
+          const prevScrollHeight = scrollRoot.scrollHeight;
+          storeLoadOlderMessages(chatId).then((prepended) => {
+            if (prepended.length > 0) {
+              // Restore scroll position after DOM update
+              requestAnimationFrame(() => {
+                const newScrollHeight = scrollRoot.scrollHeight;
+                scrollRoot.scrollTop += newScrollHeight - prevScrollHeight;
+              });
+            }
+          });
+        }
+      },
+      { root: scrollRoot, threshold: 0, rootMargin: "200px 0px 0px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [chatId, hasOlderMessages, loadingOlder, storeLoadOlderMessages]);
+
   /* ---------- Send text (after scrollToBottom so it can be used in deps) ---------- */
   const sendTextMessage = useCallback(async (text: string) => {
     if (!chatId || !text.trim()) return;
@@ -920,6 +981,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       const payload = { type: "chat.message" as const, msg_type: "text", content: trimmed, ...(replyId ? { reply_to: replyId } : {}) };
       if (chatWsRef.current?.isConnected()) {
         chatWsRef.current.send(payload);
+        playSound("send");
       } else if (!useNetworkStore.getState().isOnline) {
         useOutboxStore.getState().enqueue({ chatId, msgType: "text", content: trimmed });
         scrollToBottom();
@@ -927,7 +989,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         messagesApi.create(chatId, { msg_type: "text", content: trimmed, ...(replyId ? { reply_to_id: replyId } : {}) }).then((res) => {
           storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
           scrollToBottom();
-          onMessageSent?.(chatId, formatMessagePreview(res.data));
+          onMessageSent?.(chatId, formatMessagePreview(res.data, lang));
+          playSound("send");
         });
       }
       setInput("");
@@ -940,8 +1003,16 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       try {
         const encPayload = await prepareEncryptedMessage(myUserId, chat, trimmed, replyId);
         if (encPayload) {
+          // Cache plaintext so we can display it when the WS echo arrives
+          sentPlaintextCacheRef.current.set(encPayload.content, trimmed);
+          // Prevent unbounded growth: keep only last 100 entries
+          if (sentPlaintextCacheRef.current.size > 100) {
+            const first = sentPlaintextCacheRef.current.keys().next().value;
+            if (first !== undefined) sentPlaintextCacheRef.current.delete(first);
+          }
           if (chatWsRef.current?.isConnected()) {
             chatWsRef.current.send(encPayload);
+            playSound("send");
           } else if (!useNetworkStore.getState().isOnline) {
             useOutboxStore.getState().enqueue({ chatId, msgType: "text", content: trimmed });
             scrollToBottom();
@@ -954,9 +1025,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               encrypted_keys: encPayload.encrypted_keys,
               ...(replyId ? { reply_to_id: replyId } : {}),
             }).then((res) => {
-              storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
+              // Replace ciphertext with cached plaintext for display
+              const msgData = { ...res.data, content: trimmed };
+              storeUpsertMessage(chatId, storeNormalizeMessage(msgData));
               scrollToBottom();
-              onMessageSent?.(chatId, "Зашифрованное сообщение");
+              onMessageSent?.(chatId, formatMessagePreview({ content: trimmed }, lang));
+              playSound("send");
             });
           }
           setInput("");
@@ -971,6 +1045,47 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
     doSendPlain();
   }, [chatId, chat, replyToMessage, resetUndoStack, scrollToBottom, onMessageSent, storeUpsertMessage]);
+
+  const handleSelectGif = useCallback((url: string) => {
+    if (!chatId || !url) return;
+    setShowStickerGifPanel(false);
+    const replyId = replyToMessage?.id;
+    if (chatWsRef.current?.isConnected()) {
+      chatWsRef.current.send({ type: "chat.message" as const, msg_type: "gif", content: url, ...(replyId ? { reply_to: replyId } : {}) });
+      playSound("send");
+    } else if (!useNetworkStore.getState().isOnline) {
+      useOutboxStore.getState().enqueue({ chatId, msgType: "gif", content: url });
+      scrollToBottom();
+    } else {
+      messagesApi.create(chatId, { msg_type: "gif", content: url, ...(replyId ? { reply_to_id: replyId } : {}) }).then((res) => {
+        storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
+        scrollToBottom();
+        onMessageSent?.(chatId, formatMessagePreview(res.data, lang));
+        playSound("send");
+      });
+    }
+    setReplyToMessage(null);
+  }, [chatId, replyToMessage, scrollToBottom, onMessageSent, storeUpsertMessage]);
+
+  const handleSelectSticker = useCallback((path: string) => {
+    if (!chatId || !path) return;
+    setShowStickerGifPanel(false);
+    const replyId = replyToMessage?.id;
+    if (chatWsRef.current?.isConnected()) {
+      chatWsRef.current.send({ type: "chat.message" as const, msg_type: "sticker", content: path, ...(replyId ? { reply_to: replyId } : {}) });
+    } else if (!useNetworkStore.getState().isOnline) {
+      useOutboxStore.getState().enqueue({ chatId, msgType: "sticker", content: path });
+      scrollToBottom();
+    } else {
+      messagesApi.create(chatId, { msg_type: "sticker", content: path, ...(replyId ? { reply_to_id: replyId } : {}) }).then((res) => {
+        storeUpsertMessage(chatId, storeNormalizeMessage(res.data));
+        scrollToBottom();
+        onMessageSent?.(chatId, formatMessagePreview(res.data, lang));
+        playSound("send");
+      });
+    }
+    setReplyToMessage(null);
+  }, [chatId, replyToMessage, scrollToBottom, onMessageSent, storeUpsertMessage]);
 
   const [editablePlainCursor, setEditablePlainCursor] = useState({ plain: "", cursor: 0 });
   const mentionableMembers = members.filter((m) => m.status === "active" && (m.user as User).id !== myUserId);
@@ -1081,7 +1196,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
     if (ctrl && e.key === "k") {
       e.preventDefault();
-      const url = window.prompt("Введите URL:", "https://");
+      const url = window.prompt(t("chat.enterUrl"), "https://");
       if (url != null) applyFormatShortcut("createLink", url);
       return;
     }
@@ -1090,7 +1205,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       applyFormatShortcut("strikeThrough");
       return;
     }
-  }, [getInputMarkdown, sendTextMessage, applyFormatShortcut, setInputAndEditable, mentionPicker, mentionFiltered, insertMention]);
+    // Ctrl+T — переключить раскладку EN↔RU
+    if (ctrl && e.key === "t") {
+      e.preventDefault();
+      handleSwitchLayout();
+      return;
+    }
+  }, [getInputMarkdown, sendTextMessage, applyFormatShortcut, setInputAndEditable, handleSwitchLayout, mentionPicker, mentionFiltered, insertMention]);
 
   /* ---------- Request notification permission on mount ---------- */
   useEffect(() => {
@@ -1116,6 +1237,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const markRead = useCallback(() => {
     if (!chatId) return;
     chatsApi.markRead(chatId).catch(() => {});
+    useChatListStore.getState().setUnread(chatId, 0);
     // Also notify via notification WS
     notifMgrRef.current?.send({ type: "mark_read", chat_id: chatId });
   }, [chatId]);
@@ -1217,6 +1339,16 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     chatsApi.get(chatId).then((res) => setChat(res.data));
   }, [chatId]);
 
+  /* ---------- Auto-focus message input when chat loads ---------- */
+  useEffect(() => {
+    if (!loading && chat && inputEditableRef.current) {
+      // Small delay to let the DOM settle after render
+      requestAnimationFrame(() => {
+        inputEditableRef.current?.focus();
+      });
+    }
+  }, [loading, chat]);
+
   const canInviteToGroup = chat && !chat.is_personal && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"));
 
   useEffect(() => {
@@ -1298,17 +1430,18 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     return () => window.removeEventListener("mousedown", close);
   }, [scheduleMenuPos]);
 
-  /* ---------- Close emoji picker on click outside ---------- */
+  /* ---------- Close sticker-gif picker on click outside ---------- */
   useEffect(() => {
-    if (!showEmojiPicker) return;
+    if (!showStickerGifPanel) return;
     const handleClick = (e: MouseEvent) => {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
-        setShowEmojiPicker(false);
+      const inStickerGif = stickerGifPickerRef.current?.contains(e.target as Node);
+      if (!inStickerGif) {
+        setShowStickerGifPanel(false);
       }
     };
     window.addEventListener("mousedown", handleClick);
     return () => window.removeEventListener("mousedown", handleClick);
-  }, [showEmojiPicker]);
+  }, [showStickerGifPanel]);
 
   /* ---------- Close info (three-dots) menu on click outside ---------- */
   useEffect(() => {
@@ -1341,6 +1474,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
   /* ---------- Chat WebSocket (with auto-reconnect + delta sync) ---------- */
   const chatWsRef = useRef<WsManager | null>(null);
+  /* Stable refs for callbacks inside WS effect — prevents reconnect on re-render */
+  const scrollToBottomRef = useRef(scrollToBottom);  scrollToBottomRef.current = scrollToBottom;
+  const markReadRef = useRef(markRead);              markReadRef.current = markRead;
+  const isScrolledToBottomRef = useRef(isScrolledToBottom); isScrolledToBottomRef.current = isScrolledToBottom;
+  const onMessageSentRef = useRef(onMessageSent);    onMessageSentRef.current = onMessageSent;
+  const storeUpsertMessageRef = useRef(storeUpsertMessage); storeUpsertMessageRef.current = storeUpsertMessage;
+  const storeUpdateMessageRef = useRef(storeUpdateMessage); storeUpdateMessageRef.current = storeUpdateMessage;
   useEffect(() => {
     if (!chatId || !token) return;
     const wsUrl = buildWsUrl(`/ws/chat/${chatId}/`);
@@ -1354,9 +1494,20 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           meta.then((m) => {
             if (m?.lastMessageAt) {
               messagesApi.list(chatId, { since: m.lastMessageAt }).then((res) => {
-                const freshMsgs = (res.data as Message[]).map(storeNormalizeMessage);
+                const freshMsgs = (res.data).map(storeNormalizeMessage);
+                const existingMsgs = useMessagesStore.getState().byChat[chatId] ?? [];
+                const existingMap = new Map(existingMsgs.map((em) => [em.id, em]));
                 for (const msg of freshMsgs) {
-                  storeUpsertMessage(chatId, msg);
+                  if (msg.is_encrypted) {
+                    if (existingMap.has(msg.id)) {
+                      // Preserve decrypted content from cache
+                      storeUpsertMessageRef.current(chatId, { ...msg, content: existingMap.get(msg.id)!.content });
+                    } else {
+                      storeUpsertMessageRef.current(chatId, { ...msg, content: t("common.encryptedMessage") });
+                    }
+                  } else {
+                    storeUpsertMessageRef.current(chatId, msg);
+                  }
                 }
               }).catch(() => {});
             }
@@ -1398,7 +1549,28 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           raw = { ...raw, content: "[нет ключа для этого устройства]" };
         }
       } else if (isEncrypted && getSenderId(raw as Message) === myUserId) {
-        raw = { ...raw, content: (raw.content as string) || "[зашифровано]" };
+        // Look up cached plaintext for our own sent encrypted messages
+        const ciphertext = raw.content as string;
+        const cachedPlaintext = sentPlaintextCacheRef.current.get(ciphertext);
+        if (cachedPlaintext !== undefined) {
+          raw = { ...raw, content: cachedPlaintext };
+          sentPlaintextCacheRef.current.delete(ciphertext);
+        } else {
+          raw = { ...raw, content: t("common.encryptedMessage") };
+        }
+      }
+      // Build a proper sender object from flat WS fields so MessageBubble can render avatar
+      if (!raw.sender && raw.sender_id) {
+        raw = {
+          ...raw,
+          sender: {
+            id: raw.sender_id as string,
+            display_name: (raw.sender_display_name as string) || "",
+            phone: "",
+            avatar: null,
+            avatar_url: (raw.sender_avatar_url as string) || null,
+          },
+        };
       }
       const msg: Message = normalizeMessage({
         ...raw,
@@ -1411,18 +1583,41 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       const isMine = getSenderId(raw as Message) === myUserId;
       const atBottom = isScrolledToBottom();
       storeUpsertMessage(chatId, msg);
-      if (isMine) onMessageSent?.(chatId, formatMessagePreview(raw as Message));
+      if (isMine) onMessageSent?.(chatId, formatMessagePreview(raw as Message, lang));
       if (isMine || atBottom) setTimeout(scrollToBottom, 80);
       if (!document.hidden) markRead();
+      if (!isMine && !isMutedRef.current) {
+        const content = (raw.content as string) || "";
+        const me = useAuthStore.getState().user;
+        const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
+        const isMention = identifiers.some((id) => {
+          const re = new RegExp(`@${escapeRegex(id)}\\b`, "i");
+          return re.test(content);
+        });
+        playSound(isMention ? "mention" : "receive");
+      }
     });
 
     mgr.on("chat.message.updated", (data: unknown) => {
       const d = data as { message?: Record<string, unknown> };
       if (!d.message) return;
-      const raw = d.message;
+      let raw = d.message;
       if (raw.is_deleted) {
-        storeUpdateMessage(chatId, raw.id as string, { is_deleted: true });
+        storeUpdateMessageRef.current(chatId, raw.id as string, { is_deleted: true });
       } else {
+        // Build a proper sender object from flat WS fields
+        if (!raw.sender && raw.sender_id) {
+          raw = {
+            ...raw,
+            sender: {
+              id: raw.sender_id as string,
+              display_name: (raw.sender_display_name as string) || "",
+              phone: "",
+              avatar: null,
+              avatar_url: (raw.sender_avatar_url as string) || null,
+            },
+          };
+        }
         const updated: Message = storeNormalizeMessage({
           ...raw,
           id: raw.id as string,
@@ -1431,7 +1626,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           my_reactions: (raw.my_reactions as string[]) ?? ((raw as { my_reaction?: string }).my_reaction ? [(raw as { my_reaction: string }).my_reaction] : []),
           read_status: getSenderId(raw as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
         } as Message & { my_reaction?: string });
-        storeUpsertMessage(chatId, updated);
+        storeUpsertMessageRef.current(chatId, updated);
       }
     });
 
@@ -1444,7 +1639,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         for (const m of currentMsgs) {
           if (getSenderId(m) !== myUserId) continue;
           if (new Date(m.created_at).getTime() <= readAt && m.read_status !== "read") {
-            storeUpdateMessage(chatId, m.id, { read_status: "read" as const });
+            storeUpdateMessageRef.current(chatId, m.id, { read_status: "read" as const });
           }
         }
       }
@@ -1463,6 +1658,16 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           ...prev,
           [d.user_id!]: { is_online: !!d.is_online, last_seen_display: d.last_seen_display },
         }));
+        // Also propagate to chat list store so the sidebar green dot updates
+        const allChats = useChatListStore.getState().chats;
+        const updateChat = useChatListStore.getState().updateChat;
+        for (const c of allChats) {
+          if (c.is_personal && c.other_member?.id === d.user_id) {
+            updateChat(c.id, {
+              other_member: { ...c.other_member, is_online: !!d.is_online },
+            } as Partial<Chat>);
+          }
+        }
       }
     });
 
@@ -1473,10 +1678,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       wsRef.current = null;
       mgr.dispose();
     };
-  }, [chatId, token, scrollToBottom, myUserId, markRead, isScrolledToBottom, onMessageSent, storeUpsertMessage, storeUpdateMessage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, token, myUserId]);
 
   /* ---------- Global notification WebSocket (with auto-reconnect) ---------- */
   const notifMgrRef = useRef<WsManager | null>(null);
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
   useEffect(() => {
     if (!token) return;
     const wsUrl = buildWsUrl("/ws/notifications/");
@@ -1490,10 +1698,15 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     mgr.on("new_message", (data: unknown) => {
       const d = data as { chat_id?: string; chat_title?: string; message?: Record<string, unknown>; is_muted?: boolean };
       if (d.is_muted) return;
-      const inThisChat = d.chat_id === chatId;
+      const inThisChat = d.chat_id === chatIdRef.current;
       const tabVisible = !document.hidden;
       if (tabVisible && inThisChat) return;
-      showMessageNotification(d.chat_title || "Новое сообщение", d.message || {});
+      const content = (d.message?.content as string) || "";
+      const me = useAuthStore.getState().user;
+      const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
+      const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
+      playSound(isMention ? "mention" : "receive");
+      showMessageNotification(d.chat_title || t("dashboard.newMessage"), d.message || {});
     });
 
     mgr.connect();
@@ -1503,11 +1716,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       notifWsRef.current = null;
       mgr.dispose();
     };
-  }, [token, chatId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   /* ---------- Send file (REST) ---------- */
   const showFileTooBig = (name?: string) => {
-    setUploadError(name ? `Файл «${name}» больше 0,5 ГБ.` : "Файл больше 0,5 ГБ.");
+    setUploadError(name ? t("chat.fileTooLargeNamed").replace("%s", name) : t("chat.fileTooLarge"));
     setTimeout(() => setUploadError(""), 5000);
   };
   /** Отправка одного файла (аудио, видео и т.п.) */
@@ -1533,13 +1747,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       if (msgRes?.data?.id) {
         storeUpsertMessage(chatId, storeNormalizeMessage(msgRes.data));
         scrollToBottom();
-        onMessageSent?.(chatId, formatMessagePreview(msgRes.data));
+        onMessageSent?.(chatId, formatMessagePreview(msgRes.data, lang));
+        playSound("send");
       } else {
-        setUploadError("Сервер вернул некорректный ответ");
+        setUploadError(t("chat.serverBadResponse"));
         setTimeout(() => setUploadError(""), 4000);
       }
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка загрузки файла";
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("chat.uploadError");
       setUploadError(msg);
       setTimeout(() => setUploadError(""), 4000);
     } finally {
@@ -1572,13 +1787,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       if (msgRes?.data?.id) {
         storeUpsertMessage(chatId, storeNormalizeMessage(msgRes.data));
         scrollToBottom();
-        onMessageSent?.(chatId, formatMessagePreview(msgRes.data));
+        onMessageSent?.(chatId, formatMessagePreview(msgRes.data, lang));
+        playSound("send");
       } else {
-        setUploadError("Сервер вернул некорректный ответ");
+        setUploadError(t("chat.serverBadResponse"));
         setTimeout(() => setUploadError(""), 4000);
       }
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка загрузки файлов";
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("chat.uploadErrorMultiple");
       setUploadError(msg);
       setTimeout(() => setUploadError(""), 4000);
     } finally {
@@ -1611,12 +1827,21 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     const el = inputEditableRef.current;
     if (!el) return;
     pushUndoState(htmlToMarkdown(el.innerHTML));
+    el.focus();
     const sel = window.getSelection();
     if (sel && sel.rangeCount) {
       const r = sel.getRangeAt(0);
+      if (!el.contains(r.commonAncestorContainer)) {
+        r.setStart(el, 0);
+        r.setEnd(el, 0);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
       r.deleteContents();
       r.insertNode(document.createTextNode(emoji));
       r.collapse(false);
+    } else {
+      el.appendChild(document.createTextNode(emoji));
     }
     const md = htmlToMarkdown(el.innerHTML);
     setInput(md);
@@ -1706,7 +1931,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (files.length === 0) return;
     const tooBig = files.find((f) => f.size > MAX_FILE_SIZE_BYTES);
     if (tooBig) {
-      setUploadError(`Файл «${tooBig.name}» больше 0,5 ГБ.`);
+      setUploadError(t("chat.fileTooLargeNamed").replace("%s", tooBig.name));
       setTimeout(() => setUploadError(""), 5000);
       return;
     }
@@ -1714,19 +1939,39 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setPendingFilesAsFileOnly(zone === "top");
   };
 
+  /** Paste: обработать вставку изображений из буфера, остальное — по умолчанию */
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items?.length) return;
+    const files = Array.from(items)
+      .filter((it) => it.kind === "file")
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => f != null);
+    if (files.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const tooBig = files.find((f) => f.size > MAX_FILE_SIZE_BYTES);
+    if (tooBig) {
+      showFileTooBig(tooBig.name);
+      return;
+    }
+    setPendingFilesForPreview(files);
+    setPendingFilesAsFileOnly(false);
+  };
+
   const sendTyping = () => {
     chatWsRef.current?.send({ type: "chat.typing" });
   };
 
-  /* ---------- Mute toggle ---------- */
-  const handleToggleMute = async () => {
+  /* ---------- Mute (duration: 1h, 3h, 8h, forever, off) ---------- */
+  const handleMute = async (duration: "1h" | "3h" | "8h" | "forever" | "off") => {
     if (!chatId) return;
     setMuteLoading(true);
     try {
-      const { data } = await chatsApi.toggleMute(chatId);
+      const { data } = await chatsApi.muteChat(chatId, duration);
       setIsMuted(data.is_muted);
-      if (chat) setChat({ ...chat, is_muted: data.is_muted });
-      onChatUpdated?.({ id: chatId, is_muted: data.is_muted } as Chat);
+      if (chat) setChat({ ...chat, is_muted: data.is_muted, muted_until: data.muted_until });
+      onChatUpdated?.({ id: chatId, is_muted: data.is_muted, muted_until: data.muted_until } as Chat);
     } catch { /* */ }
     finally { setMuteLoading(false); }
   };
@@ -1748,7 +1993,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       }
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setExpandError(detail || "Не удалось расширить чат");
+      setExpandError(detail || t("chat.expandError"));
     } finally {
       setExpandLoading(false);
     }
@@ -1759,7 +2004,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (!chatId || !chat) return;
     setSavingChat(true);
     try {
-      const { data: updated } = await chatsApi.update(chatId, { description: descriptionDraft });
+      const cleanedDescription = descriptionDraft.replace(/\n{2,}/g, "\n").trim().slice(0, 100);
+      const { data: updated } = await chatsApi.update(chatId, { description: cleanedDescription });
       setChat({ ...chat, description: updated.description });
       setEditingDescription(false);
     } catch { /* ignore */ } finally { setSavingChat(false); }
@@ -1781,7 +2027,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     const file = e.target.files?.[0];
     if (!file || !chatId || !chat) return;
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setUploadError("Файл аватара больше 0,5 ГБ.");
+      setUploadError(t("chat.avatarTooLarge"));
       setTimeout(() => setUploadError(""), 5000);
       if (avatarInputRef.current) avatarInputRef.current.value = "";
       return;
@@ -1834,7 +2080,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     const file = e.target.files?.[0];
     if (!file || !chatId || !chat) return;
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setUploadError("Файл фона больше 0,5 ГБ.");
+      setUploadError(t("chat.bgTooLarge"));
       setTimeout(() => setUploadError(""), 5000);
       if (backgroundInputRef.current) backgroundInputRef.current.value = "";
       return;
@@ -1882,33 +2128,33 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         setInviteSearchResults([]);
       })
       .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
-        setInviteError(err?.response?.data?.detail || "Не удалось пригласить");
+        setInviteError(err?.response?.data?.detail || t("chat.inviteError"));
       })
       .finally(() => setInviteLoading(false));
   };
 
   const handleLeaveChat = () => {
-    if (!chatId || !window.confirm("Вы уверены, что хотите выйти из чата?")) return;
+    if (!chatId || !window.confirm(t("chat.leaveChat"))) return;
     setLeaveLoading(true);
     setLeaveError("");
     chatsApi
       .leave(chatId)
       .then(() => { onChatLeft?.(chatId); onBack?.(); })
       .catch((e: { response?: { data?: { detail?: string } } }) => {
-        setLeaveError(e?.response?.data?.detail || "Не удалось выйти из чата");
+        setLeaveError(e?.response?.data?.detail || t("chat.leaveError"));
       })
       .finally(() => setLeaveLoading(false));
   };
 
   const handleDeleteChat = () => {
-    if (!chatId || !window.confirm("Удалить чат безвозвратно? Все сообщения будут недоступны.")) return;
+    if (!chatId || !window.confirm(t("chat.deleteChat"))) return;
     setDeleteLoading(true);
     setDeleteError("");
     chatsApi
       .delete(chatId)
       .then(() => { onChatLeft?.(chatId); onBack?.(); })
       .catch((e: { response?: { data?: { detail?: string } } }) => {
-        setDeleteError(e?.response?.data?.detail || "Не удалось удалить чат");
+        setDeleteError(e?.response?.data?.detail || t("chat.deleteError"));
       })
       .finally(() => setDeleteLoading(false));
   };
@@ -1923,7 +2169,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       if (navigator.permissions) {
         const perm = await navigator.permissions.query({ name: "microphone" as PermissionName });
         if (perm.state === "denied") {
-          setUploadError("Доступ к микрофону запрещён. Разрешите в настройках браузера.");
+          setUploadError(t("chat.micAccessDenied"));
           setTimeout(() => setUploadError(""), 5000);
           return;
         }
@@ -1997,7 +2243,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         const ext = mimeType.includes("webm") ? "webm" : "mp4";
         const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: mimeType });
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          setUploadError("Голосовое сообщение больше 0,5 ГБ.");
+          setUploadError(t("chat.voiceTooLarge"));
           setTimeout(() => setUploadError(""), 5000);
           return;
         }
@@ -2033,13 +2279,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           if (msgRes?.data?.id) {
             storeUpsertMessage(chatId!, storeNormalizeMessage(msgRes.data));
             scrollToBottom();
-            onMessageSent?.(chatId!, formatMessagePreview(msgRes.data));
+            onMessageSent?.(chatId!, formatMessagePreview(msgRes.data, lang));
+            playSound("send");
           } else {
-            setUploadError("Сервер вернул некорректный ответ");
+            setUploadError(t("chat.serverBadResponse"));
             setTimeout(() => setUploadError(""), 4000);
           }
         } catch (err: unknown) {
-          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка загрузки";
+          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("chat.uploadError");
           setUploadError(msg);
           setTimeout(() => setUploadError(""), 4000);
         } finally {
@@ -2052,7 +2299,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
     } catch {
-      setUploadError("Не удалось получить доступ к микрофону. Разрешите в настройках браузера.");
+      setUploadError(t("chat.micAccessFailed"));
       setTimeout(() => setUploadError(""), 5000);
     }
   };
@@ -2104,7 +2351,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const startAiListening = useCallback(() => {
     const Ctor = getSpeechRecognition();
     if (!Ctor) {
-      setUploadError("Распознавание речи не поддерживается в этом браузере (нужен Chrome или Edge).");
+      setUploadError(t("chat.speechNotSupported"));
       setTimeout(() => setUploadError(""), 5000);
       return;
     }
@@ -2129,7 +2376,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     };
     recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
       if (event.error === "no-speech" || event.error === "aborted") return;
-      setUploadError(`Ошибка распознавания: ${event.error}`);
+      setUploadError(`${t("common.error")}: ${event.error}`);
       setTimeout(() => setUploadError(""), 4000);
       setAiListening(false);
     };
@@ -2143,7 +2390,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       setAiListening(true);
       setUploadError("");
     } catch {
-      setUploadError("Не удалось запустить распознавание речи.");
+      setUploadError(t("chat.speechStartError"));
       setTimeout(() => setUploadError(""), 5000);
     }
   }, []);
@@ -2179,6 +2426,28 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (aiListening) stopAiListening();
   }, [recording, aiListening, stopRecording, stopAiListening]);
 
+  /* ── Long-press handlers (mobile) for send / voice / input ── */
+  const lpSendHandlers = useMemo(() => makeLongPressHandlers(lpSendRef, lpSendFiredRef, (e) => {
+    const btn = (e.target as HTMLElement).closest("button");
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setScheduleMenuPos({ x: rect.left, y: rect.top });
+  }), []);
+
+  const lpVoiceHandlers = useMemo(() => makeLongPressHandlers(lpVoiceRef, lpVoiceFiredRef, () => {
+    toggleVoiceMode();
+  }), [toggleVoiceMode]);
+
+  const lpInputHandlers = useMemo(() => makeLongPressHandlers(lpInputRef, lpInputFiredRef, (e) => {
+    const sel = window.getSelection();
+    savedFormatRangeRef.current = (sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null) ?? null;
+    setScheduleMenuPos(null);
+    const touch = e.touches?.[0] || e.changedTouches?.[0];
+    if (touch) {
+      setFormatMenuPos({ x: touch.clientX, y: touch.clientY, start: 0, end: 0 });
+    }
+  }), []);
+
   /* ---------- Video recording ---------- */
   const MAX_VIDEO_DURATION = 60; // seconds
 
@@ -2187,7 +2456,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       if (navigator.permissions) {
         const camPerm = await navigator.permissions.query({ name: "camera" as PermissionName });
         if (camPerm.state === "denied") {
-          setUploadError("Доступ к камере запрещён. Разрешите в настройках браузера.");
+          setUploadError(t("chat.cameraAccessDenied"));
           setTimeout(() => setUploadError(""), 5000);
           return;
         }
@@ -2230,7 +2499,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       videoRecorderRef.current = rec;
       videoTimerRef.current = setInterval(() => setVideoRecordingTime((t) => t + 1), 1000);
     } catch {
-      setUploadError("Не удалось получить доступ к камере. Разрешите в настройках браузера.");
+      setUploadError(t("chat.cameraAccessFailed"));
       setTimeout(() => setUploadError(""), 5000);
     }
   };
@@ -2295,7 +2564,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /* ---------- Loading ---------- */
   if (loading || !chat) return (
     <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-50 w-full">
-      <p className="text-slate-500">{loading ? "Загрузка…" : "Чат не найден."}</p>
+      <p className="text-slate-500">{loading ? t("common.loading") : t("chat.loadError")}</p>
     </div>
   );
 
@@ -2311,12 +2580,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
       {/* Модалка просмотра одного изображения — затемнение + картинка по центру */}
-      {singleImagePreview && (
+      {singleImagePreview && createPortal(
         <SingleImageModal
           url={singleImagePreview.url}
           fileName={singleImagePreview.fileName}
           onClose={() => setSingleImagePreview(null)}
-        />
+        />,
+        document.body,
       )}
       {/* Forward modal */}
       {forwardModalMessage && chatId && (
@@ -2324,6 +2594,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           message={forwardModalMessage}
           sourceChatId={chatId}
           onClose={() => setForwardModalMessage(null)}
+          onForwardComplete={(targetIds) => { if (targetIds[0] && onNavigateToChat) onNavigateToChat(targetIds[0]); }}
         />
       )}
       {pendingFilesForPreview && (
@@ -2387,17 +2658,21 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               type="button"
               onClick={onBack}
               className="md:hidden shrink-0 p-2 -ml-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-              title="К списку чатов"
-              aria-label="К списку чатов"
+              title={t("chat.toChatList")}
+              aria-label={t("chat.toChatList")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             </button>
           )}
-          <button type="button" onClick={() => setShowInfo(!showInfo)} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
+          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
             <div className="flex items-center gap-2">
               <div className="relative shrink-0">
-                {(chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
-                  <img src={chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!} alt="" className="w-9 h-9 rounded-full object-cover" />
+                {chat.is_favorites ? (
+                  <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
+                  <img src={toSameOriginMediaUrl(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!)} alt="" className="w-9 h-9 rounded-full object-cover" />
                 ) : (
                   <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
                     {chat.is_personal && chat.other_member
@@ -2410,15 +2685,15 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 )}
               </div>
           <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
-                {chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
+                {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
                 {chat.is_personal && (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" title="Сквозное шифрование">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" title={t("chat.e2ee")}>
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                 )}
               </h1>
               {isMuted && (
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label="Беззвучный">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label={t("dashboard.muted")}>
                   <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
               )}
@@ -2427,26 +2702,105 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               {chat.is_personal && chat.other_member ? (
                 typing ? (
                   <span className="text-slate-400 italic">{typing} печатает…</span>
-                ) : onlineStatus[chat.other_member.id]?.is_online ? (
-                  <span className="text-green-500">в сети</span>
                 ) : (
-                  formatLastSeen(onlineStatus[chat.other_member.id]?.last_seen_display) || "Личный"
+                  <>
+                    <span>{t("chat.personal")}</span>
+                    {onlineStatus[chat.other_member.id]?.is_online ? (
+                      <span className="text-green-500 ml-1">· {t("chat.online")}</span>
+                    ) : onlineStatus[chat.other_member.id]?.last_seen_display ? (
+                      <span className="ml-1">· {formatLastSeen(onlineStatus[chat.other_member.id].last_seen_display, lang)}</span>
+                    ) : null}
+                  </>
                 )
               ) : (
                 (() => {
                   const onlineCount = members.filter((m) => onlineStatus[m.user.id]?.is_online && m.user.id !== myUserId).length + (onlineStatus[myUserId]?.is_online ? 1 : 0);
-                  const membersLabel = `${chat.members_count} участник${chat.members_count === 1 ? "" : chat.members_count < 5 ? "а" : "ов"}`;
-                  const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} в сети` : "";
-                  const typeLabel = chat.chat_type != null ? ` · ${chat.chat_type === "open" ? "Открытый" : "Закрытый"}` : "";
+                  const membersLabel = formatMembersCount(chat.members_count, lang);
+                  const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} ${t("chat.online")}` : "";
+                  const typeLabel = chat.chat_type != null ? ` · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}` : "";
                   return membersLabel + onlineLabel + typeLabel;
                 })()
               )}
             </p>
           </button>
-          <button type="button" onClick={() => setShowInfo(!showInfo)} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title="Информация о чате">
+          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
       </header>
+
+        {/* ── Unified pinned messages bar (always visible, not scrollable) ── */}
+        {(() => {
+          const allPinned = chat?.pinned_messages ?? (chat?.pinned_message ? [chat.pinned_message] : []);
+          const myPinned = chat?.my_pinned_messages ?? [];
+          // Deduplicate: personal pins that are also pinned for all → show only once
+          const allPinnedIds = new Set(allPinned.map((m) => m.id));
+          const uniqueMyPinned = myPinned.filter((m) => !allPinnedIds.has(m.id));
+
+          // Merge into a single ordered list: shared pins first, then personal-only
+          const unifiedPins: { message: Message; scope: "all" | "me" }[] = [
+            ...allPinned.map((m) => ({ message: m, scope: "all" as const })),
+            ...uniqueMyPinned.map((m) => ({ message: m, scope: "me" as const })),
+          ];
+          if (unifiedPins.length === 0) return null;
+
+          const safeIdx = pinnedIndex % unifiedPins.length;
+          const current = unifiedPins[safeIdx];
+          const pinSender = (current.message.sender as User)?.display_name || (current.message.sender as User)?.phone || "";
+          const mt = current.message.msg_type;
+          const pinPreview =
+            mt === "gif" ? "GIF" :
+            mt === "sticker" ? t("common.stickerMsg") :
+            (mt !== "text" && mt !== "emoji") ? t("common.fileMsg") :
+            (current.message.content || "").trim().slice(0, 80);
+
+          const pinLabel = unifiedPins.length > 1
+            ? `${t("pin.pinned", "Закреплено")} #${safeIdx + 1}${current.scope === "me" ? ` · ${t("pin.forYou", "для вас")}` : ""} · ${pinSender}`
+            : current.scope === "me"
+              ? `${t("pin.pinnedForYou", "Закреплено для вас")} · ${pinSender}`
+              : pinSender;
+
+          return (
+            <div className="shrink-0 border-b border-slate-200 bg-white/95 backdrop-blur-sm z-20">
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-slate-50 transition-colors min-h-[38px]"
+                onClick={() => {
+                  const el = document.querySelector(`[data-message-id="${current.message.id}"]`);
+                  el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+                  if (unifiedPins.length > 1) {
+                    setPinnedIndex((safeIdx + 1) % unifiedPins.length);
+                  }
+                }}
+              >
+                {/* Dot indicator */}
+                {unifiedPins.length > 1 ? (
+                  <div className="flex flex-col gap-[2px] shrink-0" style={{ height: 24 }}>
+                    {unifiedPins.map((p, i) => (
+                      <div
+                        key={i}
+                        className={`w-[3px] rounded-full transition-colors ${
+                          i === safeIdx
+                            ? (p.scope === "me" ? "bg-sky-400" : "bg-blue-500")
+                            : (p.scope === "me" ? "bg-sky-200" : "bg-slate-300")
+                        }`}
+                        style={{ height: `${Math.max(3, 24 / unifiedPins.length - 2)}px` }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={`w-[3px] h-[24px] rounded-full shrink-0 ${current.scope === "me" ? "bg-sky-400" : "bg-blue-500"}`} />
+                )}
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="text-xs font-medium text-blue-600 truncate">
+                    {pinLabel}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">{pinPreview}</div>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Messages — фон и размывающая подложка в одном неподвижном слое, контент скроллится поверх */}
         <div className="relative flex-1 min-h-0 flex flex-col min-w-0">
@@ -2462,7 +2816,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           <div className="absolute inset-0 bg-white/30 pointer-events-none z-0" aria-hidden />
           <div
             ref={messagesScrollRef}
-            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 space-y-1 flex flex-col scrollbar-hide relative z-10"
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 pb-5 sm:pt-3 sm:px-3 sm:pb-12 flex flex-col scrollbar-hide relative z-10"
             onContextMenu={(e) => e.preventDefault()}
             onScroll={handleMessagesScroll}
           >
@@ -2479,81 +2833,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               </div>
             ) : null;
           })()}
-          <div className="flex flex-col space-y-1 min-h-0">
-          {/* Telegram-style pinned message bar (for all) */}
-          {(() => {
-            const allPinned = chat?.pinned_messages ?? (chat?.pinned_message ? [chat.pinned_message] : []);
-            if (allPinned.length === 0) return null;
-            const safeIdx = pinnedIndex % allPinned.length;
-            const currentPin = allPinned[safeIdx];
-            const pinSender = (currentPin.sender as User)?.display_name || (currentPin.sender as User)?.phone || "";
-            const pinPreview = currentPin.msg_type !== "text" && currentPin.msg_type !== "emoji"
-              ? "(файл)"
-              : (currentPin.content || "").trim().slice(0, 80);
-            return (
-              <div className="shrink-0 mb-1">
-                <button
-                  type="button"
-                  className="w-full flex items-center gap-2 px-3 py-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors min-h-[40px]"
-                  onClick={() => {
-                    // Scroll to current pin, then cycle
-                    const el = document.querySelector(`[data-message-id="${currentPin.id}"]`);
-                    el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-                    if (allPinned.length > 1) {
-                      setPinnedIndex((safeIdx + 1) % allPinned.length);
-                    }
-                  }}
-                >
-                  {/* Dot indicator — vertical bar segments */}
-                  {allPinned.length > 1 && (
-                    <div className="flex flex-col gap-[2px] shrink-0" style={{ height: 28 }}>
-                      {allPinned.map((_, i) => (
-                        <div
-                          key={i}
-                          className={`w-[3px] rounded-full transition-colors ${i === safeIdx ? "bg-blue-500" : "bg-slate-300"}`}
-                          style={{ height: `${Math.max(3, 28 / allPinned.length - 2)}px` }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {allPinned.length <= 1 && (
-                    <div className="w-[3px] h-[28px] rounded-full bg-blue-500 shrink-0" />
-                  )}
-                  {/* Content */}
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="text-xs font-medium text-blue-600 truncate">
-                      {allPinned.length > 1
-                        ? `Закреплено #${safeIdx + 1} · ${pinSender}`
-                        : pinSender}
-                    </div>
-                    <div className="text-xs text-slate-500 truncate">{pinPreview}</div>
-                  </div>
-                  {/* Pin icon */}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
-                </button>
-              </div>
-            );
-          })()}
-          {/* Personal pinned messages */}
-          {(chat?.my_pinned_messages?.length ?? 0) > 0 && (
-            <div className="shrink-0 mb-1">
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2">
-                <p className="text-xs font-medium text-slate-600 mb-1">Закреплено для вас</p>
-                <div className="max-h-32 overflow-y-auto overflow-x-hidden scrollbar-hide space-y-1">
-                  {chat!.my_pinned_messages!.map((m) => (
-                    <PinnedMessagePreview
-                      key={m.id}
-                      message={m}
-                      onClick={() => {
-                        const el = document.querySelector(`[data-message-id="${m.id}"]`);
-                        el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+          <div className="flex flex-col space-y-0 min-h-0">
           {/* E2EE banner для личного чата */}
           {chat?.is_personal && chat?.other_member && (
             <div className="shrink-0 flex justify-center py-1">
@@ -2584,7 +2864,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           onClick={() => handleApproveMember(m.id)}
                           className="text-sm px-4 py-1.5 rounded-full bg-blue-500 text-white hover:bg-blue-600 active:scale-[0.98] disabled:opacity-50 font-medium transition-colors"
                         >
-                          {approveRejectLoading === m.id ? "…" : "Добавить"}
+                          {approveRejectLoading === m.id ? "…" : t("chat.add")}
                         </button>
                         <button
                           type="button"
@@ -2603,9 +2883,18 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           )}
           {messages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center min-h-[120px]">
-              <div className="text-center text-slate-500 text-sm max-w-[280px]">
-                <p className="font-medium text-slate-600 mb-1">Здесь пока нет сообщений</p>
-                <p>Напишите первое сообщение в поле ввода ниже — текст, эмодзи или отправьте файл.</p>
+              <div className="text-center text-sm max-w-xs rounded-xl bg-white/70 backdrop-blur-sm border border-slate-200/60 shadow-sm px-6 py-5">
+                {chat?.is_favorites ? (
+                  <>
+                    <p className="font-medium text-slate-700 mb-2">⭐ {t("chat.favoritesTitle")}</p>
+                    <p className="text-slate-500 leading-relaxed">{t("chat.favoritesHint")}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-600 mb-1">{t("chat.emptyChat")}</p>
+                    <p className="text-slate-500">{t("chat.emptyChatHint")}</p>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -2620,6 +2909,19 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               const GROUP_TIME_MS = 5 * 60 * 1000;
               return (
                 <Fragment>
+                  {/* Sentinel for loading older messages on scroll up */}
+                  <div ref={loadMoreSentinelRef} className="shrink-0" aria-hidden>
+                    {loadingOlder && (
+                      <div className="flex justify-center py-3">
+                        <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                    {!hasOlderMessages && messages.length > 0 && (
+                      <div className="flex justify-center py-3">
+                        <span className="text-xs text-slate-400">{t("chat.conversationStart")}</span>
+                      </div>
+                    )}
+                  </div>
                   {virtualState.enabled && <div style={{ height: virtualState.topPadding }} aria-hidden />}
                   {visibleMessages.map((msg, offset) => {
                     const i = start + offset;
@@ -2630,6 +2932,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       : Infinity;
                     const showAvatar = !nextMsg || !sameSender || timeGap >= GROUP_TIME_MS;
                     const prevMsg = messages[i - 1];
+                    const isLastInGroup = showAvatar && !!prevMsg && getSenderId(prevMsg) === getSenderId(msg);
                     const isFirstInGroup = !prevMsg || getSenderId(prevMsg) !== getSenderId(msg) ||
                       new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
                     const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
@@ -2645,11 +2948,11 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             setVirtualMeasureTick((v) => v + 1);
                           }
                         }}
-                        className={!isFirstInGroup ? "-mt-1" : ""}
+                        className={isFirstInGroup ? "mt-1" : "mt-0"}
                       >
                         {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         {showUnreadLine && i === firstUnreadIndex && (
-                          <div data-unread-line className="flex items-center gap-3 py-2">
+                          <div data-unread-line className="flex items-center gap-3 py-1.5">
                             <span className="flex-1 h-px bg-slate-300" aria-hidden />
                             <span className="text-xs font-medium text-slate-500 shrink-0">Непрочитанные сообщения</span>
                             <span className="flex-1 h-px bg-slate-300" aria-hidden />
@@ -2659,6 +2962,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           message={msg}
                           isMine={getSenderId(msg) === myUserId}
                           showAvatar={showAvatar}
+                          isLastInGroup={isLastInGroup}
                           chatId={chatId!}
                           textScale={textScale}
                           onMessageUpdated={(updated) =>
@@ -2674,6 +2978,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           onPinChange={refreshChat}
                           onReply={(m) => { setReplyToMessage(m); inputEditableRef.current?.focus(); }}
                           onForward={(m) => setForwardModalMessage(m)}
+                          onAvatarClick={(userId?: string) => { setInfoUserId(userId ?? null); setShowInfo(true); }}
                         />
                         <div
                           ref={(el) => {
@@ -2700,8 +3005,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           type="button"
           onClick={() => { scrollToBottom(); setShowScrollToBottom(false); }}
           className="absolute bottom-20 sm:bottom-4 right-4 z-10 w-10 h-10 rounded-full bg-slate-700 text-white shadow-lg hover:bg-slate-600 flex items-center justify-center transition-colors"
-          title="Вниз"
-          aria-label="Прокрутить вниз"
+          title={t("chat.scrollDown")}
+          aria-label={t("chat.scrollDown")}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
         </button>
@@ -2721,7 +3026,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   <span className="truncate flex-1 text-slate-700">{s.content}</span>
                   <span className="text-xs text-slate-400 shrink-0">
                     {new Date(s.scheduled_at).toLocaleString("ru", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                    {s.recurrence !== "none" && ` · ${s.recurrence === "daily" ? "ежедн." : "еженед."}`}
+                    {s.recurrence !== "none" && ` · ${s.recurrence === "daily" ? t("chat.daily") : t("chat.weekly")}`}
                   </span>
                   <button type="button" onClick={() => { if (chatId) scheduledApi.delete(chatId, s.id).then(() => refreshScheduled()); }} className="text-xs text-red-600 hover:text-red-800 shrink-0">Отменить</button>
                 </li>
@@ -2776,8 +3081,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
         {/* Input bar — правый клик: запланировать сообщение */}
         {recording ? (
-          <div className="border-t bg-white p-2 flex gap-2 items-center" onContextMenu={(e) => { e.preventDefault(); setScheduleMenuPos({ x: e.clientX, y: e.clientY }); }}>
-            <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 shrink-0" title="Отменить">
+          <div className="border-t bg-white p-2 flex gap-2 items-center">
+            <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 shrink-0" title={t("chat.cancelRecording")}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
             <div className="flex-1 flex flex-col gap-1.5 min-w-0">
@@ -2813,7 +3118,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             </button>
           </div>
         ) : (
-          <div className="relative border-t bg-white" ref={emojiPickerRef}>
+          <div className="relative border-t bg-white">
             {editingMessageId && (
               <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between bg-amber-50/80">
                 <span className="text-xs font-medium text-amber-800">Редактирование сообщения</span>
@@ -2827,23 +3132,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   AI-голосовой ввод — речь переводится в текст в поле ниже
                 </span>
                 <button type="button" onClick={stopAiListening} className="text-xs text-blue-700 hover:text-blue-900 font-medium">Остановить</button>
-              </div>
-            )}
-            {showEmojiPicker && (
-              <div className="scrollbar-hide absolute bottom-full right-2 left-2 sm:left-auto sm:right-2 z-50 mb-1 p-2 bg-white rounded-xl border border-slate-200 shadow-lg max-h-52 overflow-y-auto">
-                <div className="grid grid-cols-8 gap-0.5">
-                  {INPUT_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => handleEmojiSelect(emoji)}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors"
-                      title={emoji}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
               </div>
             )}
             {mentionPicker.open && mentionFiltered.length > 0 && (
@@ -2891,14 +3179,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   type="button"
                   className="text-slate-400 hover:text-slate-600 p-0.5"
                   onClick={() => setReplyToMessage(null)}
-                  title="Отменить ответ"
+                  title={t("chat.cancelReply")}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
             )}
-            <form onSubmit={handleSubmit} className="p-1.5 sm:p-2 flex gap-1.5 sm:gap-2 items-end" onContextMenu={(e) => { e.preventDefault(); setScheduleMenuPos({ x: e.clientX, y: e.clientY }); }}>
-              <label className="cursor-pointer text-slate-500 hover:text-slate-700 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Прикрепить файл">
+            <form onSubmit={handleSubmit} className="p-1.5 sm:p-2 flex gap-1.5 sm:gap-2 items-end">
+              <label className="cursor-pointer text-slate-500 hover:text-slate-700 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title={t("chat.attachFile")}>
                 <input type="file" className="hidden" onChange={handleFile} disabled={uploading} accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" multiple />
                 {uploading ? (
                   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -2906,11 +3194,19 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 )}
               </label>
+              <button type="button" onClick={() => setShowStickerGifPanel((p) => !p)} className={`text-slate-500 hover:text-slate-700 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors ${showStickerGifPanel ? "bg-slate-100" : ""}`} title={t("chat.stickersAndGif")} disabled={uploading}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+              </button>
+              {showStickerGifPanel && (
+                <div ref={stickerGifPickerRef} className="absolute bottom-full right-2 left-2 sm:left-auto sm:right-2 z-50 mb-1">
+                  <StickerGifPanel onSelectEmoji={handleEmojiSelect} onSelectGif={handleSelectGif} onSelectSticker={handleSelectSticker} />
+                </div>
+              )}
               <div
                 ref={inputEditableRef}
                 contentEditable={!uploading}
                 suppressContentEditableWarning
-                data-placeholder="Сообщение..."
+                data-placeholder={t("chat.messagePlaceholder")}
                 onInput={(e) => {
                   const el = e.currentTarget;
                   const html = el.innerHTML;
@@ -2953,24 +3249,26 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   setScheduleMenuPos(null);
                   setFormatMenuPos({ x: e.clientX, y: e.clientY, start: 0, end: 0 });
                 }}
+                {...lpInputHandlers}
                 className="flex-1 min-h-[2.5rem] max-h-[11rem] overflow-y-auto resize-none border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 scrollbar-hide empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"
                 style={{ height: "40px" }}
               />
             {/* Video circle button */}
-            <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Кружочек" disabled={uploading}>
+            <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title={t("chat.videoCircle")} disabled={uploading}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
             </button>
             {/* Голос: запись файла или AI-транскрипция. Правый клик — переключить режим. */}
             <button
               type="button"
-              onClick={toggleVoiceInput}
+              onClick={() => { if (!lpVoiceFiredRef.current) toggleVoiceInput(); }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 toggleVoiceMode();
               }}
+              {...lpVoiceHandlers}
               className={`p-1.5 sm:p-2 rounded-lg transition-colors ${voiceInputMode === "ai" ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50" : "text-slate-500 hover:text-red-500 hover:bg-slate-100"} ${aiListening ? "bg-blue-100 text-blue-700" : ""}`}
-              title={voiceInputMode === "ai" ? (aiListening ? "Остановить диктовку" : "AI-голосовой ввод (транскрипция в поле)") : "Голосовое сообщение (правый клик — AI-ввод и мгновенная транскрипция)"}
+              title={voiceInputMode === "ai" ? (aiListening ? t("chat.stopDictation") : t("chat.aiVoiceInput")) : t("chat.voiceMsg")}
               disabled={uploading}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
@@ -2980,7 +3278,15 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 type="submit"
                 className="bg-blue-600 text-white p-1.5 sm:p-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
                 disabled={uploading}
-                title="Enter — отправить, Shift+Enter — новая строка"
+                title="Enter — отправить, Shift+Enter — новая строка. Правый клик — отложить"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setScheduleMenuPos({ x: rect.left, y: rect.top });
+                }}
+                onClick={(e) => { if (lpSendFiredRef.current) { e.preventDefault(); e.stopPropagation(); } }}
+                {...lpSendHandlers}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
               </button>
@@ -2989,11 +3295,11 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           </div>
         )}
 
-        {/* Context menu: запланировать сообщение */}
-        {scheduleMenuPos && (
+        {/* Context menu: запланировать сообщение (через portal, чтобы не обрезался overflow) */}
+        {scheduleMenuPos && createPortal(
           <div
-            className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[180px]"
-            style={{ left: scheduleMenuPos.x, top: scheduleMenuPos.y }}
+            className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-xl py-1 min-w-[210px]"
+            style={{ left: Math.min(scheduleMenuPos.x, window.innerWidth - 220), top: scheduleMenuPos.y - 44 }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <button
@@ -3004,13 +3310,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               Запланировать сообщение
             </button>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {/* Context menu: Markdown-форматирование (правый клик по полю ввода) — не выходит за границы чата */}
         {formatMenuPos && (() => {
-          const MENU_W = 220;
-          const MENU_H = 280;
+          const MENU_W = 260;
+          const MENU_H = 340;
           let left = formatMenuPos.x;
           let top = formatMenuPos.y;
           if (chatAreaRef.current) {
@@ -3042,6 +3349,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatCopyable(); }}>
                 Копируемый при клике
               </button>
+              <div className="border-t border-slate-100 my-1" />
+              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleSwitchLayout(); setFormatMenuPos(null); }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 8 6-6 6 6"/><path d="M11 2v10"/><path d="m19 16-6 6-6-6"/><path d="M13 12v10"/></svg>
+                Переключить раскладку
+                <span className="ml-auto text-xs text-slate-400">Ctrl+T</span>
+              </button>
             </div>
           </>
           );
@@ -3062,13 +3375,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={() => setEditingAvatar(false)}>
             <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="p-4 flex justify-end">
-                <button type="button" onClick={() => setEditingAvatar(false)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" aria-label="Закрыть">
+                <button type="button" onClick={() => setEditingAvatar(false)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" aria-label={t("common.close")}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
               </div>
               <div className="px-6 pb-2 flex flex-col items-center">
                 {chat.avatar_url ? (
-                  <img src={chat.avatar_url} alt="Фото чата" className="w-48 h-48 rounded-2xl object-cover mb-6" />
+                  <img src={toSameOriginMediaUrl(chat.avatar_url)} alt={t("chat.chatPhoto")} className="w-48 h-48 rounded-2xl object-cover mb-6" />
                 ) : (
                   <div className="w-48 h-48 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-6">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
@@ -3077,16 +3390,16 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 <div className="grid grid-cols-2 gap-2 w-full">
                   <button type="button" onClick={() => { handleRemoveAvatar(); setEditingAvatar(false); }} disabled={avatarUploading || !chat.avatar_url} className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-200 disabled:opacity-50 disabled:pointer-events-none text-sm font-medium">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                    Удалить
+                    {t("common.delete")}
                   </button>
                   <button
                     type="button"
                     onClick={() => { setEditingAvatar(false); setShowAvatarEditor(true); }}
                     className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-medium"
-                    title="Обрезать, рисовать, писать текст"
+                    title={t("chat.cropDrawText")}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-                    Редактировать
+                    {t("chat.edit")}
                   </button>
                   <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50 text-sm font-medium col-span-2">
                     {avatarUploading ? <span>Загрузка...</span> : (<><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Заменить</>)}
@@ -3094,7 +3407,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   {/* TODO: Генерация аватарки чата с помощью ИИ — интеграция с API, выбор стиля/промпта, загрузка результата как аватар */}
                   <button
                     type="button"
-                    onClick={() => alert("Функционал в разработке")}
+                    onClick={() => alert(t("chat.featureInDev"))}
                     className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-amber-200 bg-amber-50/50 text-amber-800 hover:bg-amber-100 text-sm font-medium col-span-2"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
@@ -3117,7 +3430,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         {/* Редактор аватарки: обрезка, рисование, текст */}
         {showAvatarEditor && chat && (
           <AvatarEditorModal
-            imageUrl={chat.avatar_url ?? null}
+            imageUrl={toSameOriginMediaUrl(chat.avatar_url ?? undefined) || null}
             onSave={handleAvatarSaveFromEditor}
             onCancel={() => setShowAvatarEditor(false)}
           />
@@ -3129,11 +3442,11 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             onClick={() => setShowAvatarFullscreen(null)}
             role="button"
             tabIndex={-1}
-            aria-label="Закрыть"
+            aria-label={t("common.close")}
           >
             <img
               src={showAvatarFullscreen}
-              alt="Полное фото"
+              alt={t("chat.fullPhoto")}
               className="max-w-full max-h-full object-contain"
               onClick={(e) => e.stopPropagation()}
             />
@@ -3141,7 +3454,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               type="button"
               onClick={() => setShowAvatarFullscreen(null)}
               className="absolute top-4 right-4 p-2 text-white/80 hover:text-white rounded-full hover:bg-white/10"
-              aria-label="Закрыть"
+              aria-label={t("common.close")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6 6 18" /><path d="m6 6 12 12" />
@@ -3157,7 +3470,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           {/* Backdrop (mobile only): tap to close */}
           <div
             className="fixed inset-0 z-40 bg-black/30 md:hidden"
-            onClick={() => setShowInfo(false)}
+            onClick={() => { setShowInfo(false); setInfoUserId(null); }}
             aria-hidden
           />
           <aside
@@ -3166,28 +3479,25 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               md:static md:inset-auto md:z-auto md:w-80 md:border-l md:shrink-0
             `}
           >
-            <div className="p-3 border-b flex items-center gap-2">
+            <div className="p-3 border-b flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowInfo(false)}
-                className="md:hidden p-2 -ml-1 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                aria-label="Закрыть"
+                onClick={() => { setShowInfo(false); setInfoUserId(null); }}
+                className="md:hidden p-2 -ml-1 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+                aria-label={t("common.close")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
-              <div className="flex items-center justify-between flex-1 min-w-0 mb-3">
-            <h2 className="text-lg font-semibold text-slate-800 truncate">О чате</h2>
-              <div className="flex items-center gap-1 shrink-0">
-                <div className="relative" ref={infoMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowInfoMenu((v) => !v)}
-                    className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                    aria-label="Меню"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                  </button>
-                  {showInfoMenu && (() => {
+              {!infoUserId && <div className="relative shrink-0" ref={infoMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowInfoMenu((v) => !v)}
+                  className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  aria-label={t("messenger.menu")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                </button>
+                {showInfoMenu && (() => {
                     const isPersonal = chat.is_personal;
                     const myMembership = activeMembers.find((m) => m.user.id === myUserId);
                     const adminsCount = activeMembers.filter((m) => m.role === "admin").length;
@@ -3210,23 +3520,39 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             }}
                             disabled={leaveLoading || amIOnlyAdmin}
                             className={btnCls}
-                            title={amIOnlyAdmin ? "Сначала назначьте другого администратора" : undefined}
+                            title={amIOnlyAdmin ? t("chat.assignAdminFirst") : undefined}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                             Выйти из чата
                           </button>
                         )}
-                        <button type="button" onClick={() => { handleToggleMute(); setShowInfoMenu(false); }} disabled={muteLoading} className={btnCls}>
-                          {isMuted ? (
-                            <><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>Включить уведомления</>
-                          ) : (
-                            <><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>Выключить уведомления</>
-                          )}
-                        </button>
+                        {isMuted ? (
+                          <button type="button" onClick={() => { handleMute("off"); setShowInfoMenu(false); }} disabled={muteLoading} className={btnCls}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                            {t("messenger.enableNotif")}
+                          </button>
+                        ) : (
+                          <div className="relative group/mute">
+                            <button type="button" disabled={muteLoading} className={btnCls + " justify-between"}>
+                              <span className="flex items-center gap-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                                {t("messenger.mute")}
+                              </span>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><path d="m9 18 6-6-6-6"/></svg>
+                            </button>
+                            <div className="invisible group-hover/mute:visible absolute right-full top-0 pr-1 min-w-[160px] z-50"><div className="py-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                              {(["1h", "3h", "8h", "forever"] as const).map((dur) => (
+                                <button key={dur} type="button" onClick={() => { handleMute(dur); setShowInfoMenu(false); }} disabled={muteLoading} className={btnCls}>
+                                  {t(dur === "1h" ? "messenger.muteFor1h" : dur === "3h" ? "messenger.muteFor3h" : dur === "8h" ? "messenger.muteFor8h" : "messenger.muteForever")}
+                                </button>
+                              ))}
+                            </div></div>
+                          </div>
+                        )}
                         {chat.owner?.id === myUserId && (
                           <button type="button" onClick={() => { handleDeleteChat(); setShowInfoMenu(false); }} disabled={deleteLoading} className={btnClsRed}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                            Удалить чат
+                            {t("common.delete")}
                           </button>
                         )}
                         {chat.owner?.id === myUserId && (
@@ -3246,11 +3572,116 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       </div>
                     );
                   })()}
-                </div>
-                <button type="button" onClick={() => setShowInfo(false)} className="text-slate-400 hover:text-slate-600 p-1">&#10005;</button>
-              </div>
+              </div>}
+              <h2 className="text-lg font-semibold text-slate-800 truncate flex-1 text-center min-w-0">{infoUserId ? t("chat.profileTitle") : t("chat.aboutChat")}</h2>
+              <button type="button" onClick={() => { setShowInfo(false); setInfoUserId(null); }} className="text-slate-400 hover:text-slate-600 p-1 shrink-0">&#10005;</button>
             </div>
 
+            {/* ===== User profile view ===== */}
+            {infoUserId && (() => {
+              const member = activeMembers.find((m) => m.user.id === infoUserId);
+              const profileUser = member?.user ?? (chat.is_personal && chat.other_member?.id === infoUserId ? chat.other_member : null);
+              if (!profileUser) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-slate-500">
+                    <p className="text-sm">Пользователь не найден</p>
+                    <button type="button" onClick={() => setInfoUserId(null)} className="mt-3 text-sm text-blue-600 hover:text-blue-800 hover:underline">Назад к чату</button>
+                  </div>
+                );
+              }
+              const avatarUrl = (profileUser as User).avatar_url ?? (profileUser as User).avatar ?? null;
+              const name = profileUser.display_name || profileUser.phone || "?";
+              const isOnline = onlineStatus[profileUser.id]?.is_online;
+              const lastSeen = onlineStatus[profileUser.id]?.last_seen_display;
+              const isMe = profileUser.id === myUserId;
+              return (
+                <div className="flex-1 overflow-y-auto">
+                  {/* Back to chat info */}
+                  <div className="px-3 pt-2 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setInfoUserId(null)}
+                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                      {t("chat.backToChat")}
+                    </button>
+                  </div>
+
+                  {/* Avatar + name */}
+                  <div className="flex flex-col items-center px-4 pb-4">
+                    <div className="relative">
+                      {avatarUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowAvatarFullscreen(toSameOriginMediaUrl(avatarUrl))}
+                          className="block rounded-full overflow-hidden cursor-zoom-in hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                          title={t("chat.viewPhoto")}
+                        >
+                          <img src={toSameOriginMediaUrl(avatarUrl)} alt="" className="w-20 h-20 rounded-full object-cover" />
+                        </button>
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-2xl font-bold">
+                          {name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?"}
+                        </div>
+                      )}
+                      {isOnline && (
+                        <span className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full" />
+                      )}
+                    </div>
+
+                    <h3 className="font-semibold text-slate-800 text-center mt-2">{name}</h3>
+
+                    {/* Online status */}
+                    <p className="text-xs mt-0.5">
+                      {isOnline ? (
+                        <span className="text-green-500 font-medium">{t("chat.online")}</span>
+                      ) : lastSeen ? (
+                        <span className="text-slate-500">{formatLastSeen(lastSeen, lang)}</span>
+                      ) : null}
+                    </p>
+
+                    {/* Username & phone */}
+                    {((profileUser as User).username || profileUser.phone) && (
+                      <div className="mt-2 flex flex-col items-center gap-0.5 text-xs text-slate-500">
+                        {(profileUser as User).username && (
+                          <span className="font-medium text-slate-700">@{(profileUser as User).username}</span>
+                        )}
+                        {profileUser.phone && (
+                          <span className="text-slate-600">{profileUser.phone}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Role badge (for group members) */}
+                    {member && (
+                      <div className="mt-2">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${member.role === "admin" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                          {member.role === "admin" ? t("chat.administrator") : t("chat.member")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="px-4 pb-4 space-y-2">
+                    {!isMe && onOpenDmWithUserId && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDmWithUserId(profileUser.id)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm font-medium transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        {t("common.write")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ===== Chat info view (original) ===== */}
+            {!infoUserId && <>
             {(leaveError || deleteError) && (
               <div className="px-4 py-2 border-b bg-red-50 border-red-100">
                 <p className="text-xs text-red-600">{leaveError || deleteError}</p>
@@ -3260,14 +3691,18 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             {/* Avatar */}
             <div className="flex flex-col items-center mb-3">
               <div className="relative group">
-                {(chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
+                {chat.is_favorites ? (
+                  <div className="w-20 h-20 rounded-full bg-blue-500 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
                   <button
                     type="button"
-                    onClick={() => setShowAvatarFullscreen(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!)}
+                    onClick={() => setShowAvatarFullscreen(toSameOriginMediaUrl(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!))}
                     className="block rounded-full overflow-hidden cursor-zoom-in hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-                    title="Просмотреть фото"
+                    title={t("chat.viewPhoto")}
                   >
-                    <img src={chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!} alt="" className="w-20 h-20 rounded-full object-cover" />
+                    <img src={toSameOriginMediaUrl(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!)} alt="" className="w-20 h-20 rounded-full object-cover" />
                   </button>
                 ) : (
                   <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-2xl font-bold">
@@ -3276,8 +3711,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       : (chat.title || "Ч").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "Ч"}
                   </div>
                 )}
-                {chat.owner?.id === myUserId && !chat.is_personal && (
-                  <button type="button" onClick={() => setEditingAvatar(true)} className="absolute bottom-0 right-0 w-7 h-7 bg-slate-600 text-white rounded-full flex items-center justify-center shadow hover:bg-slate-700 transition-colors" title="Изменить фото">
+                {chat.owner?.id === myUserId && !chat.is_personal && !chat.is_favorites && (
+                  <button type="button" onClick={() => setEditingAvatar(true)} className="absolute bottom-0 right-0 w-7 h-7 bg-slate-600 text-white rounded-full flex items-center justify-center shadow hover:bg-slate-700 transition-colors" title={t("chat.editPhoto")}>
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                   </button>
                 )}
@@ -3295,21 +3730,21 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     maxLength={50}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-800 text-center focus:outline-none focus:ring-1 focus:ring-blue-400"
                     autoFocus
-                    placeholder="Название чата"
+                    placeholder={t("chat.chatNamePlaceholder")}
                   />
                   {titleDraft.length >= 30 && (
                     <p className="text-xs text-slate-500 text-center">{titleDraft.length}/50</p>
                   )}
                   <div className="flex gap-2 justify-center">
                     <button type="button" onClick={() => { setEditingTitle(false); setTitleDraft(chat.title || ""); }} className="text-xs text-slate-500 hover:text-slate-700">Отмена</button>
-                    <button type="button" onClick={handleSaveTitle} disabled={savingChat || !titleDraft.trim()} className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50">{savingChat ? "..." : "Сохранить"}</button>
+                    <button type="button" onClick={handleSaveTitle} disabled={savingChat || !titleDraft.trim()} className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50">{savingChat ? "..." : t("common.save")}</button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-1 mt-2">
-                  <h3 className="font-semibold text-slate-800 text-center">{chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}</h3>
-                  {chat.owner?.id === myUserId && !chat.is_personal && (
-                    <button type="button" onClick={() => { setTitleDraft(chat.title || ""); setEditingTitle(true); }} className="p-0.5 text-slate-400 hover:text-slate-600 rounded" title="Изменить название">
+                  <h3 className="font-semibold text-slate-800 text-center">{chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}</h3>
+                  {chat.owner?.id === myUserId && !chat.is_personal && !chat.is_favorites && (
+                    <button type="button" onClick={() => { setTitleDraft(chat.title || ""); setEditingTitle(true); }} className="p-0.5 text-slate-400 hover:text-slate-600 rounded" title={t("chat.editChatName")}>
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                     </button>
                   )}
@@ -3319,28 +3754,50 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 <>
                 <p className="text-xs mt-0.5">
                   {onlineStatus[chat.other_member.id]?.is_online ? (
-                    <span className="text-green-500 font-medium">в сети</span>
+                    <span className="text-green-500 font-medium">{t("chat.online")}</span>
                   ) : (
-                    <span className="text-slate-500">{formatLastSeen(onlineStatus[chat.other_member.id]?.last_seen_display)}</span>
+                    <span className="text-slate-500">{formatLastSeen(onlineStatus[chat.other_member.id]?.last_seen_display, lang)}</span>
                   )}
                 </p>
-                <SafetyNumberButton otherUserId={chat.other_member.id} otherUserName={chat.other_member.display_name || chat.other_member.phone} myUserId={myUserId} />
+                {(chat.other_member.username || chat.other_member.phone) && (
+                  <div className="mt-1.5 flex flex-col items-center gap-0.5 text-xs text-slate-500">
+                    {chat.other_member.username && (
+                      <span>
+                        {onOpenDmWithUserId && chat.other_member?.id ? (
+                          <button
+                            type="button"
+                            onClick={() => { setUsernameShake(true); setTimeout(() => setUsernameShake(false), 400); }}
+                            className={`text-blue-600 hover:text-blue-800 hover:underline font-medium ${usernameShake ? "animate-username-shake" : ""}`}
+                            title={t("chat.alreadyInChat")}
+                          >
+                            @{chat.other_member.username}
+                          </button>
+                        ) : (
+                          <span className="font-medium text-slate-700">@{chat.other_member.username}</span>
+                        )}
+                      </span>
+                    )}
+                    {chat.other_member.phone && (
+                      <span className="text-slate-600">{chat.other_member.phone}</span>
+                    )}
+                  </div>
+                )}
                 </>
               )}
-              {!chat.is_personal && (
-                <p className="text-xs text-slate-500">{chat.members_count} участник{chat.members_count === 1 ? "" : chat.members_count < 5 ? "а" : "ов"}</p>
+              {!chat.is_personal && !chat.is_favorites && (
+                <p className="text-xs text-slate-500">{formatMembersCount(chat.members_count, lang)}</p>
               )}
               {/* Group tier badge + возраст группы — только для групп */}
-              {!chat.is_personal && (() => {
+              {!chat.is_personal && !chat.is_favorites && (() => {
                 const eff = chat.effective_max_members ?? chat.max_members ?? 100;
                 const tier = eff >= 10000 ? "mega" : eff >= 1000 ? "kilo" : "default";
-                const label = tier === "mega" ? "Мега группа" : tier === "kilo" ? "Кило группа" : "Группа";
-                const hint = tier === "mega" ? "До 10 000 участников" : tier === "kilo" ? "До 1 000 участников" : "До 100 участников";
+                const label = tier === "mega" ? t("chat.megaGroup") : tier === "kilo" ? t("chat.kiloGroup") : t("chat.group");
+                const hint = tier === "mega" ? t("chat.upTo10k") : tier === "kilo" ? t("chat.upTo1k") : t("chat.upTo100");
                 const colors = tier === "mega" ? "bg-purple-100 text-purple-700" : tier === "kilo" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600";
                 const created = new Date(chat.created_at).getTime();
                 const days = Math.floor((Date.now() - created) / (24 * 60 * 60 * 1000));
                 const ageStr = days < 31
-                  ? (days === 0 ? "менее дня" : days === 1 ? "1 день" : days < 5 ? `${days} дня` : `${days} дн.`)
+                  ? (days === 0 ? t("misc.lessThanDay") : days === 1 ? t("misc.oneDay") : days < 5 ? `${days} дня` : `${days} дн.`)
                   : days < 365
                     ? (() => { const m = Math.floor(days / 30); return m === 1 ? "1 мес." : `${m} мес.`; })()
                     : (() => { const y = Math.floor(days / 365); return y === 1 ? "1 год" : y < 5 ? `${y} года` : `${y} лет`; })();
@@ -3364,43 +3821,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               })()}
             </div>
 
-            {/* В личном чате описание не показываем; юзернейм и номер телефона. В группе — блок «Описание». */}
-            {chat.is_personal && chat.other_member && (
-              <div className="mb-3 space-y-1">
-                {chat.other_member.username && (
-                  <p className="text-sm text-slate-700">
-                    <span className="text-slate-400">Юзернейм: </span>
-                    {onOpenDmWithUserId && chat.other_member?.id ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUsernameShake(true);
-                          setTimeout(() => setUsernameShake(false), 400);
-                        }}
-                        className={`font-medium text-blue-600 hover:text-blue-800 hover:underline inline-block ${usernameShake ? "animate-username-shake" : ""}`}
-                        title="Вы уже в этом чате"
-                      >
-                        @{chat.other_member.username}
-                      </button>
-                    ) : (
-                      <span className="font-medium">@{chat.other_member.username}</span>
-                    )}
-                  </p>
-                )}
-                {chat.other_member.phone && (
-                  <p className="text-sm text-slate-700">
-                    <span className="text-slate-400">Номер: </span>
-                    <span className="font-medium text-slate-800">{chat.other_member.phone}</span>
-                  </p>
-                )}
-              </div>
-            )}
-{!chat.is_personal && (
-            <div className="mb-3">
+            {!chat.is_personal && !chat.is_favorites && (
+            <div className="mb-3 px-5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-slate-400 uppercase tracking-wide">Описание</span>
                   {chat.owner?.id === myUserId && !editingDescription && (
-                    <button type="button" onClick={() => { setDescriptionDraft(chat.description || ""); setEditingDescription(true); }} className="p-0.5 text-slate-400 hover:text-slate-600 rounded" title="Изменить описание">
+                    <button type="button" onClick={() => { setDescriptionDraft(chat.description || ""); setEditingDescription(true); }} className="p-0.5 text-slate-400 hover:text-slate-600 rounded" title={t("chat.editDescription")}>
                       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                     </button>
                   )}
@@ -3411,15 +3837,15 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
                       rows={3}
                       value={descriptionDraft}
-                      onChange={(e) => setDescriptionDraft(e.target.value.slice(0, 300))}
-                      maxLength={300}
+                      onChange={(e) => setDescriptionDraft(e.target.value.replace(/\n{2,}/g, "\n").slice(0, 100))}
+                      maxLength={100}
                       autoFocus
-                      placeholder="Добавьте описание группы..."
+                      placeholder={t("chat.descPlaceholder")}
                     />
-                    <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionDraft.length}/300</p>
+                    <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionDraft.length}/100</p>
                     <div className="flex gap-2 mt-1 justify-end">
                       <button type="button" onClick={() => setEditingDescription(false)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1">Отмена</button>
-                      <button type="button" onClick={handleSaveDescription} disabled={savingChat} className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50">{savingChat ? "..." : "Сохранить"}</button>
+                      <button type="button" onClick={handleSaveDescription} disabled={savingChat} className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50">{savingChat ? "..." : t("common.save")}</button>
                     </div>
                   </div>
                 ) : (
@@ -3431,7 +3857,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                         className="w-full text-left rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 transition-colors"
                       >
                         {chat.description ? (
-                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{chat.description}</p>
+                          (() => {
+                            const cleaned = chat.description.replace(/\n{2,}/g, "\n").trim();
+                            const lineCount = cleaned.split("\n").length;
+                            return (
+                              <p className={`text-sm text-slate-700 whitespace-pre-wrap ${lineCount > 5 ? "max-h-[7.5rem] overflow-y-auto" : ""}`}>{cleaned}</p>
+                            );
+                          })()
                         ) : (
                           <p className="text-sm text-slate-400 italic">Нет описания</p>
                         )}
@@ -3439,7 +3871,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     ) : (
                       <>
                         {chat.description ? (
-                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{chat.description}</p>
+                          (() => {
+                            const cleaned = chat.description.replace(/\n{2,}/g, "\n").trim();
+                            const lineCount = cleaned.split("\n").length;
+                            return (
+                              <p className={`text-sm text-slate-700 whitespace-pre-wrap ${lineCount > 5 ? "max-h-[7.5rem] overflow-y-auto" : ""}`}>{cleaned}</p>
+                            );
+                          })()
                         ) : (
                           <p className="text-sm text-slate-400 italic">Нет описания</p>
                         )}
@@ -3458,26 +3896,25 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             )}
 
             {/* Тип и пригласительная ссылка — только для групп */}
-            {!chat.is_personal && (
-            <div className="space-y-2">
+            {!chat.is_personal && !chat.is_favorites && (
+            <div className="space-y-2 px-5">
               {chat.chat_type != null && (
-              <div><span className="text-xs text-slate-400 uppercase tracking-wide">Тип</span><p className="text-slate-700">{chat.chat_type === "open" ? "Открытый" : "Закрытый"}</p></div>
+              <div><span className="text-xs text-slate-400 uppercase tracking-wide">{t("chat.type")}</span><p className="text-slate-700">{chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}</p></div>
               )}
               {chat.invite_link && (
                 <div>
                   <span className="text-xs text-slate-400 uppercase tracking-wide">Пригласительная ссылка</span>
                   <div className="flex items-center gap-2 mt-1">
                     <code className="text-xs bg-slate-100 rounded px-2 py-1 text-slate-600 truncate flex-1">{normalizeInviteLink(chat.invite_link)}</code>
-                    <button type="button" onClick={handleCopy} className={`text-xs px-2 py-1 rounded transition-colors ${copiedState ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-600 hover:bg-blue-200"}`}>{copiedState ? "Скопировано" : "Копировать"}</button>
+                    <button type="button" onClick={handleCopy} className={`text-xs px-2 py-1 rounded transition-colors ${copiedState ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-600 hover:bg-blue-200"}`}>{copiedState ? t("common.copied") : t("common.copy")}</button>
                   </div>
                 </div>
               )}
             </div>
             )}
-          </div>
 
-          {/* Расширение за звёзды — только для групп; в личном чате не показываем */}
-          {!chat.is_personal && chat.owner?.id === myUserId && (() => {
+          {/* Расширение за звёзды — только для групп; в личном чате и Избранном не показываем */}
+          {!chat.is_personal && !chat.is_favorites && chat.owner?.id === myUserId && (() => {
             const effective = chat.effective_max_members ?? chat.max_members ?? 10;
             const isExpandedTo100 = chat.is_expanded && effective === 100;
             const isExpandedTo1000 = chat.is_expanded && effective === 1000;
@@ -3499,23 +3936,23 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       disabled={expandLoading}
                       className="w-full bg-amber-500 text-white py-2 rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
                     >
-                      {expandLoading ? "..." : "Прокачать за ⭐ 100 звёзд"}
+                      {expandLoading ? "..." : (lang === "en" ? "Upgrade for ⭐ 100 stars" : "Прокачать за ⭐ 100 звёзд")}
                     </button>
                   </div>
                 )}
                 {isExpandedTo100 && (
                   <div className="bg-amber-50 rounded-lg p-3">
-                    <p className="text-sm text-amber-800 font-medium">&#9733; Чат расширен до 100 участников навсегда</p>
+                    <p className="text-sm text-amber-800 font-medium">&#9733; {lang === "en" ? "Chat expanded to 100 members forever" : "Чат расширен до 100 участников навсегда"}</p>
                   </div>
                 )}
                 {isExpandedTo1000 && (
                   <div className="bg-amber-50 rounded-lg p-3">
-                    <p className="text-sm text-amber-800 font-medium">&#9733; Чат расширен до 1000 участников навсегда</p>
+                    <p className="text-sm text-amber-800 font-medium">&#9733; {lang === "en" ? "Chat expanded to 1000 members forever" : "Чат расширен до 1000 участников навсегда"}</p>
                   </div>
                 )}
                 {expandError && <p className="text-xs text-red-500">{expandError}</p>}
                 {/* Подсказка: при нехватке звёзд — поделиться реферальной ссылкой */}
-                {(expandError?.includes("Недостаточно звёзд") || showUpgradeTo1000) && (
+                {(expandError?.includes("Недостаточно") || expandError?.includes("Not enough") || showUpgradeTo1000) && (
                   <ReferralHintInChat />
                 )}
               </div>
@@ -3552,17 +3989,18 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 const files = (msg.files ?? []) as { url?: string }[];
                 return f || files[0]?.url;
               };
-              const tabs: { id: "media" | "links" | "files" | "participants"; label: string }[] = isGroup
+              const showParticipants = isGroup && !chat.is_favorites;
+              const tabs: { id: "media" | "links" | "files" | "participants"; label: string }[] = showParticipants
                 ? [
-                    { id: "participants" as const, label: "Участники" },
-                    { id: "media", label: "Медиа" },
-                    { id: "links", label: "Ссылки" },
-                    { id: "files", label: "Файлы" },
+                    { id: "participants" as const, label: t("chat.participants") },
+                    { id: "media", label: t("chat.media") },
+                    { id: "links", label: t("chat.links") },
+                    { id: "files", label: t("chat.files") },
                   ]
                 : [
-                    { id: "media", label: "Медиа" },
-                    { id: "links", label: "Ссылки" },
-                    { id: "files", label: "Файлы" },
+                    { id: "media", label: t("chat.media") },
+                    { id: "links", label: t("chat.links") },
+                    { id: "files", label: t("chat.files") },
                   ];
               return (
                 <div className="mt-3 pt-2">
@@ -3583,14 +4021,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     ))}
                   </div>
                   <div className="pt-2">
-                    {mediaLinksFilesTab === "participants" && isGroup && (
+                    {mediaLinksFilesTab === "participants" && showParticipants && (
                       <div className="space-y-4">
                         {canInviteToGroup && (
                           <div className="mb-4">
                             <label className="block text-sm font-medium text-slate-600 mb-2">Пригласить по username</label>
                             <input
                               type="text"
-                              placeholder="Введите @username"
+                              placeholder={t("chat.enterUsername")}
                               value={inviteSearchQuery}
                               onChange={(e) => setInviteSearchQuery(e.target.value)}
                               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -3650,7 +4088,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                                     <p className="text-xs text-slate-400 truncate">@{m.user.telegram_username}</p>
                                   ) : null}
                                 </div>
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${m.role === "admin" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{m.role === "admin" ? "Админ" : "Участник"}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${m.role === "admin" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{m.role === "admin" ? t("chat.admin") : t("chat.member")}</span>
                               </li>
                             );
                           })}
@@ -3671,7 +4109,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                                         onClick={() => handleApproveMember(m.id)}
                                         className="text-xs px-2.5 py-1 rounded-lg bg-green-100 text-green-800 hover:bg-green-200 disabled:opacity-50 font-medium"
                                       >
-                                        {approveRejectLoading === m.id ? "…" : "Добавить"}
+                                        {approveRejectLoading === m.id ? "…" : t("chat.add")}
                                       </button>
                                       <button
                                         type="button"
@@ -3692,7 +4130,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                         )}
                       </div>
                     )}
-                    {(mediaLinksFilesTab === "media" || (mediaLinksFilesTab === "participants" && !isGroup)) && (
+                    {(mediaLinksFilesTab === "media" || (mediaLinksFilesTab === "participants" && !showParticipants)) && (
                       <div className="grid grid-cols-3 gap-1.5">
                         {mediaMessages.slice(-24).reverse().map((msg) => {
                           const url = thumbUrl(msg);
@@ -3700,7 +4138,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           return (
                           <button key={msg.id} type="button" onClick={() => scrollToMessageId(msg.id)} className="aspect-square rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-blue-400">
                             {isImg && url ? (
-                              <ProgressiveImage src={url} alt="" className="w-full h-full" objectFit="cover" />
+                              <ProgressiveImage src={toSameOriginMediaUrl(url) || url} alt="" className="w-full h-full" objectFit="cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-slate-400">
                                 {isVideo(msg) ? (
@@ -3727,13 +4165,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             </li>
                           ));
                         })}
-                        {linkMessages.length === 0 && <p className="text-xs text-slate-500">Нет ссылок</p>}
+                        {linkMessages.length === 0 && <p className="text-xs text-slate-500">{t("chat.noLinks")}</p>}
                       </ul>
                     )}
                     {mediaLinksFilesTab === "files" && (
                       <ul className="space-y-1 max-h-40 overflow-y-auto">
                         {fileMessages.slice(-20).reverse().map((msg) => {
-                          const name = (msg.file && typeof msg.file === "object" && "original_name" in msg.file) ? (msg.file as { original_name?: string }).original_name : msg.content || "Файл";
+                          const name = (msg.file && typeof msg.file === "object" && "original_name" in msg.file) ? (msg.file as { original_name?: string }).original_name : msg.content || t("common.file");
                           return (
                             <li key={msg.id}>
                               <button type="button" onClick={() => scrollToMessageId(msg.id)} className="w-full text-left text-sm text-slate-700 hover:bg-slate-50 truncate block px-2 py-1.5 rounded flex items-center gap-2">
@@ -3743,7 +4181,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             </li>
                           );
                         })}
-                        {fileMessages.length === 0 && <p className="text-xs text-slate-500">Нет файлов</p>}
+                        {fileMessages.length === 0 && <p className="text-xs text-slate-500">{t("chat.noFiles")}</p>}
                       </ul>
                     )}
                   </div>
@@ -3752,6 +4190,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             })()}
 
           </div>
+            </>}
         </aside>
         </>
       )}
@@ -3764,6 +4203,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
    UpgradeTo100Compact — компактный блок: до 100 участников + реферальная ссылка + кнопка Личный кабинет
    ================================================================ */
 function UpgradeTo100Compact() {
+  const { t } = useTranslation();
   const [referralLink, setReferralLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -3789,8 +4229,8 @@ function UpgradeTo100Compact() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Присоединяйся к чатам",
-          text: "Зарегистрируйся по моей ссылке — месяц бесплатно и ⭐ 10 звёзд в подарок.",
+          title: t("chat.shareTitle"),
+          text: t("chat.shareText"),
           url: referralLink,
         });
       } catch { /* user cancelled or error */ }
@@ -3802,10 +4242,10 @@ function UpgradeTo100Compact() {
   return (
     <div className="bg-amber-50 rounded-xl p-3 space-y-3 border border-amber-100">
       <p className="text-xs text-amber-800 leading-snug">
-        &#9733; Сейчас в группе до 10 участников. Чтобы расширить до 100, накопите 50 звёзд в реферальной программе.
+        {t("chat.upgradeDesc")}
       </p>
       <Link
-        to="/dashboard"
+        to="/chats"
         className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold shadow-sm hover:shadow transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-amber-50"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3813,17 +4253,17 @@ function UpgradeTo100Compact() {
           <polyline points="10 17 15 12 10 7"/>
           <line x1="15" y1="12" x2="3" y2="12"/>
         </svg>
-        Личный кабинет
+        {t("dashboard.title")}
       </Link>
       <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
-        <p className="text-xs text-amber-700 flex-1 min-w-0 truncate">Приглашайте друзей — за каждого &#9733; 10 звёзд</p>
+        <p className="text-xs text-amber-700 flex-1 min-w-0 truncate">{t("chat.inviteFriendsStars")}</p>
         {referralLink && (
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
               onClick={handleCopy}
               className="p-1.5 rounded-lg text-amber-700 hover:bg-amber-200/80 transition-colors"
-              title="Копировать ссылку"
+              title={t("chat.copyLink")}
             >
               {copied ? (
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -3835,7 +4275,7 @@ function UpgradeTo100Compact() {
               type="button"
               onClick={handleShare}
               className="p-1.5 rounded-lg text-amber-700 hover:bg-amber-200/80 transition-colors"
-              title="Поделиться"
+              title={t("chat.share")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
             </button>
@@ -3850,6 +4290,7 @@ function UpgradeTo100Compact() {
    ReferralHintInChat — подсказка «поделиться реферальной ссылкой» при нехватке звёзд
    ================================================================ */
 function ReferralHintInChat() {
+  const { t } = useTranslation();
   const [referralLink, setReferralLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -3875,8 +4316,8 @@ function ReferralHintInChat() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Присоединяйся к чатам",
-          text: "Зарегистрируйся по моей ссылке — месяц бесплатно и ⭐ 10 звёзд в подарок.",
+          title: t("chat.shareTitle"),
+          text: t("chat.shareText"),
           url: referralLink,
         });
       } catch { /* user cancelled or error */ }
@@ -3885,7 +4326,7 @@ function ReferralHintInChat() {
     }
   };
 
-  if (!referralLink) return <p className="text-xs text-slate-500">Загрузка…</p>;
+  if (!referralLink) return <p className="text-xs text-slate-500">{t("common.loading")}</p>;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
@@ -3899,7 +4340,7 @@ function ReferralHintInChat() {
             type="button"
             onClick={handleCopy}
             className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 transition-colors"
-            title="Копировать ссылку"
+            title={t("chat.copyLink")}
           >
             {copied ? (
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -3911,7 +4352,7 @@ function ReferralHintInChat() {
             type="button"
             onClick={handleShare}
             className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 transition-colors"
-            title="Поделиться"
+            title={t("chat.share")}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
           </button>
@@ -3981,7 +4422,7 @@ function FileNameDisplay({ fileName, className = "" }: { fileName: string; class
 function DateDivider({ date, lang }: { date: string; lang: "en" | "ru" }) {
   const label = formatDateLabel(date, lang);
   return (
-    <div className="flex items-center gap-3 py-2">
+    <div className="flex items-center gap-3 py-1.5">
       <span className="flex-1 h-px bg-slate-300" aria-hidden />
       <span className="text-xs font-medium text-slate-500 shrink-0">{label}</span>
       <span className="flex-1 h-px bg-slate-300" aria-hidden />
@@ -3989,26 +4430,12 @@ function DateDivider({ date, lang }: { date: string; lang: "en" | "ru" }) {
   );
 }
 
-/** Краткий превью закреплённого сообщения (клик — переход к сообщению) */
-function PinnedMessagePreview({ message, onClick }: { message: Message; onClick: () => void }) {
-  const isFile = message.msg_type !== "text" && message.msg_type !== "emoji";
-  const preview = isFile ? "(файл)" : (message.content || "").trim().slice(0, 80);
-  const sender = (message.sender as User)?.display_name || (message.sender as User)?.phone || "";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full text-left text-sm text-slate-700 hover:bg-white/60 rounded-lg px-2 py-1.5 truncate"
-    >
-      {sender && <span className="font-medium text-slate-600">{sender}: </span>}
-      <span className="truncate">{preview}</span>
-    </button>
-  );
-}
 
-function ForwardModal({ message, sourceChatId, onClose }: { message: Message; sourceChatId: string; onClose: () => void }) {
+function ForwardModal({ message, sourceChatId, onClose, onForwardComplete }: { message: Message; sourceChatId: string; onClose: () => void; onForwardComplete?: (targetChatIds: string[]) => void }) {
+  const { t } = useTranslation();
   const [chats, setChats] = useState<Chat[]>([]);
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -4031,13 +4458,30 @@ function ForwardModal({ message, sourceChatId, onClose }: { message: Message; so
     return c.title.toLowerCase().includes(q) || (c.other_member?.display_name || "").toLowerCase().includes(q);
   });
 
-  const handleForward = async (targetChatId: string) => {
+  const toggleChat = (id: string) => {
+    if (id === sourceChatId) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirm = async () => {
+    const ids = Array.from(selectedIds).filter((id) => id !== sourceChatId);
+    if (ids.length === 0) return;
     if (sending) return;
     setSending(true);
     try {
-      await messagesApi.forward(targetChatId, { message_id: message.id, source_chat_id: sourceChatId });
+      const storeUpsertMessage = useMessagesStore.getState().upsertMessage;
+      for (const targetChatId of ids) {
+        const res = await messagesApi.forward(targetChatId, { message_id: message.id, source_chat_id: sourceChatId });
+        storeUpsertMessage(targetChatId, storeNormalizeMessage({ ...res.data, chat: targetChatId } as Message & { chat: string }));
+      }
       setSent(true);
-      setTimeout(() => onClose(), 1200);
+      onForwardComplete?.(ids);
+      setTimeout(() => onClose(), 800);
     } catch {
       setSending(false);
     }
@@ -4047,7 +4491,7 @@ function ForwardModal({ message, sourceChatId, onClose }: { message: Message; so
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-xl w-[90vw] max-w-md max-h-[70vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-800">Переслать сообщение</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{t("chat.forwardMessage")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
@@ -4055,14 +4499,14 @@ function ForwardModal({ message, sourceChatId, onClose }: { message: Message; so
         {sent ? (
           <div className="flex items-center justify-center p-8 text-green-600 text-sm font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M20 6 9 17l-5-5"/></svg>
-            Переслано
+            {t("chat.forwarded")}
           </div>
         ) : (
           <>
             <div className="px-4 pt-3 pb-2">
               <input
                 type="text"
-                placeholder="Поиск чата..."
+                placeholder={t("chat.searchChat")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -4071,25 +4515,47 @@ function ForwardModal({ message, sourceChatId, onClose }: { message: Message; so
             </div>
             <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
               {filtered.map((c) => {
-                const chatTitle = c.is_personal && c.other_member ? (c.other_member.display_name || c.other_member.phone) : c.title;
+                const chatTitle = c.is_favorites ? t("chat.favoritesTitle") : c.is_personal && c.other_member ? (c.other_member.display_name || c.other_member.phone) : c.title;
+                const isSelected = selectedIds.has(c.id);
+                const isSource = c.id === sourceChatId;
                 return (
                   <button
                     key={c.id}
                     type="button"
-                    className="w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors disabled:opacity-50"
-                    onClick={() => handleForward(c.id)}
+                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors ${isSelected ? "bg-blue-50" : ""} ${isSource ? "opacity-50 cursor-not-allowed" : ""}`}
+                    onClick={() => !isSource && toggleChat(c.id)}
                     disabled={sending}
                   >
+                    {c.is_favorites ? (
+                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                      </div>
+                    ) : (
                     <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-600 shrink-0">
                       {getAvatarInitials(chatTitle)}
                     </div>
-                    <span className="text-sm text-slate-800 truncate">{chatTitle}</span>
+                    )}
+                    <span className="flex-1 text-sm text-slate-800 truncate">{chatTitle}</span>
+                    {isSelected && (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0"><path d="M20 6 9 17l-5-5"/></svg>
+                    )}
                   </button>
                 );
               })}
               {filtered.length === 0 && (
-                <div className="text-center text-xs text-slate-400 py-6">Ничего не найдено</div>
+                <div className="text-center text-xs text-slate-400 py-6">{t("messenger.noMatchingChats")}</div>
               )}
+            </div>
+            <div className="p-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={sending || selectedIds.size === 0}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-500 text-white font-medium text-sm hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                {sending ? t("chat.forwardSending") : `${t("chat.forward")} (${selectedIds.size})`}
+              </button>
             </div>
           </>
         )}
@@ -4100,31 +4566,34 @@ function ForwardModal({ message, sourceChatId, onClose }: { message: Message; so
 }
 
 function SingleImageModal({ url, fileName, onClose }: { url: string; fileName?: string; onClose: () => void }) {
+  const { t } = useTranslation();
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
+  const resolvedUrl = toSameOriginMediaUrl(url) || url;
   return (
     <div
-      className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center"
+      className="fixed inset-0 z-[110] bg-black/90 flex items-center justify-center"
       onClick={onClose}
       role="presentation"
     >
-      <div className="max-w-[90vw] max-h-[90vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
         <ProgressiveImage
-          src={url}
+          src={resolvedUrl}
           alt={fileName || ""}
-          className="max-w-full max-h-[85vh] w-auto h-auto rounded-lg shadow-2xl"
+          className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg shadow-2xl"
           loading="eager"
           preserveAnimation={/\.gif$/i.test(fileName || "")}
+          useOriginalQuality
         />
       </div>
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         className="fixed top-4 right-4 z-[111] bg-white/90 hover:bg-white text-slate-800 rounded-full w-9 h-9 flex items-center justify-center shadow-lg transition-colors"
-        aria-label="Закрыть"
+        aria-label={t("common.close")}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -4132,30 +4601,15 @@ function SingleImageModal({ url, fileName, onClose }: { url: string; fileName?: 
   );
 }
 
-function MessageBubble({
-  message,
-  isMine,
-  chatId,
-  textScale,
-  showAvatar = true,
-  onMessageUpdated,
-  onMessageDeleted,
-  onStartEditInInput,
-  onImageClick,
-  canPinForAll,
-  pinnedForAllIds,
-  maxPins,
-  myPinnedIds,
-  onPinChange,
-  onReply,
-  onForward,
-}: {
+type MessageBubbleProps = {
   message: Message;
   isMine: boolean;
   chatId: string;
   textScale: number;
   /** Показывать аватар (false — placeholder для группировки сообщений) */
   showAvatar?: boolean;
+  /** Последнее сообщение в группе (хвостик в сторону аватарки) */
+  isLastInGroup?: boolean;
   onMessageUpdated: (msg: Message) => void;
   onMessageDeleted?: (messageId: string) => void;
   /** Для сообщений только из эмодзи — редактировать в поле ввода, а не инлайном */
@@ -4168,6 +4622,8 @@ function MessageBubble({
   pinnedForAllIds?: string[];
   /** Максимально допустимое кол-во закреплённых для всех */
   maxPins?: number;
+  /** Клик по аватарке отправителя (открыть информацию о пользователе) */
+  onAvatarClick?: (userId?: string) => void;
   /** ID сообщений, закреплённых текущим пользователем для себя */
   myPinnedIds?: string[];
   /** Вызов после закрепления/открепления (обновить чат) */
@@ -4176,7 +4632,29 @@ function MessageBubble({
   onReply?: (message: Message) => void;
   /** Переслать сообщение */
   onForward?: (message: Message) => void;
-}) {
+};
+
+const MessageBubble = memo(function MessageBubble({
+  message,
+  isMine,
+  chatId,
+  textScale,
+  showAvatar = true,
+  isLastInGroup = false,
+  onMessageUpdated,
+  onMessageDeleted,
+  onStartEditInInput,
+  onImageClick,
+  canPinForAll,
+  pinnedForAllIds,
+  maxPins,
+  myPinnedIds,
+  onPinChange,
+  onReply,
+  onForward,
+  onAvatarClick,
+}: MessageBubbleProps) {
+  const { t, lang } = useTranslation();
   const [hoverDelayPassed, setHoverDelayPassed] = useState(false);
   const hoverDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickerHover, setPickerHover] = useState(false);
@@ -4194,6 +4672,9 @@ function MessageBubble({
   const [swipeX, setSwipeX] = useState(0);
   const swipeActiveRef = useRef(false);
   const swipeXRef = useRef(0);
+  const [swipeBounce, setSwipeBounce] = useState(false);
+  const swipeBounceFromRef = useRef(0);
+  const messageWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => {
     if (reactionLimitToastTimerRef.current) clearTimeout(reactionLimitToastTimerRef.current);
@@ -4226,14 +4707,16 @@ function MessageBubble({
   if (message.is_deleted) {
     return (
       <div className="flex justify-center py-1">
-        <span className="text-xs text-slate-400 italic">Сообщение удалено</span>
+        <span className="text-xs text-slate-400 italic">{t("chat.messageDeleted")}</span>
       </div>
     );
   }
 
-  const isFile = message.msg_type !== "text" && message.msg_type !== "emoji";
+  const isFile = message.msg_type !== "text" && message.msg_type !== "emoji" && message.msg_type !== "gif" && message.msg_type !== "sticker";
+  const isGif = message.msg_type === "gif" && message.content;
+  const isSticker = message.msg_type === "sticker" && message.content;
   const senderName = getSenderName(message);
-  const content = message.content || "(файл)";
+  const content = message.content || t("common.fileMsg");
   const isShortText = !isFile && content.length <= SHORT_MSG_MAX_LEN && !content.includes("\n");
   const isEmojiOnly = !isFile && !content.includes("\n") && isOnlyEmoji(content);
   const reactions = message.reactions ?? {};
@@ -4267,23 +4750,24 @@ function MessageBubble({
   const isMultiImage = imageFiles.length > 1;
   const isImageBubble = isVideoCircle || isMultiImage || (isFile && isImage);
 
-  const timeStr = new Date(message.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+  const locale = getLocale(lang);
+  const timeStr = new Date(message.created_at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const editedStr = message.edited_at
-    ? new Date(message.edited_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })
+    ? new Date(message.edited_at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
     : null;
   const isPendingOutbox = isMine && message.sender?.id === "self";
   const readStatus = isMine ? (isPendingOutbox ? "pending" : (message.read_status || "delivered")) : null;
   const Checkmarks = readStatus === "pending" ? (
-    <span className="ml-1 inline-flex" title="Отправляется…">
+    <span className="ml-1 inline-flex" title={t("chat.sending")}>
       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 animate-pulse"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     </span>
   ) : readStatus === "read" ? (
-    <span className="ml-1 inline-flex" title="Прочитано">
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-0.5"><path d="M20 6 9 17l-5-5"/></svg>
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-1.5"><path d="M20 6 9 17l-5-5"/></svg>
+    <span className="ml-1 inline-flex" title={t("chat.read")}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-1"><path d="M20 6 9 17l-5-5"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-2.5"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
   ) : readStatus === "delivered" ? (
-    <span className="ml-1 inline-flex" title="Доставлено">
+    <span className="ml-1 inline-flex" title={t("chat.delivered")}>
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
   ) : null;
@@ -4298,7 +4782,7 @@ function MessageBubble({
     setReactionLoading(true);
     try {
       const res = await messagesApi.setReaction(chatId, message.id, emoji);
-      onMessageUpdated(normalizeMessage(res.data));
+      onMessageUpdated(storeNormalizeMessage(res.data));
     } finally {
       setReactionLoading(false);
     }
@@ -4335,6 +4819,22 @@ function MessageBubble({
     return () => window.removeEventListener("mousedown", handleClick);
   }, [contextMenu]);
 
+  /** Тачпад: смахивание 2 пальцами вправо — ответ на сообщение */
+  useEffect(() => {
+    const el = messageWrapperRef.current;
+    if (!el || !onReply) return;
+    const WHEEL_THRESHOLD = 80;
+    const handleWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      if (e.deltaX < WHEEL_THRESHOLD) return;
+      e.preventDefault();
+      onReply(message);
+      if (navigator.vibrate) navigator.vibrate(15);
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [message, onReply]);
+
   const handleDelete = () => {
     closeContextMenu();
     messagesApi.delete(chatId, message.id).then(() => {
@@ -4345,8 +4845,10 @@ function MessageBubble({
   const hasReactions = Object.keys(reactions).length > 0;
   const reactionEntries = Object.entries(reactions).filter(([, c]) => c > 0);
 
+  const reactionCount = reactionEntries.length;
+  const allowReactionWrap = reactionCount >= 5;
   const reactionButtons = hasReactions ? (
-    <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5">
+    <span className={`inline-flex items-center gap-x-1 gap-y-0.5 ${allowReactionWrap ? "flex-wrap" : "flex-nowrap"}`}>
       {reactionEntries.map(([emoji, count]) => (
         <button
           key={emoji}
@@ -4358,18 +4860,18 @@ function MessageBubble({
               : "border border-slate-200/80 text-slate-600 hover:bg-slate-50"
           }`}
           disabled={reactionLoading}
-          title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
+          title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
         >
-          <AnimatedReaction emoji={emoji} size={18} playOnce />
+          <AnimatedReaction emoji={emoji} size={18} playOnce preferEmoji={emoji !== "🔥"} />
           {count > 1 && <span className="ml-0.5 tabular-nums">{count}</span>}
         </button>
       ))}
     </span>
   ) : null;
 
-  /** Время (+ ред.) + галочки; реакции у своих — слева от пузыря, у входящих — справа от пузыря (отдельный блок) */
+  /** Время (+ ред.) + галочки — последовательно в одну линию */
   const timeEl = (
-    <span className={`inline-flex flex-wrap items-center gap-x-1 gap-y-0 text-[10px] max-w-full min-w-0 shrink-0 ${isMine ? "text-slate-500" : "text-slate-400"}`}>
+    <span className={`inline-flex flex-nowrap items-center gap-x-1 text-[10px] min-w-0 shrink-0 whitespace-nowrap ${isMine ? "text-slate-500" : "text-slate-400"}`}>
       {timeStr}
       {editedStr && <span className="opacity-80 ml-0.5">ред. {editedStr}</span>}
       {Checkmarks}
@@ -4378,7 +4880,7 @@ function MessageBubble({
 
   const handleMouseEnter = () => {
     if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
-    hoverDelayTimerRef.current = setTimeout(() => setHoverDelayPassed(true), 1000);
+    hoverDelayTimerRef.current = setTimeout(() => setHoverDelayPassed(true), 400);
   };
   const handleMouseLeave = () => {
     setPickerHover(false);
@@ -4391,9 +4893,8 @@ function MessageBubble({
 
   return (
     <div
-      className={`flex w-full ${isMine ? "justify-end" : "justify-start"} group ${hasReactions ? "mb-1" : ""}`}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      ref={messageWrapperRef}
+      className={`relative flex w-full ${isMine ? "justify-end" : "justify-start"} ${hasReactions ? "mb-px" : ""}`}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -4433,10 +4934,13 @@ function MessageBubble({
       }}
       onTouchEnd={(e) => {
         if (swipeActiveRef.current) {
+          const triggered = swipeXRef.current >= 60 && !!onReply;
           swipeActiveRef.current = false;
-          if (swipeXRef.current >= 60 && onReply) {
-            onReply(message);
+          if (triggered) {
+            onReply!(message);
             if (navigator.vibrate) navigator.vibrate(15);
+            swipeBounceFromRef.current = swipeXRef.current;
+            setSwipeBounce(true);
           }
           setSwipeX(0);
           e.stopPropagation();
@@ -4453,11 +4957,16 @@ function MessageBubble({
     >
       {/* Обёртка: [reply icon при свайпе] [аватар + пузырь + реакции] */}
       <div
-        className={`relative inline-flex flex-row flex-nowrap items-end gap-2.5 swipe-message ${isMine ? "ml-auto" : ""}`}
+        className={`relative flex flex-row flex-nowrap items-end gap-2 swipe-message ${isMine ? "w-full" : "inline-flex"} ${swipeBounce ? "swipe-bounce" : ""}`}
         style={{
-          transform: `translateX(${swipeX}px)`,
-          transition: swipeX === 0 ? "transform 0.25s ease-out" : "none",
+          ...(!swipeBounce ? {
+            transform: `translateX(${swipeX}px)`,
+            transition: swipeX === 0 ? "transform 0.25s ease-out" : "none",
+          } : {
+            "--swipe-from": `${swipeBounceFromRef.current}px`,
+          } as React.CSSProperties),
         }}
+        onAnimationEnd={() => setSwipeBounce(false)}
       >
         {swipeX > 0 && onReply && (
           <div
@@ -4481,66 +4990,54 @@ function MessageBubble({
             </svg>
           </div>
         )}
-        {/* Reaction picker — слева от сообщения (с другой стороны от аватарки), не перекрывая пузырь */}
-        {isMine && hoverDelayPassed && !editing && (
-          <div
-            className="absolute bottom-1 right-full mr-0.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
-          >
-            <div className="scrollbar-hide flex flex-col gap-0.5 bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg py-1 px-1 overflow-y-auto max-h-[5.75rem]">
-              {REACTION_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
-                  onClick={() => handleReaction(emoji)}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
-                  title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
-                >
-                  <AnimatedReaction emoji={emoji} size={24} loop />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-      <div className={`relative inline-flex flex-row items-end gap-2 max-w-[88%] min-w-0 shrink-0 ${isMine ? "order-2 flex-row-reverse" : "order-0"}`}>
-        {!isMine && (showAvatar ? (
+      <div className={`relative flex flex-row items-end gap-1.5 min-w-0 ${isMine ? "order-2 w-full max-w-[88%] ml-auto flex-row-reverse justify-start" : "order-0 inline-flex max-w-[88%] shrink-0"}`}>
+        {(showAvatar ? (
           (() => {
             const sender = message.sender as User;
             const avatarUrl = sender?.avatar_url ?? sender?.avatar ?? null;
             return (
-              <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200">
+              <button
+                type="button"
+                onClick={() => onAvatarClick?.(sender?.id)}
+                className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200 cursor-pointer hover:ring-2 hover:ring-blue-300 transition-shadow"
+                title={senderName}
+              >
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                  <img src={toSameOriginMediaUrl(avatarUrl)} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <span className="text-xs font-semibold text-slate-600">
                     {getAvatarInitials(senderName)}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })()
         ) : (
           <div className="w-8 h-8 shrink-0" aria-hidden />
         ))}
-        <div className={`flex flex-col min-w-0 ${isMine ? "items-end" : "items-start"}`}>
+        <div
+          className={`relative flex flex-col min-w-0 group ${isMine ? "items-end" : "items-start"}`}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
         {isEmojiOnly && !editing ? (
-          <div className={`inline-flex flex-col gap-0.5 max-w-full min-w-0 rounded-2xl ${content.length <= 20 ? "px-6 py-3" : "px-3 py-1.5"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} style={{ fontSize: `${MESSAGE_EMOJI_BASE_PX * textScale}px` }}>
-            <div className="inline-flex items-center gap-2 flex-wrap">
+          <div className="inline-flex flex-col gap-0.5 max-w-full min-w-0">
+            <div className="inline-flex items-center gap-2 flex-wrap" style={{ fontSize: `${MESSAGE_EMOJI_BASE_PX * textScale}px` }}>
               <span className="leading-none">{content.trim()}</span>
               {timeEl}
             </div>
             {hasReactions && (
-              <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-0.5 animate-reactions-appear ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"}`}>
                 {reactionButtons}
               </div>
             )}
           </div>
         ) : (
-        <div className={`inline-block max-w-full min-w-0 ${isImageBubble ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl pl-2 pr-2 pt-1.5 pb-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-7 pr-6 py-3" : "px-3 py-1.5"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+        <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`}>
+        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-6 pr-5 py-2" : "px-3 py-1"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? (isMine ? "rounded-br-[4px]" : "rounded-bl-[4px]") : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
           {/* Forwarded header */}
           {message.forwarded_from && (
-            <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-1 -mt-0.5">
+            <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-0.5 -mt-0.5">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
               <span>Переслано от <strong className="not-italic font-medium text-slate-600">{(message.forwarded_from as User).display_name || (message.forwarded_from as User).phone}</strong></span>
               {message.forwarded_from_chat_title && (
@@ -4548,29 +5045,48 @@ function MessageBubble({
               )}
             </div>
           )}
-          {/* Reply quote block */}
+          {/* Reply quote block — для своих сообщений прижата к правому краю */}
           {message.reply_to && !message.reply_to.is_deleted && (
-            <button
-              type="button"
-              className={`w-full text-left mb-1 -mt-0.5 rounded-lg px-2 py-1 border-l-[3px] ${isMine ? "border-blue-400 bg-blue-50/50" : "border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
-              onClick={() => {
-                const el = document.querySelector(`[data-message-id="${message.reply_to!.id}"]`);
-                el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-              }}
-            >
-              <div className="text-xs font-medium text-blue-600 truncate">
-                {(message.reply_to.sender as User)?.display_name || (message.reply_to.sender as User)?.phone || ""}
-              </div>
-              <div className="text-xs text-slate-500 truncate">
-                {message.reply_to.msg_type !== "text" && message.reply_to.msg_type !== "emoji"
-                  ? "(файл)"
-                  : (message.reply_to.content || "").trim().slice(0, 80)}
-              </div>
-            </button>
+            <div className={isMine ? "flex justify-end mb-0.5 -mt-0.5" : "mb-0.5 -mt-0.5"}>
+              <button
+                type="button"
+                className={`rounded-lg px-2 py-0.5 border-l-[3px] ${isMine ? "w-fit max-w-full text-right border-blue-400 bg-blue-50/50" : "w-full text-left border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
+                onClick={() => {
+                  const el = document.querySelector(`[data-message-id="${message.reply_to!.id}"]`);
+                  el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+                  if (el) {
+                    setTimeout(() => {
+                      const msgEl = el.previousElementSibling as HTMLElement | null;
+                      if (!msgEl) return;
+                      msgEl.classList.remove("msg-highlight-flash");
+                      void msgEl.offsetWidth;
+                      msgEl.classList.add("msg-highlight-flash");
+                      const onEnd = () => { msgEl.classList.remove("msg-highlight-flash"); msgEl.removeEventListener("animationend", onEnd); };
+                      msgEl.addEventListener("animationend", onEnd);
+                    }, 350);
+                  }
+                }}
+              >
+                <div className="text-xs font-medium text-blue-600 truncate">
+                  {(message.reply_to.sender as User)?.display_name || (message.reply_to.sender as User)?.phone || ""}
+                </div>
+                <div className="text-xs text-slate-500 truncate">
+                  {message.reply_to.msg_type === "gif"
+                    ? "(GIF)"
+                    : message.reply_to.msg_type === "sticker"
+                      ? t("common.stickerMsg")
+                      : message.reply_to.msg_type !== "text" && message.reply_to.msg_type !== "emoji"
+                        ? t("common.fileMsg")
+                        : (message.reply_to.content || "").trim().slice(0, 80)}
+                </div>
+              </button>
+            </div>
           )}
           {message.reply_to && message.reply_to.is_deleted && (
-            <div className="w-full text-left mb-1 -mt-0.5 rounded-lg px-2 py-1 border-l-[3px] border-slate-300 bg-slate-50/50">
-              <div className="text-xs text-slate-400 italic">Сообщение удалено</div>
+            <div className={`mb-0.5 -mt-0.5 ${isMine ? "flex justify-end" : ""}`}>
+              <div className={`rounded-lg px-2 py-0.5 border-l-[3px] border-slate-300 bg-slate-50/50 ${isMine ? "w-fit max-w-full text-right" : "w-full text-left"}`}>
+                <div className="text-xs text-slate-400 italic">{t("chat.messageDeleted")}</div>
+              </div>
             </div>
           )}
           {editing ? (
@@ -4601,32 +5117,46 @@ function MessageBubble({
           ) : isVideoCircle ? (
             <div className="min-w-0 max-w-full">
               <VideoCirclePlayer src={fileUrl} />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
             </div>
           ) : isVideo ? (
             <div className="min-w-0 max-w-full">
               <InlineAutoplayVideo src={fileUrl} className="max-w-[300px] max-h-80 rounded-lg" />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
+                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              </div>
+            </div>
+          ) : isGif ? (
+            <div className="min-w-0 max-w-full">
+              <img src={content} alt="" className="max-w-[280px] max-h-80 rounded-xl object-contain" style={{ maxHeight: "280px" }} />
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
+                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              </div>
+            </div>
+          ) : isSticker ? (
+            <div className="min-w-0 max-w-full">
+              <img src={content.startsWith("/") ? content : `/${content.replace(/^\/+/, "")}`} alt="" className="w-14 h-14 object-contain" />
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
             </div>
           ) : isMultiImage ? (
-            <div className="min-w-0 max-w-full">
+            <div className="min-w-0 max-w-full flex flex-col gap-0.5">
               <ImageTileGrid images={imageFiles} />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
             </div>
           ) : isFile && message.file ? (
-            <div className="min-w-0 max-w-full">
+            <div className={`min-w-0 max-w-full ${isImage ? "min-w-[180px]" : ""}`}>
               {isImage ? (
                 onImageClick ? (
                   <ProgressiveImage
                     src={fileUrl}
                     alt={fileName}
-                    className="w-[320px] max-w-[80vw] max-h-80 h-auto rounded-lg cursor-pointer"
+                    className="w-full max-w-[340px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
                     wrapper="button"
                     onClick={() => onImageClick(fileUrl, fileName)}
                     preserveAnimation={fileMime.includes("gif")}
@@ -4635,7 +5165,7 @@ function MessageBubble({
                   <ProgressiveImage
                     src={fileUrl}
                     alt={fileName}
-                    className="w-[320px] max-w-[80vw] max-h-80 h-auto rounded-lg cursor-pointer"
+                    className="w-full max-w-[340px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
                     wrapper="a"
                     href={fileUrl}
                     preserveAnimation={fileMime.includes("gif")}
@@ -4664,41 +5194,65 @@ function MessageBubble({
                   </span>
                 </a>
               )}
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
                 {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
               </div>
             </div>
           ) : isShortText ? (
             <>
-              <div className={`flex items-center gap-x-1.5 gap-y-0 leading-snug min-w-0 max-w-full ${content.length < 20 ? "flex-nowrap" : "flex-wrap"} ${isMine ? "justify-end" : ""}`}>
+              <div className={`flex items-center gap-x-1 gap-y-0 leading-snug min-w-fit max-w-full ${content.length < 20 ? "flex-nowrap" : "flex-wrap"} ${isMine ? "justify-end" : ""}`}>
                 <MarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
                 {timeEl}
               </div>
               {hasReactions && (
-                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-0.5 animate-reactions-appear ${isMine ? "justify-end" : "justify-start"}`}>
+                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"} ${!isMine ? "-ml-3 mr-1" : ""}`}>
                   {reactionButtons}
                 </div>
               )}
             </>
           ) : (
             <>
-              <div className={`flex flex-wrap items-center gap-x-1.5 leading-snug min-w-0 max-w-full ${isMine ? "justify-end" : ""}`}>
+              <div className={`flex flex-wrap items-center gap-x-1 leading-snug min-w-fit max-w-full ${isMine ? "justify-end" : ""}`}>
                 <MarkdownMessageContent content={content} isMine={isMine} className="inline" />
                 {timeEl}
               </div>
               {hasReactions && (
-                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-0.5 animate-reactions-appear ${isMine ? "justify-end" : "justify-start"}`}>
+                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"} ${!isMine ? "-ml-1 mr-1" : ""}`}>
                   {reactionButtons}
                 </div>
               )}
             </>
           )}
         </div>
+        {isLastInGroup && (
+          <div
+            className={`absolute w-0 h-0 border-[6px] border-transparent bottom-[10px] ${isMine ? "right-0 -mr-px border-l-blue-100" : "left-0 -ml-px border-r-white"}`}
+            aria-hidden
+          />
         )}
         </div>
-      </div>
-
-        {/* Reaction picker — справа от сообщения (с другой стороны от аватарки), не перекрывая пузырь */}
+        )}
+        {/* Reaction picker — слева от bubbleColumn (для isMine), справа (для !isMine) */}
+        {isMine && hoverDelayPassed && !editing && (
+          <div
+            className="absolute bottom-1 right-full mr-0.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+          >
+            <div className="scrollbar-hide flex flex-col gap-0.5 bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg py-1 px-1 overflow-y-auto max-h-[5.75rem]">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
+                  onClick={() => handleReaction(emoji)}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
+                  title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
+                >
+                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji={emoji !== "🔥"} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {!isMine && pickerVisible && (
           <div
             className="absolute bottom-1 left-full ml-0.5 z-20 flex items-center gap-1"
@@ -4713,14 +5267,17 @@ function MessageBubble({
                   disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
                   onClick={() => handleReaction(emoji)}
                   className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
-                  title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : "Макс. 3 реакции"}
+                  title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
                 >
-                  <AnimatedReaction emoji={emoji} size={24} loop />
+                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji={emoji !== "🔥"} />
                 </button>
               ))}
             </div>
           </div>
         )}
+        </div>
+      </div>
+
       </div>
       {contextMenu && (
         <>
@@ -4734,23 +5291,6 @@ function MessageBubble({
             className="context-menu-bottom-sheet fixed z-[100] min-w-[200px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh] overflow-y-auto"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            {/* Quick-react emoji row (mobile-first, visible on all) */}
-            <div className="flex flex-wrap justify-center gap-1 px-3 py-2 border-b border-slate-100 md:border-b-0 md:pb-0 md:pt-0 md:px-0 md:py-0 md:hidden">
-              {REACTION_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
-                  onClick={() => {
-                    handleReaction(emoji);
-                    closeContextMenu();
-                  }}
-                  className={`w-9 h-9 flex items-center justify-center rounded-lg text-lg active:bg-slate-100 transition-colors ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
-                >
-                  <AnimatedReaction emoji={emoji} size={28} loop />
-                </button>
-              ))}
-            </div>
             {/* 1. Ответить */}
           {onReply && (
             <button
@@ -4762,7 +5302,7 @@ function MessageBubble({
               Ответить
             </button>
           )}
-          {/* 2. Переслать */}
+          {/* 2. Forward */}
           {onForward && (
             <button
               type="button"
@@ -4770,7 +5310,7 @@ function MessageBubble({
               onClick={() => { closeContextMenu(); onForward(message); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
-              Переслать
+              {t("chat.forward")}
             </button>
           )}
           {/* 3. Копировать */}
@@ -4778,7 +5318,7 @@ function MessageBubble({
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
             onClick={() => {
-              const text = isFile ? "(файл)" : (message.content || "");
+              const text = isFile ? t("common.fileMsg") : (message.content || "");
               copyToClipboard(text).then(() => {
                 setContextMenuCopied(true);
                 setTimeout(() => setContextMenuCopied(false), 2000);
@@ -4786,14 +5326,14 @@ function MessageBubble({
             }}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            {contextMenuCopied ? "Скопировано" : "Копировать"}
+            {contextMenuCopied ? t("common.copied") : t("common.copy")}
           </button>
           {/* 4. Копировать для Word */}
           <button
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
             onClick={() => {
-              const raw = isFile ? "(файл)" : (message.content || "");
+              const raw = isFile ? t("common.fileMsg") : (message.content || "");
               const text = isFile ? raw : stripMarkdown(raw);
               copyToClipboard(text).then(() => {
                 setContextMenuCopied(true);
@@ -4802,7 +5342,7 @@ function MessageBubble({
             }}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            Копировать для Word
+            {t("chat.copyForWord")}
           </button>
           {/* 5. Редактировать */}
           {canEdit && (
@@ -4819,8 +5359,8 @@ function MessageBubble({
               }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-              Редактировать сообщение
-            </button>
+{t("chat.editMessage")}
+              </button>
           )}
           {/* 6. Удалить */}
           {isMine && onMessageDeleted && (
@@ -4904,7 +5444,7 @@ function MessageBubble({
                   {message.read_by!.map((u) => (
                     <div key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 text-slate-700">
                       {(u.avatar_url ?? u.avatar) ? (
-                        <img src={(u.avatar_url ?? u.avatar)!} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                        <img src={toSameOriginMediaUrl(u.avatar_url ?? u.avatar)!} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
                       ) : (
                         <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-semibold shrink-0">
                           {getAvatarInitials(u.display_name || u.phone || u.telegram_username || u.id)}
@@ -4928,7 +5468,7 @@ function MessageBubble({
       )}
     </div>
   );
-}
+});
 
 /* ================================================================
    VideoCirclePlayer — круглое видео (кружочек)
@@ -4946,6 +5486,7 @@ function formatAudioTime(seconds: number): string {
    ================================================================ */
 
 function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boolean }) {
+  const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -5016,28 +5557,28 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
   };
 
   return (
-    <div className="flex items-center gap-3 my-0.5 min-w-[240px] max-w-[360px]">
+    <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
       <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
       <button
         type="button"
         onClick={togglePlay}
-        className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
           isMine ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
         }`}
-        aria-label={isPlaying ? "Пауза" : "Воспроизвести"}
+        aria-label={isPlaying ? t("chat.pause") : t("chat.play")}
       >
         {isPlaying ? (
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
         ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         )}
       </button>
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <div
-          className="flex items-end gap-[2px] h-6 cursor-pointer select-none"
+          className="flex items-end gap-[2px] h-5 cursor-pointer select-none"
           onClick={handleBarClick}
           role="button"
-          aria-label="Перемотка: клик по волне"
+          aria-label={t("chat.seekWave")}
         >
           {waveform.map((v, i) => {
             const played = (i + 1) / waveform.length <= progress;
@@ -5045,7 +5586,7 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
               <div
                 key={i}
                 className={`w-[3px] rounded-full min-h-[2px] transition-colors ${played ? (isMine ? "bg-blue-600" : "bg-slate-500") : "bg-slate-300"}`}
-                style={{ height: `${Math.max(2, (v / 255) * 22)}px` }}
+                style={{ height: `${Math.max(2, (v / 255) * 16)}px` }}
               />
             );
           })}
@@ -5073,6 +5614,7 @@ function AudioWaveform({
   progress?: number;
   onSeek?: (percent: number) => void;
 }) {
+  const { t } = useTranslation();
   if (!waveform.length) return null;
   const maxH = 20;
   const n = waveform.length;
@@ -5092,7 +5634,7 @@ function AudioWaveform({
       className="flex items-end gap-0.5 h-5 cursor-pointer select-none"
       onClick={handleClick}
       role={onSeek ? "button" : undefined}
-      aria-label={onSeek ? "Перемотка: клик по волне" : undefined}
+      aria-label={onSeek ? t("chat.seekWave") : undefined}
     >
       {waveform.map((v, i) => {
         const played = (i + 1) / n <= progress;
@@ -5113,6 +5655,7 @@ function AudioWaveform({
    ================================================================ */
 
 function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; waveform: number[]; isMine: boolean }) {
+  const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -5169,23 +5712,23 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
   };
 
   return (
-    <div className="flex items-center gap-3 my-0.5 min-w-[240px] max-w-[360px]">
+    <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
       <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
       <button
         type="button"
         onClick={togglePlay}
-        className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
           isMine ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"
         }`}
-        aria-label={isPlaying ? "Пауза" : "Воспроизвести"}
+        aria-label={isPlaying ? t("chat.pause") : t("chat.play")}
       >
         {isPlaying ? (
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
         ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         )}
       </button>
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <AudioWaveform waveform={waveform} isMine={isMine} progress={progress} onSeek={handleSeek} />
         <div className={`text-xs tabular-nums ${isMine ? "text-slate-600" : "text-slate-500"}`}>
           {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
@@ -5218,10 +5761,10 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
     return "";
   };
 
-  const getItemHeight = () => {
-    if (count === 2) return "h-40";
-    if (count <= 4) return "h-32";
-    return "h-28";
+  const getItemAspect = () => {
+    if (count === 2) return "aspect-square";
+    if (count <= 4) return "aspect-square";
+    return "aspect-square";
   };
 
   // Показывать максимум 6, остальные — "+N"
@@ -5231,15 +5774,14 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
 
   return (
     <>
-      <div className={`grid ${getGridClass()} gap-0.5 rounded-xl overflow-hidden max-w-[320px]`}>
+      <div className={`grid ${getGridClass()} gap-px rounded-xl overflow-hidden w-full max-w-[320px] min-w-[180px]`}>
         {visibleImages.map((img, idx) => {
-          const url = img.url || "#";
-          const previewUrl = withPreviewParams(url, 1400);
+          const url = toSameOriginMediaUrl(img.url || "#") || "#";
           const isLast = idx === maxShow - 1 && hiddenCount > 0;
           return (
             <div
               key={img.id}
-              className={`relative ${getItemClass(idx)} ${getItemHeight()} cursor-pointer overflow-hidden`}
+              className={`relative ${getItemClass(idx)} ${getItemAspect()} min-h-[100px] cursor-pointer overflow-hidden bg-slate-100`}
               onClick={() => setLightboxIdx(idx)}
             >
               <ProgressiveImage
@@ -5247,6 +5789,7 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
                 alt={img.original_name || ""}
                 className="w-full h-full hover:scale-105 transition-transform duration-200"
                 objectFit="cover"
+                fullWidth={800}
                 preserveAnimation={(img.mime_type || "").includes("gif") || /\.gif$/i.test(img.original_name || "")}
               />
               {isLast && (
@@ -5259,13 +5802,14 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
         })}
       </div>
 
-      {/* Lightbox */}
-      {lightboxIdx !== null && (
+      {/* Lightbox — portal в body для полноэкранного отображения */}
+      {lightboxIdx !== null && createPortal(
         <ImageLightbox
           images={images}
           initialIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
-        />
+        />,
+        document.body,
       )}
     </>
   );
@@ -5280,9 +5824,10 @@ function ImageLightbox({
   initialIndex: number;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [idx, setIdx] = useState(initialIndex);
   const img = images[idx];
-  const url = img?.url || "#";
+  const url = toSameOriginMediaUrl(img?.url || "#") || "#";
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -5296,13 +5841,14 @@ function ImageLightbox({
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={onClose}>
-      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
         <ProgressiveImage
           src={url}
           alt={img?.original_name || ""}
-          className="max-w-full max-h-[85vh] rounded-lg"
+          className="max-w-full max-h-full object-contain rounded-lg"
           loading="eager"
           preserveAnimation={/\.gif$/i.test(img?.original_name || "")}
+          useOriginalQuality
         />
 
         {/* Навигация */}
@@ -5332,7 +5878,7 @@ function ImageLightbox({
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         className="fixed top-4 right-4 z-[101] bg-white/90 hover:bg-white text-slate-800 rounded-full w-9 h-9 flex items-center justify-center shadow-lg transition-colors"
-        aria-label="Закрыть"
+        aria-label={t("common.close")}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -5474,8 +6020,6 @@ function VideoCirclePlayer({ src }: { src: string }) {
    ScheduleMessageModal — форма отложенного/рекуррентного сообщения
    ================================================================ */
 
-const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-
 function ScheduleMessageModal({
   chatId,
   initialContent,
@@ -5487,6 +6031,7 @@ function ScheduleMessageModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t, lang } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const [scheduledAt, setScheduledAt] = useState("");
   const [recurrence, setRecurrence] = useState<"none" | "daily" | "weekly">("none");
@@ -5494,6 +6039,7 @@ function ScheduleMessageModal({
   const [recurrenceWeekday, setRecurrenceWeekday] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const weekdays = getWeekdays(lang);
 
   useEffect(() => {
     const d = new Date();
@@ -5516,16 +6062,16 @@ function ScheduleMessageModal({
     setError("");
     const text = content.trim();
     if (!text) {
-      setError("Введите текст сообщения.");
+      setError(t("chat.scheduleEnterText"));
       return;
     }
     if (!scheduledAt) {
-      setError("Укажите дату и время отправки.");
+      setError(t("chat.scheduleSetTime"));
       return;
     }
     const at = new Date(scheduledAt);
     if (at.getTime() <= Date.now()) {
-      setError("Время отправки должно быть в будущем.");
+      setError(t("chat.scheduleInFuture"));
       return;
     }
     setSubmitting(true);
@@ -5542,7 +6088,7 @@ function ScheduleMessageModal({
       .create(chatId, payload)
       .then(() => onSaved())
       .catch((err: { response?: { data?: { detail?: string; recurrence_time?: string[]; recurrence_weekday?: string[] } } }) => {
-        const msg = err.response?.data?.detail || err.response?.data?.recurrence_time?.[0] || err.response?.data?.recurrence_weekday?.[0] || "Ошибка сохранения.";
+        const msg = err.response?.data?.detail || err.response?.data?.recurrence_time?.[0] || err.response?.data?.recurrence_weekday?.[0] || t("chat.scheduleSaveError");
         setError(msg);
       })
       .finally(() => setSubmitting(false));
@@ -5552,22 +6098,22 @@ function ScheduleMessageModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-slate-800">Отложенное сообщение</h3>
+          <h3 className="text-lg font-semibold text-slate-800">{t("chat.scheduledMessageTitle")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">&#10005;</button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Текст</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t("chat.scheduleLabelText")}</label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[80px]"
-              placeholder="Сообщение..."
+              placeholder={t("chat.messagePlaceholder")}
               autoFocus
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Когда отправить</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t("chat.scheduleLabelWhen")}</label>
             <input
               type="datetime-local"
               value={scheduledAt}
@@ -5576,21 +6122,21 @@ function ScheduleMessageModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Повтор</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">{t("chat.scheduleLabelRepeat")}</label>
             <select
               value={recurrence}
               onChange={(e) => setRecurrence(e.target.value as "none" | "daily" | "weekly")}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
             >
-              <option value="none">Один раз</option>
-              <option value="daily">Каждый день</option>
-              <option value="weekly">Раз в неделю</option>
+              <option value="none">{t("chat.scheduleOnce")}</option>
+              <option value="daily">{t("chat.scheduleEveryDay")}</option>
+              <option value="weekly">{t("chat.scheduleWeekly")}</option>
             </select>
           </div>
           {recurrence !== "none" && (
             <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Время</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t("chat.scheduleLabelTime")}</label>
               <input
                 type="time"
                 value={recurrenceTime}
@@ -5600,13 +6146,13 @@ function ScheduleMessageModal({
             </div>
             {recurrence === "weekly" && (
               <div className="flex-1">
-                <label className="block text-sm font-medium text-slate-700 mb-1">День недели</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t("chat.scheduleLabelWeekday")}</label>
                 <select
                   value={recurrenceWeekday}
                   onChange={(e) => setRecurrenceWeekday(Number(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
                 >
-                  {WEEKDAYS.map((label, i) => (
+                  {weekdays.map((label, i) => (
                     <option key={i} value={i}>{label}</option>
                   ))}
                 </select>
@@ -5617,10 +6163,10 @@ function ScheduleMessageModal({
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex gap-2 justify-end pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">
-              Отмена
+              {t("common.cancel")}
             </button>
             <button type="submit" disabled={submitting} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {submitting ? "Сохранение…" : "Запланировать"}
+              {submitting ? t("chat.scheduleSaving") : t("chat.schedule")}
             </button>
           </div>
         </form>

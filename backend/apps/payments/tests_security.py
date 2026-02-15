@@ -19,12 +19,12 @@ class ReturnUrlSecurityTest(TestCase):
 
     @override_settings(FRONTEND_URL="https://app.example.com")
     def test_allowed_same_netloc(self):
-        self.assertTrue(_is_allowed_return_url("https://app.example.com/dashboard?paid=1"))
+        self.assertTrue(_is_allowed_return_url("https://app.example.com/chats?paid=1"))
         self.assertTrue(_is_allowed_return_url("https://app.example.com/"))
 
     @override_settings(FRONTEND_URL="https://app.example.com")
     def test_rejected_different_domain(self):
-        self.assertFalse(_is_allowed_return_url("https://evil.com/dashboard"))
+        self.assertFalse(_is_allowed_return_url("https://evil.com/chats"))
         self.assertFalse(_is_allowed_return_url("https://evil.example.com/"))
 
     @override_settings(FRONTEND_URL="")

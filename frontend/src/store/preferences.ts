@@ -18,9 +18,17 @@ interface PreferencesState {
   messageTextScale: MessageTextScale;
   theme: AppTheme;
   language: AppLanguage;
+  soundEnabled: boolean;
+  soundSend: boolean;
+  soundReceive: boolean;
+  soundMention: boolean;
   setMessageTextScale: (scale: MessageTextScale) => void;
   setTheme: (theme: AppTheme) => void;
   setLanguage: (language: AppLanguage) => void;
+  setSoundEnabled: (enabled: boolean) => void;
+  setSoundSend: (enabled: boolean) => void;
+  setSoundReceive: (enabled: boolean) => void;
+  setSoundMention: (enabled: boolean) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>()(
@@ -29,20 +37,49 @@ export const usePreferencesStore = create<PreferencesState>()(
       messageTextScale: 0.9,
       theme: "light",
       language: "en",
+      soundEnabled: true,
+      soundSend: true,
+      soundReceive: true,
+      soundMention: true,
       setMessageTextScale: (scale) => set({ messageTextScale: normalizeScale(scale) }),
       setTheme: (theme) => set({ theme: theme === "dark" ? "dark" : "light" }),
       setLanguage: (language) => set({ language: language === "ru" ? "ru" : "en" }),
+      setSoundEnabled: (enabled) => set({ soundEnabled: enabled }),
+      setSoundSend: (enabled) => set({ soundSend: enabled }),
+      setSoundReceive: (enabled) => set({ soundReceive: enabled }),
+      setSoundMention: (enabled) => set({ soundMention: enabled }),
     }),
     {
       name: "preferences",
       merge: (persisted, current) => {
         const stored = (persisted as {
-          state?: { messageTextScale?: unknown; theme?: unknown; language?: unknown };
+          state?: {
+            messageTextScale?: unknown;
+            theme?: unknown;
+            language?: unknown;
+            soundEnabled?: boolean;
+            soundSend?: boolean;
+            soundReceive?: boolean;
+            soundMention?: boolean;
+          };
         } | null)?.state;
         const scale = stored?.messageTextScale ?? current.messageTextScale;
         const theme = stored?.theme === "dark" ? "dark" : "light";
         const language = stored?.language === "ru" ? "ru" : "en";
-        return { ...current, messageTextScale: normalizeScale(scale), theme, language };
+        const soundEnabled = stored?.soundEnabled ?? current.soundEnabled;
+        const soundSend = stored?.soundSend ?? current.soundSend;
+        const soundReceive = stored?.soundReceive ?? current.soundReceive;
+        const soundMention = stored?.soundMention ?? current.soundMention;
+        return {
+          ...current,
+          messageTextScale: normalizeScale(scale),
+          theme,
+          language,
+          soundEnabled,
+          soundSend,
+          soundReceive,
+          soundMention,
+        };
       },
     }
   )

@@ -13,7 +13,9 @@ def main():
     cmd = sys.argv[1].lower()
     if cmd == "backend":
         os.chdir(os.path.join(ROOT, "backend"))
-        subprocess.run([sys.executable, "manage.py", "runserver", "8000"], check=True)
+        env = os.environ.copy()
+        env["DJANGO_SETTINGS_MODULE"] = "config.settings.dev"
+        subprocess.run([sys.executable, "manage.py", "runserver", "8000"], check=True, env=env)
     elif cmd == "frontend":
         os.chdir(os.path.join(ROOT, "frontend"))
         subprocess.run(["npm.cmd", "run", "dev"], check=True, shell=True)

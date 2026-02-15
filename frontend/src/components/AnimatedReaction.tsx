@@ -22,6 +22,8 @@ export interface AnimatedReactionProps {
   /** Loop animation. Use true for picker. */
   loop?: boolean;
   className?: string;
+  /** Всегда показывать эмодзи (без Lottie) — надёжно в любом браузере. Использовать в пикере. */
+  preferEmoji?: boolean;
 }
 
 export function AnimatedReaction({
@@ -30,6 +32,7 @@ export function AnimatedReaction({
   playOnce = true,
   loop = false,
   className = "",
+  preferEmoji = false,
 }: AnimatedReactionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<AnimationItem | null>(null);
@@ -37,10 +40,10 @@ export function AnimatedReaction({
   const [visible, setVisible] = useState(loop);
 
   const def = REACTION_BY_EMOJI.get(emoji);
+  const showEmoji = preferEmoji || useFallback || !def;
 
   useEffect(() => {
-    if (!def || useFallback) return;
-
+    if (preferEmoji || !def || useFallback) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -81,10 +84,10 @@ export function AnimatedReaction({
       animRef.current?.destroy();
       animRef.current = null;
     };
-  }, [def, emoji, loop, playOnce, useFallback, visible]);
+  }, [preferEmoji, def, emoji, loop, playOnce, useFallback, visible]);
 
   useEffect(() => {
-    if (!def || useFallback) return;
+    if (preferEmoji || !def || useFallback) return;
 
     const container = containerRef.current;
     if (!container) return;
@@ -99,7 +102,7 @@ export function AnimatedReaction({
 
     observer.observe(container);
     return () => observer.disconnect();
-  }, [def, useFallback]);
+  }, [preferEmoji, def, useFallback]);
 
   useEffect(() => {
     if (visible && animRef.current) {
@@ -107,11 +110,17 @@ export function AnimatedReaction({
     }
   }, [visible]);
 
-  if (useFallback || !def) {
+  if (showEmoji) {
     return (
       <span
         className={`inline-flex items-center justify-center ${className}`}
-        style={{ width: size, height: size, fontSize: Math.round(size * 0.85) }}
+        style={{
+          width: size,
+          height: size,
+          fontSize: Math.round(size * 0.85),
+          lineHeight: 1,
+          fontFamily: '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Android Emoji",emoji',
+        }}
       >
         {emoji}
       </span>

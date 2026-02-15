@@ -48,6 +48,43 @@ describe("compressImageForUpload", () => {
     expect(result).toBe(pdf);
   });
 
+  it("resizes image 4000x3000 to max 1920px on longest side", async () => {
+    const large = makeFile("big.jpg", "image/jpeg", 500);
+
+    // Mock createImageBitmap: image is 4000×3000
+    const bitmap = { width: 4000, height: 3000, close: vi.fn() };
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+
+    // Mock canvas — capture the assigned width/height
+    const smallBlob = new Blob([new Uint8Array(200 * 1024)], { type: "image/webp" });
+    const mockCtx = {
+      fillStyle: "",
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    };
+    const canvasObj = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn().mockReturnValue(mockCtx),
+      toBlob: vi.fn((cb: (b: Blob | null) => void) => cb(smallBlob)),
+    };
+    vi.spyOn(document, "createElement").mockReturnValue(canvasObj as unknown as HTMLElement);
+
+    const result = await compressImageForUpload(large);
+
+    // The canvas dimensions should be scaled down to fit 1920 max
+    // 4000×3000 → scale = min(1920/4000, 1920/3000, 1) = 0.48
+    // Width = round(4000 * 0.48) = 1920, Height = round(3000 * 0.48) = 1440
+    expect(canvasObj.width).toBeLessThanOrEqual(1920);
+    expect(canvasObj.height).toBeLessThanOrEqual(1920);
+    expect(canvasObj.width).toBeGreaterThan(0);
+    expect(canvasObj.height).toBeGreaterThan(0);
+    // The longer side should be exactly 1920
+    const longerSide = Math.max(canvasObj.width, canvasObj.height);
+    expect(longerSide).toBe(1920);
+    expect(result.type).toBe("image/webp");
+  });
+
   it("attempts compression for large JPEG and returns file", async () => {
     const large = makeFile("big.jpg", "image/jpeg", 500);
 

@@ -349,7 +349,7 @@ class NotifyNewLoginTest(TestCase):
         self.user = create_user(phone="+79990002060")
         self.session = _create_session(self.user)
 
-    @patch("apps.users.services.is_online", return_value=False)
+    @patch("apps.users.online.is_online", return_value=False)
     @patch("apps.users.services.send_sms")
     def test_offline_user_gets_sms(self, mock_sms, mock_online):
         from apps.users.services import notify_new_login
@@ -376,7 +376,7 @@ class NotifyNewLoginTest(TestCase):
         AUTH_DEBUG_CODE="123456",
     )
     @patch("apps.users.services.send_sms")
-    @patch("apps.users.services.is_online", return_value=False)
+    @patch("apps.users.online.is_online", return_value=False)
     def test_new_registration_does_not_notify(self, mock_online, mock_sms):
         """First login (new user) → notify_new_login is NOT called."""
         client = APIClient()
@@ -396,7 +396,7 @@ class NotifyNewLoginTest(TestCase):
         AUTH_DEBUG_CODE="123456",
     )
     @patch("apps.users.services.send_sms")
-    @patch("apps.users.services.is_online", return_value=False)
+    @patch("apps.users.online.is_online", return_value=False)
     def test_existing_user_login_notifies(self, mock_online, mock_sms):
         """Second login (existing user) → notify_new_login IS called."""
         # First login — creates user

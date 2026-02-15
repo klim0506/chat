@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useTranslation } from "../lib/i18n";
 
 export interface FilePreviewItem {
   file: File;
@@ -50,6 +51,7 @@ async function buildImagePreview(file: File): Promise<Blob | null> {
 }
 
 export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel }: FilePreviewModalProps) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<FilePreviewItem[]>(() =>
     initialFiles.map((f, i) => ({ file: f, id: `${f.name}-${f.size}-${i}-${Date.now()}` }))
   );
@@ -160,7 +162,7 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel }: F
                       type="button"
                       onClick={() => remove(it.id)}
                       className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hover:bg-red-500 text-white flex items-center justify-center text-sm transition-colors"
-                      title="Удалить"
+                      title={t("common.delete")}
                     >
                       ×
                     </button>
@@ -199,7 +201,7 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel }: F
                       type="button"
                       onClick={() => remove(it.id)}
                       className="shrink-0 w-7 h-7 rounded-full bg-slate-200 hover:bg-red-500 hover:text-white text-slate-600 flex items-center justify-center text-sm transition-colors"
-                      title="Удалить"
+                      title={t("common.delete")}
                     >
                       ×
                     </button>

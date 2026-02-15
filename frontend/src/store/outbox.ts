@@ -4,6 +4,7 @@ import { messagesApi, filesApi } from "../api/client";
 import type { Message } from "../api/client";
 import { useMessagesStore, normalizeMessage } from "./messages";
 import { useNetworkStore } from "./network";
+import { useAuthStore } from "./auth";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -83,10 +84,17 @@ export const useOutboxStore = create<OutboxState>()((set, get) => ({
     db.outbox.put(item).catch(() => {});
 
     // Also show optimistic message in the messages store
+    const currentUser = useAuthStore.getState().user;
     const optimisticMsg: Message = {
       id,
       chat: params.chatId,
-      sender: { id: "self", phone: "", display_name: "", avatar: null },
+      sender: {
+        id: currentUser?.id || "self",
+        phone: currentUser?.phone || "",
+        display_name: currentUser?.display_name || "",
+        avatar: currentUser?.avatar ?? null,
+        avatar_url: currentUser?.avatar_url ?? null,
+      },
       msg_type: params.msgType,
       content: params.content,
       file: null,

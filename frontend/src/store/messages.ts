@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Message } from "../api/client";
 import { messagesApi } from "../api/client";
 import { db, toCachedMessage, type CachedMessage } from "../lib/db";
+import { useAuthStore } from "./auth";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -12,11 +13,17 @@ interface MessagesState {
   byChat: Record<string, Message[]>;
   /** Whether a particular chat's messages are currently being loaded from the network. */
   loadingChats: Record<string, boolean>;
+  /** Whether a chat has older messages available on the server (for pagination). */
+  hasMoreByChat: Record<string, boolean>;
+  /** Whether older messages are currently being fetched (to prevent duplicate requests). */
+  loadingOlderChats: Record<string, boolean>;
 
   /* ---------- Actions ---------- */
 
-  /** Load messages for a chat: IndexedDB first, then revalidate from API. */
+  /** Load messages for a chat: IndexedDB first, then revalidate from API (latest page). */
   loadMessages: (chatId: string) => Promise<Message[]>;
+  /** Load older messages for a chat (triggered by scrolling up). Returns the prepended messages. */
+  loadOlderMessages: (chatId: string) => Promise<Message[]>;
   /** Add or update a single message (from WS, REST, or outbox confirmation). */
   upsertMessage: (chatId: string, msg: Message) => void;
   /** Update a message by id within a chat (edit, reaction, delete). */
@@ -83,15 +90,23 @@ function upsertSorted(prev: Message[], next: Message): Message[] {
 export const useMessagesStore = create<MessagesState>()((set, get) => ({
   byChat: {},
   loadingChats: {},
+  hasMoreByChat: {},
+  loadingOlderChats: {},
 
   loadMessages: async (chatId) => {
     set((s) => ({ loadingChats: { ...s.loadingChats, [chatId]: true } }));
 
-    // 1. Load from IndexedDB cache (instant)
+    const currentUserId = useAuthStore.getState().user?.id;
+
+    // 1. Load from IndexedDB cache (instant, filtered by owner)
     try {
       const cached = await db.messages.where("chatId").equals(chatId).sortBy("created_at");
-      if (cached.length > 0) {
-        const msgs = cached.map(stripCacheMeta);
+      // Only use cache entries belonging to current user (or legacy entries without _userId)
+      const owned = currentUserId
+        ? cached.filter((m) => m._userId === currentUserId || !m._userId)
+        : [];
+      if (owned.length > 0) {
+        const msgs = owned.map(stripCacheMeta);
         set((s) => ({
           byChat: { ...s.byChat, [chatId]: msgs },
           loadingChats: { ...s.loadingChats, [chatId]: false },
@@ -101,13 +116,32 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       // IndexedDB unavailable
     }
 
-    // 2. Revalidate from network
+    // 2. Revalidate from network (latest page)
     try {
       const res = await messagesApi.list(chatId);
-      const freshMsgs = (res.data as Message[]).map(normalizeMessage);
+      const rawFreshMsgs = res.data.map(normalizeMessage);
+
+      // Preserve locally-decrypted content for encrypted messages that we already have
+      // (WS handler decrypts in real-time and stores plaintext; API always returns ciphertext)
+      const existingMsgs = get().byChat[chatId] ?? [];
+      const existingMap = new Map(existingMsgs.map((m) => [m.id, m]));
+      const freshMsgs = rawFreshMsgs.map((m) => {
+        if (m.is_encrypted) {
+          if (existingMap.has(m.id)) {
+            const existing = existingMap.get(m.id)!;
+            // Keep the cached content (decrypted plaintext or a user-friendly placeholder)
+            return { ...m, content: existing.content };
+          }
+          // No cached version — show placeholder instead of raw ciphertext
+          return { ...m, content: "Зашифрованное сообщение" };
+        }
+        return m;
+      });
+
       set((s) => ({
         byChat: { ...s.byChat, [chatId]: freshMsgs },
         loadingChats: { ...s.loadingChats, [chatId]: false },
+        hasMoreByChat: { ...s.hasMoreByChat, [chatId]: res.hasMore },
       }));
 
       // Persist to IndexedDB
@@ -130,13 +164,70 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     }
   },
 
+  loadOlderMessages: async (chatId) => {
+    const state = get();
+    // Guard: don't load if already loading or no more messages available
+    if (state.loadingOlderChats[chatId]) return [];
+    if (state.hasMoreByChat[chatId] === false) return [];
+
+    const existing = state.byChat[chatId] ?? [];
+    if (existing.length === 0) return [];
+
+    // Cursor = created_at of the oldest message we currently have
+    const oldestMsg = existing[0];
+    const before = oldestMsg.created_at;
+
+    set((s) => ({ loadingOlderChats: { ...s.loadingOlderChats, [chatId]: true } }));
+
+    try {
+      const res = await messagesApi.list(chatId, { before });
+      const olderRaw = res.data.map(normalizeMessage);
+
+      // Preserve decrypted content if we already have these messages cached
+      const existingMap = new Map((get().byChat[chatId] ?? []).map((m) => [m.id, m]));
+      const olderMsgs = olderRaw.map((m) => {
+        if (m.is_encrypted) {
+          if (existingMap.has(m.id)) {
+            return { ...m, content: existingMap.get(m.id)!.content };
+          }
+          return { ...m, content: "Зашифрованное сообщение" };
+        }
+        return m;
+      });
+
+      // Deduplicate: filter out any messages that already exist
+      const existingIds = new Set((get().byChat[chatId] ?? []).map((m) => m.id));
+      const uniqueOlder = olderMsgs.filter((m) => !existingIds.has(m.id));
+
+      set((s) => {
+        const current = s.byChat[chatId] ?? [];
+        return {
+          byChat: { ...s.byChat, [chatId]: [...uniqueOlder, ...current] },
+          hasMoreByChat: { ...s.hasMoreByChat, [chatId]: res.hasMore },
+          loadingOlderChats: { ...s.loadingOlderChats, [chatId]: false },
+        };
+      });
+
+      // Persist older messages to IndexedDB
+      if (uniqueOlder.length > 0) {
+        persistMessages(chatId, uniqueOlder).catch(() => {});
+      }
+
+      return uniqueOlder;
+    } catch {
+      set((s) => ({ loadingOlderChats: { ...s.loadingOlderChats, [chatId]: false } }));
+      return [];
+    }
+  },
+
   upsertMessage: (chatId, msg) => {
     set((s) => {
       const prev = s.byChat[chatId] ?? [];
       return { byChat: { ...s.byChat, [chatId]: upsertSorted(prev, msg) } };
     });
     // Persist single message
-    db.messages.put(toCachedMessage(msg)).catch(() => {});
+    const userId = useAuthStore.getState().user?.id;
+    db.messages.put(toCachedMessage(msg, userId)).catch(() => {});
   },
 
   updateMessage: (chatId, messageId, updates) => {
@@ -149,7 +240,10 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     // Persist the updated message
     const msgs = get().byChat[chatId];
     const updated = msgs?.find((m) => m.id === messageId);
-    if (updated) db.messages.put(toCachedMessage(updated)).catch(() => {});
+    if (updated) {
+      const userId = useAuthStore.getState().user?.id;
+      db.messages.put(toCachedMessage(updated, userId)).catch(() => {});
+    }
   },
 
   replaceTempMessage: (chatId, tempId, serverMsg) => {
@@ -159,24 +253,29 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
       return { byChat: { ...s.byChat, [chatId]: upsertSorted(without, serverMsg) } };
     });
     // Remove temp from DB, add server message
+    const userId = useAuthStore.getState().user?.id;
     db.messages.delete(tempId).catch(() => {});
-    db.messages.put(toCachedMessage(serverMsg)).catch(() => {});
+    db.messages.put(toCachedMessage(serverMsg, userId)).catch(() => {});
   },
 
   getMessages: (chatId) => get().byChat[chatId] ?? [],
 
   clearChat: (chatId) => {
     set((s) => {
-      const next = { ...s.byChat };
-      delete next[chatId];
-      return { byChat: next };
+      const nextByChat = { ...s.byChat };
+      delete nextByChat[chatId];
+      const nextHasMore = { ...s.hasMoreByChat };
+      delete nextHasMore[chatId];
+      const nextLoadingOlder = { ...s.loadingOlderChats };
+      delete nextLoadingOlder[chatId];
+      return { byChat: nextByChat, hasMoreByChat: nextHasMore, loadingOlderChats: nextLoadingOlder };
     });
     db.messages.where("chatId").equals(chatId).delete().catch(() => {});
     db.syncMeta.delete(chatId).catch(() => {});
   },
 
   reset: () => {
-    set({ byChat: {}, loadingChats: {} });
+    set({ byChat: {}, loadingChats: {}, hasMoreByChat: {}, loadingOlderChats: {} });
     db.messages.clear().catch(() => {});
     db.syncMeta.clear().catch(() => {});
   },
@@ -193,6 +292,7 @@ function stripCacheMeta(cached: CachedMessage): Message {
 }
 
 async function persistMessages(chatId: string, msgs: Message[]) {
-  const rows = msgs.map((m) => toCachedMessage({ ...m, chat: chatId }));
+  const userId = useAuthStore.getState().user?.id;
+  const rows = msgs.map((m) => toCachedMessage({ ...m, chat: chatId }, userId));
   await db.messages.bulkPut(rows);
 }

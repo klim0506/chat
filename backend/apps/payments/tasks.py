@@ -1,7 +1,10 @@
+import logging
 from datetime import timedelta
 from django.utils import timezone
 from celery import shared_task
-from .models import UserSubscription, PaymentLog
+from .models import UserSubscription, PaymentLog, StarTransaction
+
+logger = logging.getLogger(__name__)
 from .constants import SUBSCRIPTION_PERIOD_DAYS
 from .yookassa_client import create_recurring_payment
 
@@ -51,3 +54,38 @@ def charge_recurring_subscriptions():
         except Exception:
             sub.status = UserSubscription.Status.PAST_DUE
             sub.save()
+
+
+@shared_task
+def purge_old_idempotency_records():
+    """
+    Purge old idempotency-related records no longer needed for support:
+    - PaymentLog with terminal status (succeeded, cancelled, refunded), older than 30 days
+    - StarTransaction with referral reasons, older than 30 days
+    Keeps pending PaymentLog and non-referral StarTransactions regardless of age.
+    """
+    cutoff = timezone.now() - timedelta(days=30)
+    terminal_statuses = [
+        PaymentLog.Status.SUCCEEDED,
+        PaymentLog.Status.CANCELLED,
+        PaymentLog.Status.REFUNDED,
+    ]
+
+    pl_deleted, _ = PaymentLog.objects.filter(
+        status__in=terminal_statuses,
+        created_at__lt=cutoff,
+    ).delete()
+    st_deleted, _ = StarTransaction.objects.filter(
+        reason__in=[
+            StarTransaction.Reason.REFERRAL_INVITER,
+            StarTransaction.Reason.REFERRAL_INVITEE,
+        ],
+        created_at__lt=cutoff,
+    ).delete()
+
+    if pl_deleted or st_deleted:
+        logger.info(
+            "purge_old_idempotency_records: deleted %d PaymentLog, %d StarTransaction",
+            pl_deleted,
+            st_deleted,
+        )

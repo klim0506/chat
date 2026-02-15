@@ -1,38 +1,52 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { authApi } from "../api/client";
 import { useAuthStore } from "../store/auth";
+import { useTranslation } from "../lib/i18n";
 import logoUrl from "../../../ТЕЛЕГА.ico?url";
 
-const phoneSchema = z.object({ phone: z.string().min(10, "Введите номер телефона") });
-const codeSchema = z.object({ code: z.string().length(6, "Код из 6 цифр") });
-const usernameSchema = z.object({
-  username: z
-    .string()
-    .min(3, "От 3 до 30 символов")
-    .max(30, "От 3 до 30 символов")
-    .regex(/^[a-zA-Z0-9_]+$/, "Только латиница, цифры и подчёркивание"),
-  display_name: z.string().max(255).optional(),
-});
-type PhoneForm = z.infer<typeof phoneSchema>;
-type CodeForm = z.infer<typeof codeSchema>;
-type UsernameForm = z.infer<typeof usernameSchema>;
+type PhoneForm = { phone: string };
+type CodeForm = { code: string };
+type UsernameForm = { username: string; display_name?: string };
 
 export default function AuthPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const refCode = searchParams.get("ref") || "";
 
+  const phoneSchema = z.object({ phone: z.string().min(10, t("auth.enterPhone")) });
+  const codeSchema = z.object({ code: z.string().length(6, t("auth.codeDigits")) });
+  const usernameSchema = z.object({
+    username: z
+      .string()
+      .min(3, t("auth.username3to30"))
+      .max(30, t("auth.username3to30"))
+      .regex(/^[a-zA-Z0-9_]+$/, t("auth.usernameChars")),
+    display_name: z.string().max(255).optional(),
+  });
+
   const setTokens = useAuthStore((s) => s.setTokens);
+  const existingUser = useAuthStore((s) => s.user);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [step, setStep] = useState<"phone" | "code" | "username">("phone");
   const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "">("");
   const [preferredMethod, setPreferredMethod] = useState<"telegram" | "sms">("telegram");
+  const [isNewAccount, setIsNewAccount] = useState(false);
+
+  // If already authenticated but missing username, skip straight to username step
+  useEffect(() => {
+    if (isAuthenticated && existingUser && !existingUser.username) {
+      setIsNewAccount(true);
+      setStep("username");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const phoneForm = useForm<PhoneForm>({ resolver: zodResolver(phoneSchema), defaultValues: { phone: "" } });
   const codeForm = useForm<CodeForm>({ resolver: zodResolver(codeSchema), defaultValues: { code: "" } });
@@ -54,7 +68,7 @@ export default function AuthPage() {
       const method = (res.data as { method?: string }).method;
       setCodeMethod(method === "telegram" ? "telegram" : "sms");
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка");
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("common.error"));
     } finally {
       setLoading(false);
     }
@@ -67,14 +81,16 @@ export default function AuthPage() {
     try {
       const res = await authApi.verifyCode(phone, data.code, refCode || undefined);
       setTokens(res.data.access, res.data.refresh, res.data.user);
+      const created = !!(res.data as { created?: boolean }).created;
+      setIsNewAccount(created);
       if (res.data.user && !res.data.user.username) {
         setStep("username");
       } else {
-        const target = nextUrl && nextUrl.startsWith("/") ? nextUrl : "/dashboard";
+        const target = nextUrl && nextUrl.startsWith("/") ? nextUrl : "/chats";
         navigate(target, { replace: true });
       }
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Неверный код");
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("auth.invalidCode"));
     } finally {
       setLoading(false);
     }
@@ -111,11 +127,11 @@ export default function AuthPage() {
         user
       );
       if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-      const target = nextUrl && nextUrl.startsWith("/") ? nextUrl : "/dashboard";
+      const target = nextUrl && nextUrl.startsWith("/") ? nextUrl : "/chats";
       navigate(target, { replace: true });
     } catch (e: unknown) {
       setError(
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Этот юзернейм занят или недоступен"
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("auth.usernameTaken")
       );
     } finally {
       setLoading(false);
@@ -125,11 +141,13 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 p-4">
       <div className="absolute left-4 top-4">
-        <img src={logoUrl} alt="Логотип" className="h-8 w-8 object-contain" />
+        <img src={logoUrl} alt={t("auth.logo")} className="h-8 w-8 object-contain" />
       </div>
       <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-md p-6">
-        <h1 className="text-xl font-semibold text-center mb-6">Вход</h1>
+        <h1 className="text-xl font-semibold text-center mb-6">
+          {isNewAccount ? "Создание аккаунта" : "Вход"}
+        </h1>
 
         {refCode && (
           <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
@@ -183,7 +201,7 @@ export default function AuthPage() {
               disabled={loading}
               className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Отправка..." : "Получить код"}
+              {loading ? t("auth.sending") : t("auth.sendCode")}
             </button>
           </form>
         ) : step === "username" ? (
@@ -192,22 +210,22 @@ export default function AuthPage() {
               Придумайте юзернейм. По нему вас смогут найти и написать. Имя и аватарку можно задать сейчас или позже в профиле.
             </p>
             <div className="flex gap-4 items-start mb-4">
-              <label className="cursor-pointer shrink-0" title="Добавить аватарку">
+              <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
                 <input type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
                 <span className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 hover:border-blue-400 transition-colors">
                   {avatarPreview ? (
                     <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-gray-400 text-xs font-medium">Нет</span>
+                    <span className="text-gray-400 text-xs font-medium">{t("auth.photoPlaceholder")}</span>
                   )}
                 </span>
               </label>
               <div className="flex-1 min-w-0">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Имя (необязательно)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Имя</label>
                 <input
                   type="text"
                   autoComplete="name"
-                  placeholder="Как к вам обращаться"
+                  placeholder={t("auth.howToAddress")}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   {...usernameForm.register("display_name")}
                 />
@@ -235,7 +253,7 @@ export default function AuthPage() {
               disabled={loading}
               className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Сохранение..." : "Продолжить"}
+              {loading ? t("auth.saving") : t("auth.continue")}
             </button>
           </form>
         ) : (
@@ -256,7 +274,7 @@ export default function AuthPage() {
             </p>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {codeMethod === "telegram" ? "Код из Telegram" : "Код из SMS"}
+                {codeMethod === "telegram" ? t("auth.codeFromTelegram") : t("auth.codeFromSms")}
               </label>
               <input
                 type="text"
@@ -283,7 +301,7 @@ export default function AuthPage() {
                       const res = await authApi.sendCode(phone, "sms");
                       setCodeMethod((res.data as { method?: string }).method === "sms" ? "sms" : "telegram");
                     } catch (e: unknown) {
-                      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка");
+                      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("common.error"));
                     } finally {
                       setLoading(false);
                     }
@@ -300,7 +318,7 @@ export default function AuthPage() {
               disabled={loading}
               className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Проверка..." : "Войти"}
+              {loading ? t("auth.checking") : t("auth.loginBtn")}
             </button>
           </form>
         )}

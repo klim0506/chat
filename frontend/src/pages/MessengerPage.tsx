@@ -4,25 +4,30 @@ import { authApi, chatsApi, paymentsApi, type Chat, type UserSearchResult } from
 import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
 import { getAvatarInitials } from "../lib/avatar-initials";
+import { toSameOriginMediaUrl } from "../lib/media-url";
 import { showMessageNotification, requestPermission } from "../lib/notifications";
+import { playSound } from "../lib/sounds";
 import ChatPage from "./ChatPage";
 import SettingsPage from "./SettingsPage";
 import { useE2eeStore } from "../store/e2ee";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { WsManager, buildWsUrl } from "../lib/ws-manager";
-
+import CreateChatModal from "../components/CreateChatModal";
+import JoinChatPreviewModal from "../components/JoinChatPreviewModal";
+import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
+import type { AppLanguage } from "../store/preferences";
 
 /** Превью сообщения для списка чатов (совпадает с логикой бэкенда get_last_message_preview). */
-function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string }; is_encrypted?: boolean }): string {
+function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string }; is_encrypted?: boolean }, lang: AppLanguage): string {
   if (!msg) return "";
-  if ((msg as { is_encrypted?: boolean }).is_encrypted) return "Зашифрованное сообщение";
+  if ((msg as { is_encrypted?: boolean }).is_encrypted) return tFn("common.encryptedMessage", lang);
   const mime = (msg.file && msg.file.mime_type) || "";
-  if (msg.msg_type === "audio") return "(голосовое)";
-  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return "(видео)";
-  if (String(mime).startsWith("image/")) return "(фото)";
-  if (msg.msg_type === "file") return "(файл)";
+  if (msg.msg_type === "audio") return tFn("common.voice", lang);
+  if (msg.msg_type === "video" || msg.msg_type === "video_circle" || String(mime).startsWith("video/")) return tFn("common.video", lang);
+  if (String(mime).startsWith("image/")) return tFn("common.photo", lang);
+  if (msg.msg_type === "file") return tFn("common.fileMsg", lang);
   const text = (msg.content || "").trim();
-  if (!text) return "(сообщение)";
+  if (!text) return tFn("common.message", lang);
   return text.length > 60 ? text.slice(0, 60) + "…" : text;
 }
 
@@ -45,9 +50,10 @@ function withPreviewParams(url: string | null | undefined, width: number): strin
 }
 
 export default function MessengerPage() {
+  const { t, lang } = useTranslation();
   const { chatId: urlChatId } = useParams<{ chatId: string }>();
   const location = useLocation();
-  const showSettings = location.pathname === "/dashboard/settings";
+  const showSettings = location.pathname === "/chats/settings";
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId || null);
   const chats = useChatListStore((s) => s.chats);
   const chatListLoading = useChatListStore((s) => s.loading);
@@ -88,8 +94,15 @@ export default function MessengerPage() {
   const [joinLinkInput, setJoinLinkInput] = useState("");
   const [joinStatus, setJoinStatus] = useState<"idle" | "loading" | "joined" | "pending" | "error">("idle");
   const [joinMessage, setJoinMessage] = useState("");
+  /** Join-preview modal state (triggered by URL params or paste-a-link flow) */
+  const [joinPreviewSlug, setJoinPreviewSlug] = useState("");
+  const [joinPreviewCode, setJoinPreviewCode] = useState("");
+  const [showJoinPreviewModal, setShowJoinPreviewModal] = useState(false);
   /** Контекстное меню по правому клику на чат */
   const [chatContextMenu, setChatContextMenu] = useState<{ x: number; y: number; chat: Chat } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [showCreateChatModal, setShowCreateChatModal] = useState(false);
+  const [inviteFriendsCopied, setInviteFriendsCopied] = useState(false);
   const MAX_PINNED = 5;
   const lastSyncedPinnedRef = useRef<string[]>([]);
 
@@ -105,9 +118,27 @@ export default function MessengerPage() {
     }
   }, [location.state, location.pathname, navigate]);
 
+  // Open JoinChatPreviewModal when URL contains join_slug & join_code (e.g. redirect from invite link)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const slug = params.get("join_slug") || "";
+    const code = params.get("join_code") || "";
+    if (slug && code) {
+      setJoinPreviewSlug(slug);
+      setJoinPreviewCode(code);
+      setShowJoinPreviewModal(true);
+      // Clean up the URL params so they don't re-trigger on navigation
+      params.delete("join_slug");
+      params.delete("join_code");
+      const remaining = params.toString();
+      navigate(remaining ? `${location.pathname}?${remaining}` : location.pathname, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync URL with active chat / settings
   useEffect(() => {
-    if (location.pathname === "/dashboard/settings") {
+    if (location.pathname === "/chats/settings") {
       setActiveChatId(null);
     } else if (urlChatId && urlChatId !== activeChatId) {
       setActiveChatId(urlChatId);
@@ -141,12 +172,11 @@ export default function MessengerPage() {
         if (status === 403) {
           setNeedsSub(true);
         } else {
-          setError("Не удалось загрузить чаты");
+          setError(t("dashboard.loadError"));
         }
       })
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [t]);
 
   /* ---------- New-login toast ---------- */
   const [newLoginToast, setNewLoginToast] = useState<{ device: string; ip: string } | null>(null);
@@ -194,18 +224,20 @@ export default function MessengerPage() {
     }
 
     if (data.type === "new_message") {
-      const preview = data.message ? formatMessagePreview(data.message) : undefined;
+      const preview = data.message ? formatMessagePreview(data.message, lang) : undefined;
       const currentChats = useChatListStore.getState().chats;
       const found = currentChats.some((c) => c.id === data.chat_id);
 
       if (found) {
-        // Update existing chat in store
+        // Update existing chat in store; auto-unarchive when new message arrives (Telegram-style)
         const isActive = data.chat_id === activeChatId;
+        const chat = currentChats.find((c) => c.id === data.chat_id);
         storeUpdateChat(data.chat_id, {
           unread_count: isActive
-            ? (currentChats.find((c) => c.id === data.chat_id)?.unread_count || 0)
-            : (currentChats.find((c) => c.id === data.chat_id)?.unread_count || 0) + 1,
+            ? (chat?.unread_count || 0)
+            : (chat?.unread_count || 0) + 1,
           ...(preview ? { last_message_preview: preview } : {}),
+          ...(chat?.is_archived ? { is_archived: false } : {}),
         });
       } else {
         chatsApi.get(data.chat_id).then((res) => {
@@ -214,40 +246,26 @@ export default function MessengerPage() {
             last_message_preview: preview ?? res.data.last_message_preview,
           });
         }).catch(() => {
-          const now = new Date().toISOString();
-          const stubOwner = { id: data.chat_id, phone: "", display_name: data.chat_title || "User", avatar: null };
-          storeUpsertChat({
-            id: data.chat_id,
-            title: data.chat_title || "Новый чат",
-            description: "",
-            slug: "",
-            chat_type: "open",
-            is_personal: false,
-            max_members: 100,
-            effective_max_members: 100,
-            owner: stubOwner,
-            members_count: 2,
-            invite_link: null,
-            is_active: true,
-            created_at: now,
-            unread_count: 1,
-            is_muted: false,
-            is_expanded: false,
-            expanded_until: null,
-            avatar_url: null,
-            background_url: null,
-          } as Chat, {
-            last_message_preview: preview || "",
-          });
+          // Chat not accessible — do not add to store
         });
       }
-      if (!data.is_muted && document.hidden) {
-        showMessageNotification(data.chat_title || "Новое сообщение", data.message || {});
+      if (!data.is_muted) {
+        const content = (data.message?.content as string) || "";
+        const me = useAuthStore.getState().user;
+        const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
+        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
+        playSound(isMention ? "mention" : "receive");
+        if (document.hidden) {
+          showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {});
+        }
       }
     }
   }, [activeChatId, storeUpsertChat, storeUpdateChat]);
 
   const notifMgrRef = useRef<WsManager | null>(null);
+  const handleNotificationRef = useRef(handleNotification);
+  handleNotificationRef.current = handleNotification;
   useEffect(() => {
     if (!token || needsSub) return;
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
@@ -262,7 +280,22 @@ export default function MessengerPage() {
     notifWsRef.current = mgr.raw;
 
     mgr.on("*", (data: unknown) => {
-      handleNotification(data as Parameters<typeof handleNotification>[0]);
+      handleNotificationRef.current(data as Parameters<typeof handleNotification>[0]);
+    });
+
+    // Handle user online/offline status updates (for DM chats green dot in sidebar)
+    mgr.on("user.online.status", (data: unknown) => {
+      const d = data as { user_id?: string; is_online?: boolean; last_seen_display?: string | null };
+      if (!d.user_id) return;
+      const currentChats = useChatListStore.getState().chats;
+      const updateChat = useChatListStore.getState().updateChat;
+      for (const chat of currentChats) {
+        if (chat.is_personal && chat.other_member?.id === d.user_id) {
+          updateChat(chat.id, {
+            other_member: { ...chat.other_member, is_online: !!d.is_online },
+          } as Partial<Chat>);
+        }
+      }
     });
 
     mgr.connect();
@@ -272,7 +305,8 @@ export default function MessengerPage() {
       notifWsRef.current = null;
       mgr.dispose();
     };
-  }, [token, needsSub, handleNotification]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, needsSub]);
 
   const handleLogout = () => {
     clearTokens();
@@ -299,11 +333,11 @@ export default function MessengerPage() {
 
   const closeChat = () => {
     setActiveChatId(null);
-    navigate("/dashboard", { replace: true });
+    navigate("/chats", { replace: true });
   };
 
   const closeSettings = () => {
-    navigate("/dashboard", { replace: true });
+    navigate("/chats", { replace: true });
   };
 
   // Sort: pinned first (preserve pin order), then unread first, then by created_at
@@ -324,9 +358,14 @@ export default function MessengerPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
+  const archivedCount = chats.filter((c) => c.is_archived).length;
+  const baseChats = showArchived
+    ? sortedChats.filter((c) => c.is_archived)
+    : sortedChats.filter((c) => !c.is_archived);
+
   const q = searchQuery.trim().toLowerCase();
   const filteredChats = q
-    ? sortedChats.filter((c) => {
+    ? baseChats.filter((c) => {
         const title = (c.title || "").toLowerCase();
         const otherName = (c.is_personal && c.other_member)
           ? (c.other_member.display_name || c.other_member.phone || (c.other_member as { username?: string }).username || "").toLowerCase()
@@ -336,10 +375,11 @@ export default function MessengerPage() {
           : "";
         return title.includes(q) || otherName.includes(q) || otherUsername.includes(q);
       })
-    : sortedChats;
+    : baseChats;
 
   const rightPanelOpen = !!activeChatId || showSettings;
-  const showRightPanel = rightPanelOpen || chats.length === 0;
+  const onlyFavoritesChat = chats.length === 1 && !!chats[0]?.is_favorites;
+  const showRightPanel = rightPanelOpen || chats.length === 0 || (!rightPanelOpen && onlyFavoritesChat);
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -403,11 +443,11 @@ export default function MessengerPage() {
     }
   }, [pinnedChatIds]);
 
-  const handleToggleMute = useCallback(
-    async (chat: Chat) => {
+  const handleMute = useCallback(
+    async (chat: Chat, duration: "1h" | "3h" | "8h" | "forever" | "off") => {
       try {
-        const { data } = await chatsApi.toggleMute(chat.id);
-        storeUpdateChat(chat.id, { is_muted: data.is_muted });
+        const { data } = await chatsApi.muteChat(chat.id, duration);
+        storeUpdateChat(chat.id, { is_muted: data.is_muted, muted_until: data.muted_until });
       } catch { /* ignore */ }
       setChatContextMenu(null);
     },
@@ -418,11 +458,24 @@ export default function MessengerPage() {
     async (chat: Chat) => {
       try {
         await chatsApi.markUnread(chat.id);
+        const hadReal = (chat.unread_count || 0) > 0;
         storeSetUnread(chat.id, (prev) => Math.max(1, prev));
+        if (!hadReal) storeUpdateChat(chat.id, { manually_unread: true });
       } catch { /* ignore */ }
       setChatContextMenu(null);
     },
-    [storeSetUnread]
+    [storeSetUnread, storeUpdateChat]
+  );
+
+  const handleToggleArchive = useCallback(
+    async (chat: Chat) => {
+      try {
+        const { data } = await chatsApi.toggleArchive(chat.id);
+        storeUpdateChat(chat.id, { is_archived: data.is_archived });
+      } catch { /* ignore */ }
+      setChatContextMenu(null);
+    },
+    [storeUpdateChat]
   );
 
   // Единый поиск: по чатам (filteredChats) и по юзернеймам (debounced API)
@@ -470,21 +523,18 @@ export default function MessengerPage() {
         })
         .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
           const detail = err?.response?.data?.detail;
-          setError(
-            err?.response?.status === 403 && detail
-              ? detail
-              : "Не удалось открыть чат"
-          );
+          const msg = typeof detail === "string" ? detail : t("messenger.openChatError");
+          setError(msg);
           setTimeout(() => setError(""), 5000);
         });
     },
-    [openChat]
+    [openChat, t]
   );
 
   const handleJoinByLinkSubmit = () => {
     const raw = joinLinkInput.trim();
     if (!raw) {
-      setJoinMessage("Вставьте пригласительную ссылку на чат.");
+      setJoinMessage(t("messenger.joinLinkEmpty"));
       setJoinStatus("error");
       return;
     }
@@ -497,39 +547,20 @@ export default function MessengerPage() {
       if (match) slug = decodeURIComponent(match[1]);
       code = url.searchParams.get("code") || "";
     } catch {
-      setJoinMessage("Неверный формат ссылки. Вставьте полную пригласительную ссылку.");
+      setJoinMessage(t("messenger.joinLinkBadFormat"));
       setJoinStatus("error");
       return;
     }
     if (!slug || !code) {
-      setJoinMessage("В ссылке должны быть путь вида …/chat/join/название-чата и параметр code.");
+      setJoinMessage(t("messenger.joinLinkMissing"));
       setJoinStatus("error");
       return;
     }
-    setJoinStatus("loading");
-    setJoinMessage("");
-    chatsApi.join(slug, code)
-      .then((res) => {
-        const data = res.data as { detail?: string; id: string; already_member?: boolean };
-        const detail = data?.detail;
-        if (detail?.includes("Ожидайте подтверждения")) {
-          setJoinStatus("pending");
-          setJoinMessage("Запрос отправлен. Ожидайте подтверждения от владельца чата.");
-        } else {
-          setJoinStatus("joined");
-          setJoinMessage(data.already_member ? "Вы уже в чате." : "Вы вступили в чат.");
-          const newChatId = data.id;
-          storeUpsertChat({ ...res.data } as Chat);
-          setShowJoinByLinkModal(false);
-          setJoinLinkInput("");
-          setJoinStatus("idle");
-          openChat(newChatId);
-        }
-      })
-      .catch((e) => {
-        setJoinMessage((e?.response?.data?.detail as string) || "Не удалось вступить в чат.");
-        setJoinStatus("error");
-      });
+    // Close the paste-a-link modal and open the preview modal instead
+    closeJoinByLinkModal();
+    setJoinPreviewSlug(slug);
+    setJoinPreviewCode(code);
+    setShowJoinPreviewModal(true);
   };
 
   const closeJoinByLinkModal = () => {
@@ -538,6 +569,58 @@ export default function MessengerPage() {
     setJoinStatus("idle");
     setJoinMessage("");
   };
+
+  const copyInviteLink = (url: string) => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
+
+  const handleChatCreated = useCallback((chatId: string, inviteLink: string | null) => {
+    setShowCreateChatModal(false);
+    if (inviteLink) {
+      copyInviteLink(inviteLink);
+      setInviteToastIsChatLink(false);
+      setShowInviteLinkCopiedToast(true);
+      setTimeout(() => setShowInviteLinkCopiedToast(false), 2000);
+    }
+    // Reload chat list and open the new chat
+    loadChats().then(() => {
+      openChat(chatId);
+    });
+  }, [loadChats, openChat]);
+
+  const handleJoinPreviewJoined = useCallback((chatId: string) => {
+    setShowJoinPreviewModal(false);
+    loadChats().then(() => {
+      openChat(chatId);
+    });
+  }, [loadChats, openChat]);
+
+  const handleJoinPreviewClose = useCallback(() => {
+    setShowJoinPreviewModal(false);
+    setJoinPreviewSlug("");
+    setJoinPreviewCode("");
+  }, []);
+
+  const handleJoinPreviewRequestSent = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.has("join_slug") || params.has("join_code")) {
+      params.delete("join_slug");
+      params.delete("join_code");
+      const remaining = params.toString();
+      navigate(remaining ? `${location.pathname}?${remaining}` : location.pathname, { replace: true });
+    }
+  }, [location.search, location.pathname, navigate]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 overflow-hidden relative">
@@ -553,7 +636,7 @@ export default function MessengerPage() {
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-400 shrink-0">
             <path d="M20 6 9 17l-5-5"/>
           </svg>
-          <span>{inviteToastIsChatLink ? "Ссылка на чат скопирована в буфер обмена" : "Ссылка-приглашение скопирована в буфер обмена"}</span>
+          <span>{inviteToastIsChatLink ? t("messenger.chatLinkCopied") : t("messenger.inviteLinkCopied")}</span>
         </button>
       )}
 
@@ -563,7 +646,7 @@ export default function MessengerPage() {
           type="button"
           onClick={() => {
             setNewLoginToast(null);
-            navigate("/dashboard/settings");
+            navigate("/chats/settings");
           }}
           className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-3 bg-amber-600 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-amber-700 transition-colors text-left max-w-md"
         >
@@ -573,9 +656,9 @@ export default function MessengerPage() {
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div>
-            <p className="font-medium">Новый вход в аккаунт</p>
+            <p className="font-medium">{t("messenger.newLoginTitle")}</p>
             <p className="text-amber-100 text-xs mt-0.5">
-              {newLoginToast.device}{newLoginToast.ip ? ` (${newLoginToast.ip})` : ""}. Не вы? Нажмите, чтобы открыть настройки сессий.
+              {newLoginToast.device}{newLoginToast.ip ? ` (${newLoginToast.ip})` : ""}. {t("messenger.newLoginDesc")}
             </p>
           </div>
         </button>
@@ -585,26 +668,26 @@ export default function MessengerPage() {
       {showJoinByLinkModal && (
         <div className="fixed inset-0 z-[150] min-h-screen w-screen flex items-center justify-center p-4 bg-black/50 overflow-y-auto" onClick={closeJoinByLinkModal}>
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 text-left my-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold text-slate-800 mb-2">Вступить по ссылке</h2>
+            <h2 className="text-lg font-semibold text-slate-800 mb-2">{t("messenger.joinByLinkTitle")}</h2>
             <p className="text-slate-600 text-sm mb-4">
-              Вставьте пригласительную ссылку на чат (её отправил владелец чата).
+              {t("messenger.joinByLinkDesc")}
             </p>
             <input
               type="url"
-              placeholder="https://…/chat/join/название-чата?code=…"
+              placeholder={t("messenger.joinByLinkPlaceholder")}
               value={joinLinkInput}
               onChange={(e) => setJoinLinkInput(e.target.value)}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 mb-4"
               disabled={joinStatus === "loading"}
               autoFocus
             />
-            {joinStatus === "loading" && <p className="text-slate-500 text-sm mb-2">Загрузка…</p>}
+            {joinStatus === "loading" && <p className="text-slate-500 text-sm mb-2">{t("common.loading")}</p>}
             {joinStatus === "error" && <p className="text-red-500 text-sm mb-2">{joinMessage}</p>}
             {joinStatus === "pending" && <p className="text-green-600 text-sm mb-2">{joinMessage}</p>}
             {joinStatus === "joined" && <p className="text-green-600 text-sm mb-2">{joinMessage}</p>}
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={closeJoinByLinkModal} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium">
-                Отмена
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -612,7 +695,7 @@ export default function MessengerPage() {
                 disabled={joinStatus === "loading"}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
               >
-                {joinStatus === "loading" ? "Вступление…" : "Вступить"}
+                {joinStatus === "loading" ? t("messenger.joining") : t("messenger.join")}
               </button>
             </div>
           </div>
@@ -624,13 +707,14 @@ export default function MessengerPage() {
         <div
           className="fixed z-[60] w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
           style={{ left: chatContextMenu.x, top: chatContextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
             onClick={() => togglePin(chatContextMenu.chat.id)}
             disabled={!pinnedChatIds.includes(chatContextMenu.chat.id) && pinnedChatIds.length >= MAX_PINNED}
-            title={!pinnedChatIds.includes(chatContextMenu.chat.id) && pinnedChatIds.length >= MAX_PINNED ? "Максимум 5 закреплённых чатов" : undefined}
+            title={!pinnedChatIds.includes(chatContextMenu.chat.id) && pinnedChatIds.length >= MAX_PINNED ? t("messenger.maxPinned") : undefined}
             className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors w-full text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent ${
               pinnedChatIds.includes(chatContextMenu.chat.id)
                 ? "text-blue-600 bg-blue-50 hover:bg-blue-100"
@@ -640,18 +724,45 @@ export default function MessengerPage() {
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={pinnedChatIds.includes(chatContextMenu.chat.id) ? "text-blue-500" : "text-slate-400"}>
               <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
             </svg>
-            {pinnedChatIds.includes(chatContextMenu.chat.id) ? "Открепить" : "Закрепить"}
+            {pinnedChatIds.includes(chatContextMenu.chat.id) ? t("messenger.unpin") : t("messenger.pin")}
           </button>
-          <button
-            type="button"
-            onClick={() => handleToggleMute(chatContextMenu.chat)}
-            className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
-              <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
-            </svg>
-            {chatContextMenu.chat.is_muted ? "Включить звук" : "Без звука"}
-          </button>
+          {chatContextMenu.chat.is_muted ? (
+            <button
+              type="button"
+              onClick={() => handleMute(chatContextMenu.chat, "off")}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+              {t("messenger.enableNotif")}
+            </button>
+          ) : (
+            <div className="relative group/mute">
+              <button
+                type="button"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left justify-between"
+              >
+                <span className="flex items-center gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                  {t("messenger.mute")}
+                </span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+              <div className="invisible group-hover/mute:visible absolute left-full top-0 pl-1 min-w-[140px] z-50"><div className="py-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                {(["1h", "3h", "8h", "forever"] as const).map((dur) => (
+                  <button
+                    key={dur}
+                    type="button"
+                    onClick={() => handleMute(chatContextMenu.chat, dur)}
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
+                  >
+                    {t(dur === "1h" ? "messenger.muteFor1h" : dur === "3h" ? "messenger.muteFor3h" : dur === "8h" ? "messenger.muteFor8h" : "messenger.muteForever")}
+                  </button>
+                ))}
+              </div></div>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => handleMarkUnread(chatContextMenu.chat)}
@@ -660,29 +771,39 @@ export default function MessengerPage() {
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
               <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
             </svg>
-            Пометить непрочитанным
+            {t("messenger.markUnread")}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleArchive(chatContextMenu.chat)}
+            className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+              <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/>
+            </svg>
+            {chatContextMenu.chat.is_archived ? t("messenger.unarchive") : t("messenger.archive")}
           </button>
         </div>
       )}
 
       {/* ═══════ Left sidebar — Chat list ═══════ */}
       <aside
-        className={`${rightPanelOpen ? "hidden md:flex" : "flex"} flex-col border-r bg-white shrink-0 ${!rightPanelOpen ? "w-full md:!w-[22rem] md:!min-w-[18rem]" : ""}`}
-        style={rightPanelOpen ? { width: sidebarWidth } : undefined}
+        className={`${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} flex-col border-r bg-white shrink-0`}
+        style={{ width: sidebarWidth }}
       >
         {/* Sidebar header */}
         <div className="border-b px-4 py-3 flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-slate-800 flex-1">Чаты</h1>
-          <Link to="/dashboard/create" className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors" title="Создать чат">
+          <h1 className="text-lg font-semibold text-slate-800 flex-1">{t("messenger.chats")}</h1>
+          <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors" title={t("dashboard.createChat")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-          </Link>
+          </button>
 
           {/* Three-dot menu */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className="text-slate-500 hover:text-slate-700 p-2 rounded-lg hover:bg-slate-100 transition-colors"
-              title="Меню"
+              title={t("messenger.menu")}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
@@ -692,14 +813,14 @@ export default function MessengerPage() {
             {menuOpen && (
               <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-50 animate-in fade-in slide-in-from-top-1">
                 <Link
-                  to="/dashboard/settings"
+                  to="/chats/settings"
                   onClick={() => setMenuOpen(false)}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
                     <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                   </svg>
-                  Настройки
+                  {t("common.settings")}
                 </Link>
                 <div className="border-t border-slate-100 my-1" />
                 <button
@@ -709,7 +830,7 @@ export default function MessengerPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
                   </svg>
-                  Выйти
+                  {t("common.logout")}
                 </button>
               </div>
             )}
@@ -724,7 +845,7 @@ export default function MessengerPage() {
             </svg>
             <input
               type="text"
-              placeholder="Поиск чатов и людей..."
+              placeholder={t("messenger.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-colors"
@@ -734,16 +855,16 @@ export default function MessengerPage() {
 
         {/* Список: при активном поиске — чаты + пользователи, иначе только чаты */}
         <div className="flex-1 overflow-y-auto">
-          {(loading || chatListLoading) && <p className="text-slate-500 text-sm text-center py-8">Загрузка…</p>}
+          {(loading || chatListLoading) && <p className="text-slate-500 text-sm text-center py-8">{t("common.loading")}</p>}
           {(error || chatListError) && <p className="text-red-500 text-sm text-center py-8">{error || chatListError}</p>}
 
           {needsSub && !loading && !chatListLoading && (
             <div className="p-4">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <h2 className="text-sm font-semibold text-amber-900 mb-1">Необходима подписка</h2>
-                <p className="text-xs text-amber-800 mb-3">Для доступа оформите подписку за <strong>300 ₽/мес</strong>.</p>
-                <Link to="/dashboard/settings" className="inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-xs font-medium transition-colors">
-                  Перейти к оплате
+                <h2 className="text-sm font-semibold text-amber-900 mb-1">{t("dashboard.needsSub")}</h2>
+                <p className="text-xs text-amber-800 mb-3" dangerouslySetInnerHTML={{ __html: t("dashboard.needsSubDesc") }} />
+                <Link to="/chats/settings" className="inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-xs font-medium transition-colors">
+                  {t("dashboard.goToPayment")}
                 </Link>
               </div>
             </div>
@@ -756,26 +877,68 @@ export default function MessengerPage() {
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
               </div>
-              <h2 className="text-slate-700 font-medium mb-1">Чатов пока нет</h2>
+              <h2 className="text-slate-700 font-medium mb-1">{t("messenger.noChatsYet")}</h2>
               <p className="text-slate-500 text-sm mb-4 max-w-[240px] mx-auto">
-                Создайте чат, чтобы общаться с коллегами или друзьями, либо вступите в чат по пригласительной ссылке.
+                {t("messenger.noChatsDesc")}
               </p>
-              <Link
-                to="/dashboard/create"
+              <button
+                type="button"
+                onClick={() => setShowCreateChatModal(true)}
                 className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                Создать первый чат
-              </Link>
+                {t("messenger.createFirst")}
+              </button>
               <p className="text-slate-400 text-xs mt-3">
-                Есть ссылка-приглашение?{" "}
-                <button type="button" onClick={() => setShowJoinByLinkModal(true)} className="text-blue-600 hover:underline">Вступить в чат</button>
+                {t("messenger.haveInvite")}{" "}
+                <button type="button" onClick={() => setShowJoinByLinkModal(true)} className="text-blue-600 hover:underline">{t("messenger.joinChat")}</button>
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const link = window.location.origin;
+                  if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(link).then(() => {
+                      setInviteFriendsCopied(true);
+                      setTimeout(() => setInviteFriendsCopied(false), 2000);
+                    });
+                  } else if (navigator.share) {
+                    navigator.share({ title: t("messenger.welcomeInviteFriends"), url: link }).catch(() => {});
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 text-purple-600 hover:underline text-xs mt-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
+              </button>
             </div>
           )}
 
-          {!needsSub && !loading && !chatListLoading && (filteredChats.length > 0 || q.length > 0) && (
+          {!needsSub && !loading && !chatListLoading && (filteredChats.length > 0 || q.length > 0 || showArchived) && (
             <>
+              {showArchived ? (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(false)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-600 hover:bg-slate-50 transition-colors text-left border-b border-slate-200"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                    <path d="m15 18-6-6 6-6"/>
+                  </svg>
+                  {t("messenger.chats")}
+                </button>
+              ) : archivedCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(true)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-600 hover:bg-slate-50 transition-colors text-left border-b border-slate-200"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                    <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/>
+                  </svg>
+                  {t("messenger.archived")} ({archivedCount})
+                </button>
+              ) : null}
               {filteredChats.length > 0 ? (
                 <ul className="divide-y divide-slate-400">
                   {filteredChats.map((chat) => {
@@ -799,14 +962,22 @@ export default function MessengerPage() {
                           }`}
                         >
                           <div className="relative shrink-0">
-                            {(chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
+                            {chat.is_favorites ? (
+                              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                                isActive ? "bg-blue-600" : "bg-blue-500"
+                              }`}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                              </div>
+                            ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
                               <>
                                 <img
                                   src={
                                     withPreviewParams(
-                                      chat.is_personal && chat.other_member
-                                        ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
-                                        : chat.avatar_url,
+                                      toSameOriginMediaUrl(
+                                        chat.is_personal && chat.other_member
+                                          ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
+                                          : chat.avatar_url
+                                      ),
                                       96
                                     ) || ""
                                   }
@@ -840,12 +1011,12 @@ export default function MessengerPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               {isPinned && (
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label="Закреплён">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
                                   <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
                                 </svg>
                               )}
                               <span className={`font-medium truncate text-sm flex items-center gap-1 ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
-                                {chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
+                                {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
                                 {chat.is_personal && (
                                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-slate-400" aria-hidden>
                                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
@@ -853,22 +1024,30 @@ export default function MessengerPage() {
                                 )}
                               </span>
                               {chat.is_muted && (
-                                <span className="shrink-0 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded" title="Без звука">
+                                <span className="shrink-0 text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded" title={t("messenger.muted")}>
                                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-middle -mt-0.5"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-                                  {" "}Без звука
+                                  {" "}{t("messenger.muted")}
                                 </span>
                               )}
                             </div>
                             <span className="text-slate-500 text-xs truncate block mt-0.5">
-                              {chat.last_message_preview || (chat.is_personal ? "Личный чат" : `${chat.members_count} участн. · ${chat.chat_type === "open" ? "откр." : "закр."}`)}
+                              {chat.last_message_preview || (chat.is_personal
+                                ? (chat.other_member?.username ? `@${chat.other_member.username}` : t("dashboard.personalChat"))
+                                : `${formatMembersCount(chat.members_count ?? 0, lang)} · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}`)}
                             </span>
                           </div>
                           {unread > 0 && (
-                            <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold text-white ${
-                              chat.is_muted ? "bg-slate-400" : "bg-blue-600"
-                            }`}>
-                              {unreadStr}
-                            </span>
+                            chat.manually_unread && unread <= 1 ? (
+                              <span className={`inline-block w-3 h-3 rounded-full shrink-0 ${
+                                chat.is_muted ? "bg-slate-400" : "bg-blue-600"
+                              }`} />
+                            ) : (
+                              <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold text-white ${
+                                chat.is_muted ? "bg-slate-400" : "bg-blue-600"
+                              }`}>
+                                {unreadStr}
+                              </span>
+                            )
                           )}
                         </button>
                       </li>
@@ -876,22 +1055,24 @@ export default function MessengerPage() {
                   })}
                 </ul>
               ) : q.length > 0 ? (
-                <p className="text-slate-500 text-sm py-3 px-4">Нет подходящих чатов</p>
+                <p className="text-slate-500 text-sm py-3 px-4">{t("messenger.noMatchingChats")}</p>
+              ) : showArchived ? (
+                <p className="text-slate-500 text-sm py-3 px-4">{t("messenger.archiveEmpty")}</p>
               ) : null}
               {q.length >= 2 && (
                 <div className="border-t border-slate-200">
-                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">Пользователи</p>
+                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("messenger.users")}</p>
                   {userSearchLoading ? (
-                    <p className="text-slate-500 text-xs py-3 px-4">Поиск…</p>
+                    <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.searching")}</p>
                   ) : userSearchResults.length === 0 ? (
-                    <p className="text-slate-500 text-xs py-3 px-4">Никого не найдено</p>
+                    <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.noUsersFound")}</p>
                   ) : (
                     <ul className="py-1">
                       {userSearchResults.map((u) => (
                         <li key={u.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50">
                           {u.avatar_url ? (
                             <img
-                              src={withPreviewParams(u.avatar_url, 96) || ""}
+                              src={withPreviewParams(toSameOriginMediaUrl(u.avatar_url), 96) || ""}
                               alt=""
                               className="w-12 h-12 rounded-full object-cover shrink-0"
                               loading="lazy"
@@ -913,7 +1094,7 @@ export default function MessengerPage() {
                             onClick={() => handleWriteToUser(u.id)}
                             className="shrink-0 text-blue-600 hover:text-blue-700 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
                           >
-                            Написать
+                            {t("common.write")}
                           </button>
                         </li>
                       ))}
@@ -926,18 +1107,16 @@ export default function MessengerPage() {
         </div>
       </aside>
 
-      {/* Resizer — только при открытой правой панели на десктопе */}
-      {showRightPanel && (
-        <div
-          role="separator"
-          aria-label="Изменить ширину списка чатов"
-          onMouseDown={handleResizeStart}
-          className="hidden md:block w-1 flex-shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400 active:bg-blue-500 transition-colors min-h-full"
-        />
-      )}
+      {/* Resizer — всегда виден на десктопе, позиция сохраняется */}
+      <div
+        role="separator"
+        aria-label={t("messenger.resizeSidebar")}
+        onMouseDown={handleResizeStart}
+        className="hidden md:block w-1 flex-shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400 active:bg-blue-500 transition-colors min-h-full"
+      />
 
       {/* ═══════ Right panel — Chat or Settings (скрыт, если есть чаты и ничего не выбрано) ═══════ */}
-      <main className={`${showRightPanel ? "flex" : "hidden"} flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-white`}>
+      <main className={`${showRightPanel ? "flex" : "hidden md:flex"} flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-white`}>
         {showSettings ? (
           <>
             <header className="border-b bg-white px-4 py-2 flex items-center gap-4 shrink-0">
@@ -945,13 +1124,13 @@ export default function MessengerPage() {
                 type="button"
                 onClick={closeSettings}
                 className="p-2 -ml-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                title="Назад"
+                title={t("common.back")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m15 18-6-6 6-6"/>
                 </svg>
               </button>
-              <h1 className="font-semibold text-slate-800">Настройки</h1>
+              <h1 className="font-semibold text-slate-800">{t("common.settings")}</h1>
             </header>
             <div className="flex-1 min-h-0 overflow-hidden">
               <SettingsPage embed />
@@ -988,54 +1167,153 @@ export default function MessengerPage() {
                   })
                   .catch((err: { response?: { status?: number; data?: { detail?: string } } }) => {
                     const detail = err?.response?.data?.detail;
-                    setError(
-                      err?.response?.status === 403 && detail
-                        ? detail
-                        : "Не удалось открыть чат"
-                    );
+                    const msg = typeof detail === "string" ? detail : t("messenger.openChatError");
+                    setError(msg);
                     setTimeout(() => setError(""), 5000);
                   });
               }}
+              onNavigateToChat={openChat}
             />
           </div>
         ) : (
           <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-50 p-6">
-            <div className="text-center max-w-sm">
-              <div className="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
+          {(() => {
+            const onlyFavorites = chats.length === 1 && chats[0]?.is_favorites;
+            const favChatId = onlyFavorites ? chats[0].id : null;
+            if (onlyFavorites) {
+              return (
+                <div className="text-center max-w-md">
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5">
+                    <span className="text-2xl">👋</span>
+                  </div>
+                  <h2 className="text-xl font-semibold text-slate-800 mb-2">{t("messenger.welcomeTitle")}</h2>
+                  <p className="text-sm text-slate-500 mb-6">{t("messenger.welcomeDesc")}</p>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const link = window.location.origin;
+                        if (navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(link).then(() => {
+                            setInviteFriendsCopied(true);
+                            setTimeout(() => setInviteFriendsCopied(false), 2000);
+                          });
+                        } else if (navigator.share) {
+                          navigator.share({ title: t("messenger.welcomeInviteFriends"), url: link }).catch(() => {});
+                        }
+                      }}
+                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-purple-300 hover:shadow-sm transition-all group"
+                    >
+                      <span className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shrink-0 group-hover:bg-purple-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">
+                          {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
+                        </p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeInviteFriendsDesc")}</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateChatModal(true)}
+                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
+                    >
+                      <span className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0 group-hover:bg-blue-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeCreateGroup")}</p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowJoinByLinkModal(true)}
+                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
+                    >
+                      <span className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0 group-hover:bg-green-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeJoin")}</p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeJoinDesc")}</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => favChatId && openChat(favChatId)}
+                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-amber-300 hover:shadow-sm transition-all group"
+                    >
+                      <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-200 transition-colors">
+                        <span className="text-lg">⭐</span>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeFavorites")}</p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeFavoritesDesc")}</p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="text-center max-w-sm">
+                <div className="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                </div>
+                <h2 className="text-lg font-medium text-slate-600 mb-1">{t("messenger.selectChat")}</h2>
+                <p className="text-sm text-slate-500 mb-4">
+                  {chats.length === 0
+                    ? t("messenger.selectChatEmpty")
+                    : t("messenger.selectChatDesc")}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateChatModal(true)}
+                    className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                    {t("dashboard.createChat")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowJoinByLinkModal(true)}
+                    className="inline-flex items-center justify-center gap-2 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
+                  >
+                    {t("messenger.joinByLink")}
+                  </button>
+                </div>
+                <p className="text-slate-400 text-xs mt-4">
+                  {t("messenger.profileAndSubscription")}
+                </p>
               </div>
-              <h2 className="text-lg font-medium text-slate-600 mb-1">Выберите чат</h2>
-              <p className="text-sm text-slate-500 mb-4">
-                {chats.length === 0
-                  ? "Создайте первый чат или вступите в чат по пригласительной ссылке — тогда здесь откроется переписка."
-                  : "Выберите чат из списка слева или создайте новый."}
-              </p>
-              <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                <Link
-                  to="/dashboard/create"
-                  className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                  Создать чат
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setShowJoinByLinkModal(true)}
-                  className="inline-flex items-center justify-center gap-2 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
-                >
-                  Вступить по ссылке
-                </button>
-              </div>
-              <p className="text-slate-400 text-xs mt-4">
-                Настройки профиля и подписки — в меню (⋮) в шапке списка чатов.
-              </p>
-            </div>
+            );
+          })()}
           </div>
         )}
       </main>
       </div>
+
+      {/* Модалка: создать чат */}
+      <CreateChatModal
+        isOpen={showCreateChatModal}
+        onClose={() => setShowCreateChatModal(false)}
+        onCreated={handleChatCreated}
+      />
+
+      {/* Модалка: предпросмотр чата перед вступлением */}
+      <JoinChatPreviewModal
+        isOpen={showJoinPreviewModal}
+        slug={joinPreviewSlug}
+        code={joinPreviewCode}
+        onClose={handleJoinPreviewClose}
+        onJoined={handleJoinPreviewJoined}
+        onRequestSent={handleJoinPreviewRequestSent}
+      />
     </div>
   );
 }

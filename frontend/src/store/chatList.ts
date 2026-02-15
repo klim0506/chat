@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { Chat } from "../api/client";
 import { chatsApi } from "../api/client";
 import { db, type CachedChat } from "../lib/db";
+import { useAuthStore } from "./auth";
+import { useUnreadStore } from "./unread";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -50,13 +52,21 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
   pinnedChatIds: [],
 
   loadChats: async () => {
-    set({ loading: true, error: null });
+    // Only show loading spinner if we have no cached chats yet
+    const hasChats = get().chats.length > 0;
+    set({ loading: !hasChats, error: null });
 
-    // 1. Instant render from IndexedDB cache
+    const currentUserId = useAuthStore.getState().user?.id;
+
+    // 1. Instant render from IndexedDB cache (only if owned by current user)
     try {
       const cached = await db.chats.toArray();
-      if (cached.length > 0) {
-        const chats = cached.map(stripCacheMeta);
+      // Filter: only show chats that belong to current user (or have no _userId — legacy entries)
+      const ownedChats = currentUserId
+        ? cached.filter((c) => c._userId === currentUserId || !c._userId)
+        : [];
+      if (ownedChats.length > 0) {
+        const chats = ownedChats.map(stripCacheMeta);
         const pins = extractPins(chats);
         set({ chats, pinnedChatIds: pins, loading: false });
       }
@@ -71,6 +81,12 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
       const freshChats: Chat[] = Array.isArray(data) ? data : data.results ?? [];
       const pins = extractPins(freshChats);
       set({ chats: freshChats, pinnedChatIds: pins, loading: false, error: null });
+
+      const byChat: Record<string, number> = {};
+      for (const c of freshChats) {
+        if ((c.unread_count || 0) > 0) byChat[c.id] = c.unread_count!;
+      }
+      useUnreadStore.getState().setAll(byChat);
 
       // Persist to IndexedDB (fire-and-forget)
       persistChats(freshChats).catch(() => {});
@@ -90,19 +106,21 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
   },
 
   upsertChat: (chat, updates) => {
+    const merged = { ...chat, ...(updates || {}) };
     set((state) => {
       const idx = state.chats.findIndex((c) => c.id === chat.id);
       let next: Chat[];
       if (idx === -1) {
-        next = [{ ...chat, ...(updates || {}) }, ...state.chats];
+        next = [merged, ...state.chats];
       } else {
         next = [...state.chats];
         next[idx] = { ...next[idx], ...chat, ...(updates || {}) };
       }
       return { chats: next };
     });
+    if ((merged.unread_count || 0) > 0) useUnreadStore.getState().setUnread(merged.id, merged.unread_count!);
     // Persist single chat update
-    persistChat({ ...chat, ...(updates || {}) } as Chat).catch(() => {});
+    persistChat(merged as Chat).catch(() => {});
   },
 
   setChats: (chats) => {
@@ -114,9 +132,14 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
     set((state) => ({
       chats: state.chats.map((c) => (c.id === chatId ? { ...c, ...updates } : c)),
     }));
+    if (updates.unread_count !== undefined) {
+      const n = updates.unread_count;
+      if (n > 0) useUnreadStore.getState().setUnread(chatId, n);
+      else useUnreadStore.getState().clearUnread(chatId);
+    }
     // Persist the update
     const chat = get().chats.find((c) => c.id === chatId);
-    if (chat) persistChat(chat).catch(() => {});
+    if (chat) persistChat({ ...chat, ...updates } as Chat).catch(() => {});
   },
 
   removeChat: (chatId) => {
@@ -132,17 +155,24 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
   },
 
   setUnread: (chatId, count) => {
-    set((state) => ({
-      chats: state.chats.map((c) => {
+    set((state) => {
+      const nextChats = state.chats.map((c) => {
         if (c.id !== chatId) return c;
         const newCount = typeof count === "function" ? count(c.unread_count || 0) : count;
-        return { ...c, unread_count: Math.max(0, newCount) };
-      }),
-    }));
+        const finalCount = Math.max(0, newCount);
+        return { ...c, unread_count: finalCount, ...(finalCount === 0 ? { manually_unread: false } : {}) };
+      });
+      const updated = nextChats.find((c) => c.id === chatId);
+      const newCount = updated?.unread_count ?? 0;
+      if (newCount > 0) useUnreadStore.getState().setUnread(chatId, newCount);
+      else useUnreadStore.getState().clearUnread(chatId);
+      return { chats: nextChats };
+    });
   },
 
   reset: () => {
     set({ chats: [], loading: true, error: null, pinnedChatIds: [] });
+    useUnreadStore.getState().reset();
     db.chats.clear().catch(() => {});
     db.syncMeta.clear().catch(() => {});
   },
@@ -168,11 +198,13 @@ function stripCacheMeta(cached: CachedChat): Chat {
 
 async function persistChats(chats: Chat[]) {
   const now = new Date().toISOString();
-  const rows: CachedChat[] = chats.map((c) => ({ ...c, _cachedAt: now }));
+  const userId = useAuthStore.getState().user?.id;
+  const rows: CachedChat[] = chats.map((c) => ({ ...c, _cachedAt: now, _userId: userId }));
   await db.chats.bulkPut(rows);
 }
 
 async function persistChat(chat: Chat) {
-  const row: CachedChat = { ...chat, _cachedAt: new Date().toISOString() };
+  const userId = useAuthStore.getState().user?.id;
+  const row: CachedChat = { ...chat, _cachedAt: new Date().toISOString(), _userId: userId };
   await db.chats.put(row);
 }

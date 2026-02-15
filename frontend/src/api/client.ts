@@ -152,8 +152,12 @@ export interface Chat {
   is_active: boolean;
   created_at: string;
   unread_count: number;
+  /** True when user manually marked chat as unread (show dot, not count) */
+  manually_unread?: boolean;
   is_muted: boolean;
+  muted_until: string | null;
   pin_order?: number | null;
+  is_archived?: boolean;
   is_expanded: boolean;
   expanded_until: string | null;
   avatar_url: string | null;
@@ -171,6 +175,18 @@ export interface Chat {
   my_pinned_messages?: Message[];
   /** Превью последнего сообщения для списка чатов */
   last_message_preview?: string | null;
+}
+
+export interface JoinChatPreview {
+  chat_type: "open" | "closed";
+  title: string;
+  description?: string;
+  avatar_url?: string | null;
+  members_count?: number;
+  already_member?: boolean;
+  chat_id?: string;
+  is_kicked?: boolean;
+  is_pending?: boolean;
 }
 
 export interface ReplyMessage {
@@ -262,6 +278,8 @@ export const chatsApi = {
     return api.post<Chat>(`/chats/${id}/background/`, form);
   },
   removeBackground: (id: string) => api.post<Chat>(`/chats/${id}/background/`, { remove: "true" }),
+  joinPreview: (slug: string, code: string) =>
+    api.post<JoinChatPreview>("/chats/join/preview/", { slug, code }),
   join: (slug: string, code: string) => api.post<Chat>("/chats/join/", { slug, code }),
   members: (chatId: string) => api.get<ChatMember[]>(`/chats/${chatId}/members/`),
   invite: (chatId: string, data: { user_id?: string; username?: string }) =>
@@ -276,7 +294,9 @@ export const chatsApi = {
   delete: (chatId: string) => api.delete<void>(`/chats/${chatId}/`),
   markRead: (chatId: string) => api.post<{ last_read_at: string }>(`/chats/${chatId}/mark-read/`),
   markUnread: (chatId: string) => api.post<{ last_read_at: null }>(`/chats/${chatId}/mark-unread/`),
-  toggleMute: (chatId: string) => api.post<{ is_muted: boolean }>(`/chats/${chatId}/toggle-mute/`),
+  muteChat: (chatId: string, duration: "1h" | "3h" | "8h" | "forever" | "off") =>
+    api.post<{ is_muted: boolean; muted_until: string | null }>(`/chats/${chatId}/mute/`, { duration }),
+  toggleArchive: (chatId: string) => api.post<{ is_archived: boolean }>(`/chats/${chatId}/toggle-archive/`),
   setPins: (chatIds: string[]) => api.post<{ pinned_chat_ids: string[] }>("/chats/pins/", { chat_ids: chatIds }),
   getOrCreateDm: (userId: string) => api.post<Chat>("/chats/dm/", { user_id: userId }),
 };
@@ -294,9 +314,19 @@ export interface ScheduledMessage {
   created_at: string;
 }
 
+export interface MessagesListResponse {
+  data: Message[];
+  hasMore: boolean;
+}
+
 export const messagesApi = {
-  list: (chatId: string, params?: { since?: string }) =>
-    api.get<Message[]>(`/chats/${chatId}/messages/`, { params }),
+  list: async (chatId: string, params?: { since?: string; before?: string; limit?: number }): Promise<MessagesListResponse> => {
+    const res = await api.get<Message[]>(`/chats/${chatId}/messages/`, { params });
+    return {
+      data: res.data,
+      hasMore: res.headers?.["x-has-more"] === "true",
+    };
+  },
   create: (chatId: string, data: { msg_type?: string; content?: string; file_id?: string; file_ids?: string[]; waveform?: number[]; reply_to_id?: string }) => {
     const payload: Record<string, unknown> = { ...data };
     // file_ids — для нескольких файлов в одном сообщении
@@ -317,6 +347,21 @@ export const messagesApi = {
     api.delete<void>(`/chats/${chatId}/messages/${messageId}/pin/`, { data: { scope } }),
   forward: (targetChatId: string, data: { message_id: string; source_chat_id: string }) =>
     api.post<Message>(`/chats/${targetChatId}/messages/forward/`, data),
+};
+
+export interface GifResult {
+  id: string;
+  url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+}
+
+export const gifApi = {
+  search: (q: string, params?: { limit?: number; pos?: string }) =>
+    api.get<{ results: GifResult[]; next: string }>("/gif/search/", { params: { q: q.trim(), ...params } }),
+  trending: (limit?: number) =>
+    api.get<{ results: GifResult[]; next: string }>("/gif/trending/", { params: limit ? { limit } : {} }),
 };
 
 export const scheduledApi = {

@@ -138,7 +138,7 @@ class CreateSubscriptionPaymentView(APIView):
             )
 
         amount_rubles = SUBSCRIPTION_PRICE_KOPECKS / 100.0
-        default_return = f"{getattr(settings, 'FRONTEND_URL', '').rstrip('/')}/dashboard?paid=1"
+        default_return = f"{getattr(settings, 'FRONTEND_URL', '').rstrip('/')}/chats?paid=1"
         return_url = request.data.get("return_url") or default_return
         if not _is_allowed_return_url(return_url):
             return Response(

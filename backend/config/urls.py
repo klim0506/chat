@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/payments/", include("apps.payments.urls")),
     path("api/files/", include("apps.files.urls")),
     path("api/e2ee/", include("apps.e2ee.urls")),
+    path("api/gif/", include("apps.chats.gif_urls")),
     path("chat/join/<path:_rest>", redirect_join_to_frontend),
 ]
 
