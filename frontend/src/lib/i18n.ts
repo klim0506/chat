@@ -571,6 +571,9 @@ const translations = {
   "spravka.security": { en: "Security", ru: "Безопасность" },
   "spravka.channels": { en: "Channels", ru: "Каналы" },
   "spravka.bots": { en: "Bots", ru: "Боты" },
+  "pin.pinned": { en: "Pinned", ru: "Закреплено" },
+  "pin.forYou": { en: "for you", ru: "для вас" },
+  "pin.pinnedForYou": { en: "Pinned for you", ru: "Закреплено для вас" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

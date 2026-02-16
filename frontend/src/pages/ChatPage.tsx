@@ -1579,12 +1579,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         created_at: (raw.created_at as string) || new Date().toISOString(),
         reactions: (raw.reactions as Record<string, number>) ?? {},
         my_reactions: (raw.my_reactions as string[]) ?? ((raw as { my_reaction?: string }).my_reaction ? [(raw as { my_reaction: string }).my_reaction] : []),
-        read_status: getSenderId(raw as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
+        read_status: getSenderId(raw as unknown as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
       } as Message & { my_reaction?: string });
-      const isMine = getSenderId(raw as Message) === myUserId;
+      const isMine = getSenderId(raw as unknown as Message) === myUserId;
       const atBottom = isScrolledToBottom();
       storeUpsertMessage(chatId, msg);
-      if (isMine) onMessageSent?.(chatId, formatMessagePreview(raw as Message, lang));
+      if (isMine) onMessageSent?.(chatId, formatMessagePreview(raw as unknown as Message, lang));
       if (isMine || atBottom) setTimeout(scrollToBottom, 80);
       if (!document.hidden) markRead();
       if (!isMine && !isMutedRef.current) {
@@ -1625,7 +1625,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           created_at: (raw.created_at as string) || new Date().toISOString(),
           reactions: (raw.reactions as Record<string, number>) ?? {},
           my_reactions: (raw.my_reactions as string[]) ?? ((raw as { my_reaction?: string }).my_reaction ? [(raw as { my_reaction: string }).my_reaction] : []),
-          read_status: getSenderId(raw as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
+          read_status: getSenderId(raw as unknown as Message) === myUserId ? ((raw.read_status as string) || "delivered") : undefined,
         } as Message & { my_reaction?: string });
         storeUpsertMessageRef.current(chatId, updated);
       }
@@ -2688,7 +2688,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
                 {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
                 {chat.is_personal && (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" title={t("chat.e2ee")}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" aria-label={t("chat.e2ee")}>
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                 )}
@@ -2755,9 +2755,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             (current.message.content || "").trim().slice(0, 80);
 
           const pinLabel = unifiedPins.length > 1
-            ? `${t("pin.pinned", "Закреплено")} #${safeIdx + 1}${current.scope === "me" ? ` · ${t("pin.forYou", "для вас")}` : ""} · ${pinSender}`
+            ? `${t("pin.pinned")} #${safeIdx + 1}${current.scope === "me" ? ` · ${t("pin.forYou")}` : ""} · ${pinSender}`
             : current.scope === "me"
-              ? `${t("pin.pinnedForYou", "Закреплено для вас")} · ${pinSender}`
+              ? `${t("pin.pinnedForYou")} · ${pinSender}`
               : pinSender;
 
           return (
@@ -4740,7 +4740,7 @@ const MessageBubble = memo(function MessageBubble({
   const isImage = message.file && fileIsImage;
   // Для одиночных изображений берём оригинал (без сильного сжатия превью).
   const filePreviewUrl = fileUrl && isImage ? withPreviewParams(fileUrl, 1400) : fileUrl;
-  const fileDisplayUrl = filePreviewUrl || fileUrl;
+  // filePreviewUrl is used directly in the JSX below
   const isAudio = message.msg_type === "audio" || (message.file && (message.file as { mime_type?: string }).mime_type?.startsWith("audio/"));
   const isVideo = message.file && !isAudio && (message.msg_type === "video" || fileIsVideo);
   const isVideoCircle = message.msg_type === "video_circle" && !isAudio && message.file;
