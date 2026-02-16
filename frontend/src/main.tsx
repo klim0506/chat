@@ -29,3 +29,22 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
+// ─── Service Worker registration (PWA) ──────────────────────────────────
+// Controlled by VITE_PWA_INSTALL_ENABLED env variable.
+// Without SW the browser won't offer the install prompt.
+if (
+  "serviceWorker" in navigator &&
+  import.meta.env.PROD &&
+  import.meta.env.VITE_PWA_INSTALL_ENABLED === "true"
+) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((reg) => {
+        console.log("[SW] registered, scope:", reg.scope);
+        setInterval(() => reg.update(), 30 * 60 * 1000);
+      })
+      .catch((err) => console.warn("[SW] registration failed:", err));
+  });
+}

@@ -1,4 +1,5 @@
-# Явное имя проекта (избегаем "project name must not be empty" при кириллице в пути)
+# Development docker-compose (HTTP only, Vite dev server).
+# For production HTTPS see: docker-compose.prod.yml
 name: privat-chaty
 
 services:

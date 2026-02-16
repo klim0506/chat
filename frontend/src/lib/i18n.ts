@@ -65,8 +65,8 @@ const translations = {
   },
   "landing.feature2.title": { en: "Fast file uploads", ru: "Быстрая загрузка файлов" },
   "landing.feature2.desc": {
-    en: "Any files upload quickly — videos, documents, media. Currently up to 0.5 GB per file; cloud storage integration planned.",
-    ru: "Любые файлы загружаются быстро — видео, документы, медиа. Сейчас до 0,5 ГБ на файл; в планах интеграция с облаком для хранения ваших данных.",
+    en: "Any files upload quickly — videos, documents, media. Currently up to 2 GB per file; cloud storage integration planned.",
+    ru: "Любые файлы загружаются быстро — видео, документы, медиа. Сейчас до 2 ГБ на файл; в планах интеграция с облаком для хранения ваших данных.",
   },
   "landing.feature3.title": { en: "Real time", ru: "В реальном времени" },
   "landing.feature3.desc": {
@@ -372,7 +372,7 @@ const translations = {
   "chat.deleteError": { en: "Could not delete chat", ru: "Не удалось удалить чат" },
   "chat.micAccessDenied": { en: "Microphone access denied. Allow in browser settings.", ru: "Доступ к микрофону запрещён. Разрешите в настройках браузера." },
   "chat.micAccessFailed": { en: "Could not access microphone. Allow in browser settings.", ru: "Не удалось получить доступ к микрофону. Разрешите в настройках браузера." },
-  "chat.voiceTooLarge": { en: "Voice message is larger than 0.5 GB.", ru: "Голосовое сообщение больше 0,5 ГБ." },
+  "chat.voiceTooLarge": { en: "Voice message is larger than 2 GB.", ru: "Голосовое сообщение больше 2 ГБ." },
   "chat.serverBadResponse": { en: "Server returned invalid response", ru: "Сервер вернул некорректный ответ" },
   "chat.uploadError": { en: "File upload error", ru: "Ошибка загрузки файла" },
   "chat.uploadErrorMultiple": { en: "Files upload error", ru: "Ошибка загрузки файлов" },
@@ -381,8 +381,8 @@ const translations = {
   "chat.cameraAccessDenied": { en: "Camera access denied. Allow in browser settings.", ru: "Доступ к камере запрещён. Разрешите в настройках браузера." },
   "chat.cameraAccessFailed": { en: "Could not access camera. Allow in browser settings.", ru: "Не удалось получить доступ к камере. Разрешите в настройках браузера." },
   "chat.expandError": { en: "Could not expand chat", ru: "Не удалось расширить чат" },
-  "chat.avatarTooLarge": { en: "Avatar file is larger than 0.5 GB.", ru: "Файл аватара больше 0,5 ГБ." },
-  "chat.bgTooLarge": { en: "Background file is larger than 0.5 GB.", ru: "Файл фона больше 0,5 ГБ." },
+  "chat.avatarTooLarge": { en: "Avatar file is larger than 2 GB.", ru: "Файл аватара больше 2 ГБ." },
+  "chat.bgTooLarge": { en: "Background file is larger than 2 GB.", ru: "Файл фона больше 2 ГБ." },
   "chat.copyLink": { en: "Copy link", ru: "Копировать ссылку" },
   "chat.share": { en: "Share", ru: "Поделиться" },
   "chat.shareTitle": { en: "Join private chats", ru: "Присоединяйся к чатам" },
@@ -475,8 +475,8 @@ const translations = {
   "chat.online": { en: "online", ru: "в сети" },
 
   // ─── File size warnings (parameterized) ──────────────────
-  "chat.fileTooLargeNamed": { en: 'File "%s" is larger than 0.5 GB.', ru: "Файл «%s» больше 0,5 ГБ." },
-  "chat.fileTooLarge": { en: "File is larger than 0.5 GB.", ru: "Файл больше 0,5 ГБ." },
+  "chat.fileTooLargeNamed": { en: 'File "%s" is larger than 2 GB.', ru: "Файл «%s» больше 2 ГБ." },
+  "chat.fileTooLarge": { en: "File is larger than 2 GB.", ru: "Файл больше 2 ГБ." },
 
   // ─── Subscription-related text in createChat / dashboard ─
   "sub.pricePerMonth": { en: "rub./mo.", ru: "руб./мес." },

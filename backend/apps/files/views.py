@@ -22,7 +22,7 @@ from .serializers import FileAttachmentSerializer
 from .tasks import scan_uploaded_file
 from PIL import Image, ImageOps
 
-MAX_FILE_SIZE = 512 * 1024 * 1024  # 0.5 ГБ
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 ГБ
 FILE_TOKEN_TTL_SECONDS = 60 * 60
 ALLOWED_UPLOAD_MIME_PREFIXES = (
     "image/",
@@ -75,7 +75,7 @@ class FileUploadView(APIView):
         if not file_obj:
             return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
         if file_obj.size > MAX_FILE_SIZE:
-            return Response({"detail": "Файл больше 0,5 ГБ."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Файл больше 2 ГБ."}, status=status.HTTP_400_BAD_REQUEST)
 
         is_encrypted = request.data.get("is_encrypted") in (True, "true", "1")
         clean_original_name = os.path.basename(file_obj.name or "file")

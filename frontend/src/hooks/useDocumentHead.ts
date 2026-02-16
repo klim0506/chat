@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLang, t } from "../lib/i18n";
 
-const DEFAULT_DESCRIPTION = "Свой мессенджер без VPN и блокировок. Чаты на 2–300 человек, файлы до 0,5 ГБ. Регистрация по SMS, личный чат бесплатно.";
+const DEFAULT_DESCRIPTION = "Свой мессенджер без VPN и блокировок. Чаты на 2–300 человек, файлы до 2 ГБ. Регистрация по SMS, личный чат бесплатно.";
 
 /**
  * Устанавливает document.title, meta name="description" и при необходимости canonical для SEO.

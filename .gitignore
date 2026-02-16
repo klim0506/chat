@@ -26,7 +26,6 @@ backend/.env
 
 # Node
 node_modules/
-frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -35,11 +34,33 @@ pnpm-debug.log*
 # Frontend build
 frontend/dist/
 .next/
-dist/
 *.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
 frontend/.asset-opt-cache.json
+
+# Android (Capacitor)
+android/node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+android/capacitor-cordova-android-plugins/build/
+android/capacitor-android/build/
+*.apk
+
+# Desktop (Electron)
+desktop/node_modules/
+desktop/dist/
+desktop/renderer/
+desktop/icon.ico
+desktop/icon.png
+desktop/build/icon.*
+
+# SSL / Certbot
+certbot/
+*.pem
+*.key
+*.crt
 
 # Archives / temp
 *.zip
@@ -48,5 +69,6 @@ frontend/.asset-opt-cache.json
 backend/celerybeat-schedule*
 
 # Cursor
+.cursor/
 .cursorignore
 .cursorindexingignore

@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuthStore } from "./store/auth";
 import { useUnreadBadge } from "./hooks/useUnreadBadge";
+import { isStandalone } from "./lib/pwa";
 
 // Lazy-loaded pages — каждая страница загружается отдельным чанком
 const AuthPage = lazy(() => import("./pages/AuthPage"));
@@ -53,7 +54,7 @@ function App() {
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-screen w-screen"><div className="w-8 h-8 border-3 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>}>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={isStandalone() ? (isFullyRegistered ? <Navigate to="/chats" replace /> : <Navigate to="/auth" replace />) : <LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/spravka" element={<SpravkaLayout />}>
           <Route index element={<SpravkaIndexPage />} />

@@ -1,0 +1,153 @@
+# Production docker-compose with HTTPS (Let's Encrypt).
+#
+# Usage:
+#   1. Copy backend/.env.production.example → backend/.env  (fill in real values)
+#   2. Set DOMAIN in shell:   export DOMAIN=example.com
+#   3. Run init script:       bash init-letsencrypt.sh
+#   4. Start:                 docker compose -f docker-compose.prod.yml up -d
+#
+# The frontend is built inside a Docker build stage, then its dist/
+# is copied into the nginx container via a shared volume.
+
+name: privat-chaty-prod
+
+services:
+  # ─── Database ────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: chatdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ───────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend (Daphne ASGI) ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
+    volumes:
+      - backend_media:/app/media
+      - backend_static:/app/staticfiles
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-postgres}@db:5432/chatdb
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DEBUG: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── Celery worker ──────────────────────────────────────────────────
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: celery -A config.celery worker -l info
+    volumes:
+      - backend_media:/app/media
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-postgres}@db:5432/chatdb
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    depends_on:
+      - backend
+      - redis
+
+  # ─── Celery beat (scheduler) ────────────────────────────────────────
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: celery -A config.celery beat -l info
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-postgres}@db:5432/chatdb
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    depends_on:
+      - celery
+
+  # ─── Frontend build (copies dist into shared volume) ────────────────
+  frontend-build:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
+        VITE_PWA_INSTALL_ENABLED: "${PWA_INSTALL_ENABLED:-false}"
+    volumes:
+      - frontend_dist:/app/dist
+
+  # ─── Nginx (SSL termination + static serving) ──────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.ssl.conf:/etc/nginx/nginx.conf.template:ro
+      - frontend_dist:/var/www/frontend:ro
+      - backend_static:/var/www/static:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    environment:
+      DOMAIN: ${DOMAIN}
+    # Only substitute $DOMAIN — leave nginx variables ($host, $uri, etc.) untouched
+    command: >
+      /bin/sh -c "envsubst '$$DOMAIN' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+      && nginx -g 'daemon off;'"
+    depends_on:
+      - backend
+      - frontend-build
+
+  # ─── Certbot (auto-renewal) ─────────────────────────────────────────
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Renew every 12 hours
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done'"
+
+volumes:
+  postgres_data:
+  backend_media:
+  backend_static:
+  frontend_dist:
+  certbot_conf:
+  certbot_www:

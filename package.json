@@ -17,7 +17,10 @@
     "run:frontend": "cd frontend && npm run dev",
     "run:worker": "cd backend && celery -A config.celery worker -l info",
     "run:beat": "cd backend && celery -A config.celery beat -l info",
-    "run:all": "concurrently -k -n backend,frontend,worker,beat -c yellow,blue,green,magenta \"npm run run:backend\" \"npm run run:frontend\" \"npm run run:worker\" \"npm run run:beat\""
+    "run:all": "concurrently -k -n backend,frontend,worker,beat -c yellow,blue,green,magenta \"npm run run:backend\" \"npm run run:frontend\" \"npm run run:worker\" \"npm run run:beat\"",
+    "desktop:dev": "cd desktop && npm run dev",
+    "desktop:build": "cd desktop && npm run build:win",
+    "android:build": "cd android && build-apk.bat"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",

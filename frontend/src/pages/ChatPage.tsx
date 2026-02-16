@@ -38,8 +38,8 @@ import defaultChatBackground from "@default-chat-bg";
 /** Эмодзи для реакций (из reaction-animations, совпадает с бэкендом) */
 const REACTION_EMOJIS = REACTIONS.map((r) => r.emoji);
 
-/** Максимальный размер файла при загрузке — 0,5 ГБ */
-const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
+/** Максимальный размер файла при загрузке — 2 ГБ */
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
 const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
 const VIRTUAL_OVERSCAN = 10;
