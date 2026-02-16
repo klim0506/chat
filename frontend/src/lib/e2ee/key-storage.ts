@@ -121,3 +121,26 @@ export async function getCurrentDeviceId(): Promise<number | null> {
 export async function setCurrentDeviceId(deviceId: number): Promise<void> {
   localStorage.setItem("e2ee_device_id", String(deviceId));
 }
+
+/**
+ * E2EE protocol version. Increment to force full re-registration.
+ * v2: fixed chain key derivation so sender/receiver keys match.
+ * v3: full key reset — clear all keys + device id to fix server/local key mismatch.
+ * v4: fix concurrent registration race condition — re-register with atomic key saving.
+ */
+const E2EE_SESSION_VERSION = 4;
+const E2EE_SESSION_VERSION_KEY = "e2ee_session_version";
+
+/** Clear ALL E2EE state if protocol version changed, forcing full re-registration. */
+export async function migrateSessionsIfNeeded(): Promise<void> {
+  const stored = localStorage.getItem(E2EE_SESSION_VERSION_KEY);
+  const currentVersion = stored ? parseInt(stored, 10) : 0;
+  if (currentVersion < E2EE_SESSION_VERSION) {
+    await db.sessions.clear();
+    await db.identityKeyPair.clear();
+    await db.signedPreKeys.clear();
+    await db.preKeys.clear();
+    localStorage.removeItem("e2ee_device_id");
+    localStorage.setItem(E2EE_SESSION_VERSION_KEY, String(E2EE_SESSION_VERSION));
+  }
+}

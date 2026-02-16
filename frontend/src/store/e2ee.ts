@@ -15,18 +15,33 @@ interface E2eeState {
 const PREKEY_COUNT = 100;
 const PREKEY_LOW_THRESHOLD = 20;
 
+// Mutex to prevent concurrent registration calls
+let registrationPromise: Promise<boolean> | null = null;
+
 export const useE2eeStore = create<E2eeState>((set, get) => ({
   deviceId: null,
   isRegistered: false,
   error: null,
 
   ensureRegistered: async () => {
+    // Clear all E2EE state if protocol version changed (forces full re-registration)
+    await keyStorage.migrateSessionsIfNeeded();
     const stored = await keyStorage.getCurrentDeviceId();
     if (stored != null) {
-      set({ deviceId: stored, isRegistered: true, error: null });
-      return true;
+      // Verify identity key exists — if migration cleared it, we need re-registration
+      await init();
+      const identity = await keyStorage.getIdentityKeyPair();
+      if (identity) {
+        set({ deviceId: stored, isRegistered: true, error: null });
+        return true;
+      }
+      // Identity key was cleared but device_id remains — force re-registration
+      localStorage.removeItem("e2ee_device_id");
     }
-    return get().registerDevice();
+    // Use mutex to prevent concurrent registration
+    if (registrationPromise) return registrationPromise;
+    registrationPromise = get().registerDevice();
+    try { return await registrationPromise; } finally { registrationPromise = null; }
   },
 
   registerDevice: async () => {
@@ -34,10 +49,10 @@ export const useE2eeStore = create<E2eeState>((set, get) => ({
       await init();
       set({ error: null });
 
+      // 1. Generate all keys in memory first (don't save to IndexedDB yet)
       let identity = await keyStorage.getIdentityKeyPair();
       if (!identity) {
         identity = cryptoSignKeypair();
-        await keyStorage.saveIdentityKeyPair(identity);
       }
 
       const spk = cryptoBoxKeypair();
@@ -49,27 +64,16 @@ export const useE2eeStore = create<E2eeState>((set, get) => ({
         const kp = cryptoBoxKeypair();
         prekeys.push({ key_id: i, public_key: kp.publicKey, private_key: kp.privateKey });
       }
-      await keyStorage.savePreKeys(
-        prekeys.map((k) => ({
-          keyId: k.key_id,
-          publicKey: k.public_key,
-          privateKey: k.private_key,
-        }))
-      );
-      await keyStorage.saveSignedPreKey(
-        spkId,
-        spk.publicKey,
-        spk.privateKey,
-        spkSig
-      );
 
-      const existingDevices = await e2eeApi.listDevices().catch(() => ({ data: [] as { device_id: number }[] }));
-      const nextId = existingDevices.data.length > 0
-        ? Math.max(...existingDevices.data.map((d) => d.device_id)) + 1
-        : 1;
+      // 2. Remove ALL existing server devices to avoid orphaned keys
+      const existingDevices = await e2eeApi.listDevices().catch(() => ({ data: [] as { device_id: number; id: string }[] }));
+      for (const dev of existingDevices.data) {
+        try { await e2eeApi.removeDevice(dev.id); } catch { /* ignore */ }
+      }
 
+      // 3. Register on server FIRST (before saving to IndexedDB)
       const res = await e2eeApi.registerDevice({
-        device_id: nextId,
+        device_id: 1,
         name: getDeviceName(),
         identity_key: toBase64(identity.publicKey),
         signed_prekey: toBase64(spk.publicKey),
@@ -81,7 +85,18 @@ export const useE2eeStore = create<E2eeState>((set, get) => ({
         })),
       });
 
-      const did = (res.data as { device_id?: number }).device_id ?? nextId;
+      const did = (res.data as { device_id?: number }).device_id ?? 1;
+
+      // 4. Server registration succeeded — NOW save keys to IndexedDB atomically
+      await keyStorage.saveIdentityKeyPair(identity);
+      await keyStorage.saveSignedPreKey(spkId, spk.publicKey, spk.privateKey, spkSig);
+      await keyStorage.savePreKeys(
+        prekeys.map((k) => ({
+          keyId: k.key_id,
+          publicKey: k.public_key,
+          privateKey: k.private_key,
+        }))
+      );
       await keyStorage.setCurrentDeviceId(did);
       set({ deviceId: did, isRegistered: true, error: null });
       return true;

@@ -145,8 +145,13 @@ body {
 /* Swipe-to-reply: GPU acceleration */
 .swipe-message {
   will-change: transform;
-  -webkit-user-select: none;
-  user-select: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .swipe-message {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 @keyframes swipe-bounce-back {

@@ -13,7 +13,6 @@ import { useNetworkStore } from "../store/network";
 import { useChatListStore } from "../store/chatList";
 import { getAvatarInitials } from "../lib/avatar-initials";
 // import { compressImageForUpload } from "../lib/image-compression";
-import { showMessageNotification } from "../lib/notifications";
 import { playSound } from "../lib/sounds";
 import { AvatarEditorModal } from "../components/AvatarEditorModal";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
@@ -1296,6 +1295,45 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }).catch(() => { setChat(null); return null; }).finally(() => setLoading(false));
     const msgsP = storeLoadMessages(chatId);
 
+    // Decrypt API-loaded encrypted messages (PreKey first, then Whisper)
+    msgsP.then(async (loadedMsgs) => {
+      if (!loadedMsgs || loadedMsgs.length === 0) return;
+      const myDeviceId = await e2eeKeyStorage.getCurrentDeviceId();
+      if (myDeviceId == null) return;
+
+      // Process in chronological order so PreKey messages establish sessions first
+      const encrypted = loadedMsgs
+        .filter((m: Message) => m.is_encrypted && (m as unknown as Record<string, unknown>).encrypted_keys)
+        .filter((m: Message) => m.content === "Зашифрованное сообщение" || m.content === t("common.encryptedMessage"));
+
+      if (encrypted.length === 0) return;
+
+      // Sort chronologically (oldest first) to ensure PreKey messages establish sessions before Whisper messages
+      const sorted = [...encrypted].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+      for (const msg of sorted) {
+        const encKeys = (msg as unknown as Record<string, unknown>).encrypted_keys as Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>;
+        const myEntry = encKeys?.[String(myDeviceId)];
+        if (!myEntry) continue;
+
+        const senderId = getSenderId(msg);
+        const senderDeviceId = ((msg as unknown as Record<string, unknown>).sender_device_id as number) ?? 0;
+
+        try {
+          const decrypted = await decryptFromDevice(
+            senderId,
+            senderDeviceId,
+            myEntry.type as 0 | 1,
+            myEntry.body,
+            myEntry.type === 0 ? { identity_key: myEntry.identity_key!, ephemeral_key: myEntry.ephemeral_key!, spk_id: myEntry.spk_id!, opk_id: myEntry.opk_id } : undefined
+          );
+          storeUpsertMessage(chatId, { ...msg, content: decrypted });
+        } catch (err) {
+          // Decryption failed for this message — skip silently
+        }
+      }
+    }).catch(() => {});
+
     // Wait for both chat metadata and messages before deciding scroll target
     Promise.all([chatP, msgsP]).then(([chatData, msgs]) => {
       const unread = chatData?.unread_count ?? 0;
@@ -1494,20 +1532,39 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         if (meta) {
           meta.then((m) => {
             if (m?.lastMessageAt) {
-              messagesApi.list(chatId, { since: m.lastMessageAt }).then((res) => {
+              messagesApi.list(chatId, { since: m.lastMessageAt }).then(async (res) => {
                 const freshMsgs = (res.data).map(storeNormalizeMessage);
                 const existingMsgs = useMessagesStore.getState().byChat[chatId] ?? [];
                 const existingMap = new Map(existingMsgs.map((em) => [em.id, em]));
+                const toDecrypt: Message[] = [];
                 for (const msg of freshMsgs) {
                   if (msg.is_encrypted) {
                     if (existingMap.has(msg.id)) {
-                      // Preserve decrypted content from cache
                       storeUpsertMessageRef.current(chatId, { ...msg, content: existingMap.get(msg.id)!.content });
                     } else {
                       storeUpsertMessageRef.current(chatId, { ...msg, content: t("common.encryptedMessage") });
+                      toDecrypt.push(msg);
                     }
                   } else {
                     storeUpsertMessageRef.current(chatId, msg);
+                  }
+                }
+                // Decrypt new encrypted messages from delta-sync
+                if (toDecrypt.length > 0) {
+                  const myDevId = await e2eeKeyStorage.getCurrentDeviceId();
+                  if (myDevId != null) {
+                    const chronological = toDecrypt.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                    for (const msg of chronological) {
+                      const ek = (msg as unknown as Record<string, unknown>).encrypted_keys as Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>;
+                      const entry = ek?.[String(myDevId)];
+                      if (!entry) continue;
+                      const sid = getSenderId(msg);
+                      const sdid = ((msg as unknown as Record<string, unknown>).sender_device_id as number) ?? 0;
+                      try {
+                        const dec = await decryptFromDevice(sid, sdid, entry.type as 0 | 1, entry.body, entry.type === 0 ? { identity_key: entry.identity_key!, ephemeral_key: entry.ephemeral_key!, spk_id: entry.spk_id!, opk_id: entry.opk_id } : undefined);
+                        storeUpsertMessageRef.current(chatId, { ...msg, content: dec });
+                      } catch { /* leave placeholder */ }
+                    }
                   }
                 }
               }).catch(() => {});
@@ -1543,7 +1600,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               myEntry.type === 0 ? { identity_key: myEntry.identity_key!, ephemeral_key: myEntry.ephemeral_key!, spk_id: myEntry.spk_id!, opk_id: myEntry.opk_id } : undefined
             );
             raw = { ...raw, content: decrypted };
-          } catch {
+          } catch (decErr) {
             raw = { ...raw, content: "[не удалось расшифровать]" };
           }
         } else {
@@ -1696,19 +1753,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     notifMgrRef.current = mgr;
     notifWsRef.current = mgr.raw;
 
-    mgr.on("new_message", (data: unknown) => {
-      const d = data as { chat_id?: string; chat_title?: string; message?: Record<string, unknown>; is_muted?: boolean };
-      if (d.is_muted) return;
-      const inThisChat = d.chat_id === chatIdRef.current;
-      const tabVisible = !document.hidden;
-      if (tabVisible && inThisChat) return;
-      const content = (d.message?.content as string) || "";
-      const me = useAuthStore.getState().user;
-      const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
-      const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
-      playSound(isMention ? "mention" : "receive");
-      showMessageNotification(d.chat_title || t("dashboard.newMessage"), d.message || {});
-    });
+    // new_message notifications are handled by MessengerPage — not duplicated here.
 
     mgr.connect();
 
@@ -4367,7 +4412,6 @@ function ReferralHintInChat() {
    MessageBubble
    ================================================================ */
 
-const SHORT_MSG_MAX_LEN = 50;
 
 /** Сообщение состоит только из эмодзи (и пробелов) — показываем без рамки, крупнее. Только цифры не считаем эмодзи. */
 function isOnlyEmoji(str: string): boolean {
@@ -4670,12 +4714,13 @@ const MessageBubble = memo(function MessageBubble({
   const menuRef = useRef<HTMLDivElement>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
-  const [swipeX, setSwipeX] = useState(0);
   const swipeActiveRef = useRef(false);
   const swipeXRef = useRef(0);
   const [swipeBounce, setSwipeBounce] = useState(false);
   const swipeBounceFromRef = useRef(0);
   const messageWrapperRef = useRef<HTMLDivElement>(null);
+  const swipeWrapperRef = useRef<HTMLDivElement>(null);
+  const swipeReplyIconRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => {
     if (reactionLimitToastTimerRef.current) clearTimeout(reactionLimitToastTimerRef.current);
@@ -4688,6 +4733,34 @@ const MessageBubble = memo(function MessageBubble({
   useEffect(() => () => {
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
   }, []);
+
+  const applySwipeVisuals = (x: number) => {
+    const wrapper = swipeWrapperRef.current;
+    const icon = swipeReplyIconRef.current;
+    if (wrapper) {
+      if (x > 0) {
+        wrapper.style.transform = `translateX(${x}px)`;
+        wrapper.style.transition = "none";
+      } else {
+        wrapper.style.transition = "transform 0.25s ease-out";
+        wrapper.style.transform = "translateX(0px)";
+      }
+    }
+    if (icon) {
+      if (x > 0) {
+        icon.style.display = "";
+        icon.style.opacity = String(Math.min(x / 60, 1));
+        const svg = icon.querySelector("svg");
+        if (svg instanceof HTMLElement) {
+          svg.style.color = x >= 60 ? "#3b82f6" : "#94a3b8";
+          svg.style.transform = x >= 60 ? "scale(1.1)" : "";
+        }
+      } else {
+        icon.style.display = "none";
+        icon.style.opacity = "0";
+      }
+    }
+  };
 
   const handleLongPress = () => {
     longPressTimerRef.current = null;
@@ -4718,7 +4791,7 @@ const MessageBubble = memo(function MessageBubble({
   const isSticker = message.msg_type === "sticker" && message.content;
   const senderName = getSenderName(message);
   const content = message.content || t("common.fileMsg");
-  const isShortText = !isFile && content.length <= SHORT_MSG_MAX_LEN && !content.includes("\n");
+  const isShortText = !isFile && !content.includes("\n") && content.length <= 40;
   const isEmojiOnly = !isFile && !content.includes("\n") && isOnlyEmoji(content);
   const reactions = message.reactions ?? {};
   const myReactions: string[] = message.my_reactions ?? [];
@@ -4893,8 +4966,11 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <div
       ref={messageWrapperRef}
-      className={`relative flex w-full ${isMine ? "justify-end" : "justify-start"} ${hasReactions ? "mb-px" : ""}`}
+      className={`relative flex w-full justify-start ${hasReactions ? "mb-px" : ""}`}
       onContextMenu={(e) => {
+        const selection = window.getSelection();
+        const hasSelection = selection && selection.toString().trim().length > 0;
+        if (hasSelection && window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
         e.preventDefault();
         e.stopPropagation();
         const menuWidth = 200;
@@ -4908,7 +4984,7 @@ const MessageBubble = memo(function MessageBubble({
         if (e.touches.length !== 1) return;
         longPressStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         swipeActiveRef.current = false;
-        setSwipeX(0);
+        swipeXRef.current = 0;
         longPressTimerRef.current = setTimeout(handleLongPress, 500);
       }}
       onTouchMove={(e) => {
@@ -4925,7 +5001,7 @@ const MessageBubble = memo(function MessageBubble({
             swipeActiveRef.current = true;
             const val = Math.min(dx, 80);
             swipeXRef.current = val;
-            setSwipeX(val);
+            applySwipeVisuals(val);
             e.preventDefault();
             e.stopPropagation();
           }
@@ -4939,9 +5015,17 @@ const MessageBubble = memo(function MessageBubble({
             onReply!(message);
             if (navigator.vibrate) navigator.vibrate(15);
             swipeBounceFromRef.current = swipeXRef.current;
+            const wrapper = swipeWrapperRef.current;
+            if (wrapper) {
+              wrapper.style.transform = "";
+              wrapper.style.transition = "";
+            }
+            applySwipeVisuals(0);
             setSwipeBounce(true);
+          } else {
+            applySwipeVisuals(0);
           }
-          setSwipeX(0);
+          swipeXRef.current = 0;
           e.stopPropagation();
         } else {
           cancelLongPress();
@@ -4949,28 +5033,24 @@ const MessageBubble = memo(function MessageBubble({
       }}
       onTouchCancel={(e) => {
         swipeActiveRef.current = false;
-        setSwipeX(0);
+        swipeXRef.current = 0;
+        applySwipeVisuals(0);
         cancelLongPress();
         e.stopPropagation();
       }}
     >
       {/* Обёртка: [reply icon при свайпе] [аватар + пузырь + реакции] */}
       <div
-        className={`relative flex flex-row flex-nowrap items-end gap-2 swipe-message ${isMine ? "w-full" : "inline-flex"} ${swipeBounce ? "swipe-bounce" : ""}`}
-        style={{
-          ...(!swipeBounce ? {
-            transform: `translateX(${swipeX}px)`,
-            transition: swipeX === 0 ? "transform 0.25s ease-out" : "none",
-          } : {
-            "--swipe-from": `${swipeBounceFromRef.current}px`,
-          } as React.CSSProperties),
-        }}
+        ref={swipeWrapperRef}
+        className={`relative flex flex-row flex-nowrap items-end gap-2 swipe-message w-full ${swipeBounce ? "swipe-bounce" : ""}`}
+        style={swipeBounce ? { "--swipe-from": `${swipeBounceFromRef.current}px` } as React.CSSProperties : undefined}
         onAnimationEnd={() => setSwipeBounce(false)}
       >
-        {swipeX > 0 && onReply && (
+        {onReply && (
           <div
+            ref={swipeReplyIconRef}
             className="flex items-center justify-center shrink-0 w-10"
-            style={{ opacity: Math.min(swipeX / 60, 1) }}
+            style={{ display: "none", opacity: 0 }}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -4982,14 +5062,14 @@ const MessageBubble = memo(function MessageBubble({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className={swipeX >= 60 ? "text-blue-500 scale-110" : "text-slate-400"}
+              className="text-slate-400 transition-transform"
             >
               <polyline points="9 17 4 12 9 7"/>
               <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
             </svg>
           </div>
         )}
-      <div className={`relative flex flex-row items-end gap-1.5 min-w-0 ${isMine ? "order-2 w-full max-w-[88%] ml-auto flex-row-reverse justify-start" : "order-0 inline-flex max-w-[88%] shrink-0"}`}>
+      <div className="relative inline-flex items-end gap-1.5 min-w-0 max-w-[88%] shrink-0">
         {(showAvatar ? (
           (() => {
             const sender = message.sender as User;
@@ -5015,7 +5095,7 @@ const MessageBubble = memo(function MessageBubble({
           <div className="w-8 h-8 shrink-0" aria-hidden />
         ))}
         <div
-          className={`relative flex flex-col min-w-0 group ${isMine ? "items-end" : "items-start"}`}
+          className="relative flex flex-col min-w-0 group items-start"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
@@ -5026,14 +5106,14 @@ const MessageBubble = memo(function MessageBubble({
               {timeEl}
             </div>
             {hasReactions && (
-              <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"}`}>
+              <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear justify-start`}>
                 {reactionButtons}
               </div>
             )}
           </div>
         ) : (
         <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`}>
-        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl ${content.length <= 20 ? "pl-6 pr-5 py-2" : "px-3 py-1"} ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? (isMine ? "rounded-br-[4px]" : "rounded-bl-[4px]") : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
           {/* Forwarded header */}
           {message.forwarded_from && (
             <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-0.5 -mt-0.5">
@@ -5046,10 +5126,10 @@ const MessageBubble = memo(function MessageBubble({
           )}
           {/* Reply quote block — для своих сообщений прижата к правому краю */}
           {message.reply_to && !message.reply_to.is_deleted && (
-            <div className={isMine ? "flex justify-end mb-0.5 -mt-0.5" : "mb-0.5 -mt-0.5"}>
+            <div className="mb-0.5 -mt-0.5">
               <button
                 type="button"
-                className={`rounded-lg px-2 py-0.5 border-l-[3px] ${isMine ? "w-fit max-w-full text-right border-blue-400 bg-blue-50/50" : "w-full text-left border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
+                className={`rounded-lg px-2 py-0.5 border-l-[3px] w-full text-left ${isMine ? "border-blue-400 bg-blue-50/50" : "border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
                 onClick={() => {
                   const el = document.querySelector(`[data-message-id="${message.reply_to!.id}"]`);
                   el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -5082,8 +5162,8 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           )}
           {message.reply_to && message.reply_to.is_deleted && (
-            <div className={`mb-0.5 -mt-0.5 ${isMine ? "flex justify-end" : ""}`}>
-              <div className={`rounded-lg px-2 py-0.5 border-l-[3px] border-slate-300 bg-slate-50/50 ${isMine ? "w-fit max-w-full text-right" : "w-full text-left"}`}>
+            <div className="mb-0.5 -mt-0.5">
+              <div className="rounded-lg px-2 py-0.5 border-l-[3px] border-slate-300 bg-slate-50/50 w-full text-left">
                 <div className="text-xs text-slate-400 italic">{t("chat.messageDeleted")}</div>
               </div>
             </div>
@@ -5116,22 +5196,22 @@ const MessageBubble = memo(function MessageBubble({
           ) : isVideoCircle ? (
             <div className="min-w-0 max-w-full">
               <VideoCirclePlayer src={fileUrl} />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isVideo ? (
             <div className="min-w-0 max-w-full">
               <InlineAutoplayVideo src={fileUrl} className="max-w-[300px] max-h-80 rounded-lg" />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isGif ? (
             <div className="min-w-0 max-w-full">
               <img src={content} alt="" className="max-w-[280px] max-h-80 rounded-xl object-contain" style={{ maxHeight: "280px" }} />
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isSticker ? (
@@ -5143,15 +5223,16 @@ const MessageBubble = memo(function MessageBubble({
                   ? <LottieSticker animationUrl={stickerAnim} size={112} />
                   : <img src={stickerPath} alt="" className="w-28 h-28 object-contain" />;
               })()}
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isMultiImage ? (
-            <div className="min-w-0 max-w-full flex flex-col gap-0.5">
+            <div className="relative min-w-0 max-w-full">
               <ImageTileGrid images={imageFiles} />
-              <div className={`min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              {/* Time/reactions overlay on bottom-right of image grid */}
+              <div className="absolute bottom-1.5 left-2 flex items-center gap-x-1 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-white [&_span]:!text-white/90">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isFile && message.file ? (
@@ -5161,19 +5242,21 @@ const MessageBubble = memo(function MessageBubble({
                   <ProgressiveImage
                     src={fileUrl}
                     alt={fileName}
-                    className="w-full max-w-[340px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
+                    className="w-full max-w-[520px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
                     wrapper="button"
                     onClick={() => onImageClick(fileUrl, fileName)}
                     preserveAnimation={fileMime.includes("gif")}
+                    fullWidth={1200}
                   />
                 ) : (
                   <ProgressiveImage
                     src={fileUrl}
                     alt={fileName}
-                    className="w-full max-w-[340px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
+                    className="w-full max-w-[520px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
                     wrapper="a"
                     href={fileUrl}
                     preserveAnimation={fileMime.includes("gif")}
+                    fullWidth={1200}
                   />
                 )
               ) : isAudio ? (
@@ -5199,30 +5282,31 @@ const MessageBubble = memo(function MessageBubble({
                   </span>
                 </a>
               )}
-              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 ${isMine ? "justify-end" : "justify-start"}`}>
-                {isMine ? (<> {hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}{timeEl}</>) : (<> {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}</>)}
+              <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isShortText ? (
             <>
-              <div className={`flex items-center gap-x-1 gap-y-0 leading-snug min-w-fit max-w-full ${content.length < 20 ? "flex-nowrap" : "flex-wrap"} ${isMine ? "justify-end" : ""}`}>
+              <div className="inline-flex items-baseline gap-x-1.5 flex-nowrap leading-snug whitespace-nowrap">
                 <MarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
                 {timeEl}
               </div>
               {hasReactions && (
-                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"} ${!isMine ? "-ml-3 mr-1" : ""}`}>
+                <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear justify-start -ml-1 mr-1">
                   {reactionButtons}
                 </div>
               )}
             </>
           ) : (
             <>
-              <div className={`flex flex-wrap items-center gap-x-1 leading-snug min-w-fit max-w-full ${isMine ? "justify-end" : ""}`}>
-                <MarkdownMessageContent content={content} isMine={isMine} className="inline" />
-                {timeEl}
+              <div className="relative leading-snug max-w-full">
+                <MarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
+                <span className="invisible inline-flex items-center whitespace-nowrap ml-1.5 text-[10px]">{timeEl}</span>
+                <span className="absolute bottom-[1px] right-0 z-10">{timeEl}</span>
               </div>
               {hasReactions && (
-                <div className={`flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear ${isMine ? "justify-end" : "justify-start"} ${!isMine ? "-ml-1 mr-1" : ""}`}>
+                <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear justify-start -ml-1 mr-1">
                   {reactionButtons}
                 </div>
               )}
@@ -5231,7 +5315,7 @@ const MessageBubble = memo(function MessageBubble({
         </div>
         {isLastInGroup && !isSticker && !isImageBubble && (
           <div
-            className={`absolute w-0 h-0 border-[6px] border-transparent bottom-[10px] ${isMine ? "right-0 -mr-px border-l-blue-100" : "left-0 -ml-px border-r-white"}`}
+            className={`absolute w-0 h-0 border-[6px] border-transparent bottom-[10px] left-0 -ml-px ${isMine ? "border-r-blue-100" : "border-r-white"}`}
             aria-hidden
           />
         )}
@@ -5240,7 +5324,7 @@ const MessageBubble = memo(function MessageBubble({
         {/* Reaction picker — слева от bubbleColumn (для isMine), справа (для !isMine) */}
         {isMine && hoverDelayPassed && !editing && (
           <div
-            className="absolute bottom-1 right-full mr-0.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+            className="absolute bottom-1 left-full ml-0.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
           >
             <div className="scrollbar-hide flex flex-col gap-0.5 bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg py-1 px-1 overflow-y-auto max-h-[5.75rem]">
               {REACTION_EMOJIS.map((emoji) => (
@@ -5747,73 +5831,239 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
    ImageTileGrid — плиточное отображение нескольких изображений
    ================================================================ */
 
+/**
+ * Telegram-style adaptive image tile grid.
+ * Calculates container dimensions from actual image aspect ratios to minimize cropping.
+ * Total height capped at 33vh. Width adapts to fit natural proportions.
+ */
+const TILE_MIN_W = 200;
+const TILE_MAX_W = 560;
+const TILE_GAP = 1;
+
+type ImgDims = { w: number; h: number; ratio: number };
+
+function useMaxTileH() {
+  const [maxH, setMaxH] = useState(Math.round(window.innerHeight / 3));
+  useEffect(() => {
+    const handler = () => setMaxH(Math.round(window.innerHeight / 3));
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return maxH;
+}
+
 function ImageTileGrid({ images }: { images: { id: string; url?: string | null; original_name?: string; mime_type?: string }[] }) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
-  const count = images.length;
-
-  // Определяем сетку в зависимости от количества
-  const getGridClass = () => {
-    if (count === 2) return "grid-cols-2";
-    if (count === 3) return "grid-cols-2";
-    if (count === 4) return "grid-cols-2";
-    if (count >= 5) return "grid-cols-3";
-    return "grid-cols-1";
-  };
-
-  // Для 3 картинок: первая занимает всю ширину
-  const getItemClass = (idx: number) => {
-    if (count === 3 && idx === 0) return "col-span-2";
-    return "";
-  };
-
-  const getItemAspect = () => {
-    if (count === 2) return "aspect-square";
-    if (count <= 4) return "aspect-square";
-    return "aspect-square";
-  };
-
-  // Показывать максимум 6, остальные — "+N"
+  const [dims, setDims] = useState<(ImgDims | null)[]>([]);
   const maxShow = 6;
   const visibleImages = images.slice(0, maxShow);
-  const hiddenCount = count - maxShow;
+  const hiddenCount = images.length - maxShow;
+  const maxH = useMaxTileH();
+
+  useEffect(() => {
+    let cancelled = false;
+    const results: (ImgDims | null)[] = new Array(visibleImages.length).fill(null);
+    let loaded = 0;
+    visibleImages.forEach((img, idx) => {
+      const url = toSameOriginMediaUrl(img.url || "#") || "#";
+      if (!url || url === "#") { loaded++; return; }
+      const el = new Image();
+      el.onload = () => {
+        if (cancelled) return;
+        results[idx] = { w: el.naturalWidth, h: el.naturalHeight, ratio: el.naturalWidth / el.naturalHeight };
+        loaded++;
+        if (loaded === visibleImages.length) setDims([...results]);
+      };
+      el.onerror = () => { loaded++; if (loaded === visibleImages.length && !cancelled) setDims([...results]); };
+      el.src = url;
+    });
+    return () => { cancelled = true; };
+  }, [images.map(i => i.id).join(",")]);
+
+  const count = visibleImages.length;
+  const allLoaded = dims.length === count;
+  const d = (i: number): ImgDims => dims[i] || { w: 400, h: 300, ratio: 4 / 3 };
+
+  const clampW = (w: number) => Math.min(Math.max(w, TILE_MIN_W), TILE_MAX_W);
+
+  const renderTile = (img: typeof visibleImages[0], idx: number, style: React.CSSProperties) => {
+    const url = toSameOriginMediaUrl(img.url || "#") || "#";
+    const isLast = idx === maxShow - 1 && hiddenCount > 0;
+    return (
+      <div key={img.id} className="relative cursor-pointer overflow-hidden" style={style} onClick={() => setLightboxIdx(idx)}>
+        <ProgressiveImage
+          src={url}
+          alt={img.original_name || ""}
+          className="w-full h-full hover:scale-105 transition-transform duration-200"
+          objectFit="cover"
+          useOriginalQuality
+          preserveAnimation={(img.mime_type || "").includes("gif") || /\.gif$/i.test(img.original_name || "")}
+        />
+        {isLast && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+            <span className="text-white text-2xl font-bold">+{hiddenCount}</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const buildLayout = (): React.ReactNode => {
+    if (count === 1) {
+      const r = d(0).ratio;
+      let h = Math.min(maxH, 400);
+      let w = clampW(h * r);
+      h = Math.min(w / r, maxH);
+      return (
+        <div className="flex rounded-xl overflow-hidden" style={{ width: w, height: h }}>
+          {renderTile(visibleImages[0], 0, { width: "100%", height: "100%" })}
+        </div>
+      );
+    }
+
+    if (count === 2) {
+      const r0 = d(0).ratio;
+      const r1 = d(1).ratio;
+      const bothLandscape = r0 > 1.1 && r1 > 1.1;
+      const bothPortrait = r0 < 0.85 && r1 < 0.85;
+
+      if (bothLandscape) {
+        let h0 = (maxH - TILE_GAP) / 2;
+        let h1 = h0;
+        let w0 = h0 * r0;
+        let w1 = h1 * r1;
+        let w = clampW(Math.max(w0, w1));
+        h0 = Math.min(w / r0, h0);
+        h1 = Math.min(w / r1, h1);
+        return (
+          <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: w, gap: TILE_GAP }}>
+            {renderTile(visibleImages[0], 0, { width: "100%", height: h0 })}
+            {renderTile(visibleImages[1], 1, { width: "100%", height: h1 })}
+          </div>
+        );
+      }
+
+      if (bothPortrait) {
+        let targetH = Math.min(maxH, 380);
+        let w0 = targetH * r0;
+        let w1 = targetH * r1;
+        let totalW = w0 + w1 + TILE_GAP;
+        if (totalW > TILE_MAX_W) {
+          const s = TILE_MAX_W / totalW;
+          w0 *= s; w1 *= s; totalW = TILE_MAX_W; targetH *= s;
+        }
+        return (
+          <div className="flex flex-row rounded-xl overflow-hidden" style={{ width: totalW, height: targetH, gap: TILE_GAP }}>
+            {renderTile(visibleImages[0], 0, { width: w0, height: "100%" })}
+            {renderTile(visibleImages[1], 1, { width: w1, height: "100%" })}
+          </div>
+        );
+      }
+
+      let targetH = Math.min(maxH, 320);
+      let w0 = targetH * r0;
+      let w1 = targetH * r1;
+      let totalW = w0 + w1 + TILE_GAP;
+      if (totalW > TILE_MAX_W) {
+        const s = TILE_MAX_W / totalW;
+        w0 *= s; w1 *= s; totalW = TILE_MAX_W; targetH *= s;
+      }
+      if (totalW < TILE_MIN_W) {
+        const s = TILE_MIN_W / totalW;
+        w0 *= s; w1 *= s; totalW = TILE_MIN_W; targetH *= s;
+      }
+      return (
+        <div className="flex flex-row rounded-xl overflow-hidden" style={{ width: totalW, height: targetH, gap: TILE_GAP }}>
+          {renderTile(visibleImages[0], 0, { width: w0, height: "100%" })}
+          {renderTile(visibleImages[1], 1, { width: w1, height: "100%" })}
+        </div>
+      );
+    }
+
+    if (count === 3) {
+      const r0 = d(0).ratio;
+      let topH = Math.min((maxH - TILE_GAP) * 0.6, 260);
+      let w = clampW(topH * r0);
+      topH = Math.min(w / r0, topH);
+      let botH = Math.min((maxH - TILE_GAP) * 0.4, 180);
+      if (topH + botH + TILE_GAP > maxH) {
+        const s = maxH / (topH + botH + TILE_GAP);
+        topH *= s; botH *= s;
+      }
+      return (
+        <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: w, gap: TILE_GAP }}>
+          {renderTile(visibleImages[0], 0, { width: "100%", height: topH })}
+          <div className="flex flex-row" style={{ gap: TILE_GAP, height: botH }}>
+            {renderTile(visibleImages[1], 1, { flex: 1, height: "100%" })}
+            {renderTile(visibleImages[2], 2, { flex: 1, height: "100%" })}
+          </div>
+        </div>
+      );
+    }
+
+    if (count === 4) {
+      const avgR = (d(0).ratio + d(1).ratio + d(2).ratio + d(3).ratio) / 4;
+      let rowH = Math.min((maxH - TILE_GAP) / 2, 200);
+      let w = clampW(rowH * avgR * 2 + TILE_GAP);
+      rowH = Math.min((maxH - TILE_GAP) / 2, rowH);
+      return (
+        <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: w, gap: TILE_GAP }}>
+          <div className="flex flex-row" style={{ gap: TILE_GAP, height: rowH }}>
+            {renderTile(visibleImages[0], 0, { flex: 1, height: "100%" })}
+            {renderTile(visibleImages[1], 1, { flex: 1, height: "100%" })}
+          </div>
+          <div className="flex flex-row" style={{ gap: TILE_GAP, height: rowH }}>
+            {renderTile(visibleImages[2], 2, { flex: 1, height: "100%" })}
+            {renderTile(visibleImages[3], 3, { flex: 1, height: "100%" })}
+          </div>
+        </div>
+      );
+    }
+
+    const topRow = visibleImages.slice(0, 3);
+    const botRow = visibleImages.slice(3);
+    let rowH = Math.min((maxH - TILE_GAP) / 2, 160);
+    const w = clampW(rowH * 3 * 1.3);
+    return (
+      <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: w, gap: TILE_GAP }}>
+        <div className="flex flex-row" style={{ gap: TILE_GAP, height: rowH }}>
+          {topRow.map((img, i) => renderTile(img, i, { flex: 1, height: "100%" }))}
+        </div>
+        {botRow.length > 0 && (
+          <div className="flex flex-row" style={{ gap: TILE_GAP, height: rowH }}>
+            {botRow.map((img, i) => renderTile(img, i + 3, { flex: 1, height: "100%" }))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const fallbackLayout = () => {
+    const fbH = Math.min(180, maxH / 2);
+    if (count === 1) return <div className="rounded-xl overflow-hidden" style={{ width: 400, height: Math.min(260, maxH) }}>{renderTile(visibleImages[0], 0, { width: "100%", height: "100%" })}</div>;
+    if (count === 2) {
+      return (
+        <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: 400, gap: TILE_GAP }}>
+          {renderTile(visibleImages[0], 0, { width: "100%", height: fbH })}
+          {renderTile(visibleImages[1], 1, { width: "100%", height: fbH })}
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col rounded-xl overflow-hidden" style={{ width: 400, gap: TILE_GAP }}>
+        {renderTile(visibleImages[0], 0, { width: "100%", height: fbH })}
+        <div className="flex flex-row" style={{ gap: TILE_GAP, height: fbH * 0.75 }}>
+          {visibleImages.slice(1).map((img, i) => renderTile(img, i + 1, { flex: 1, height: "100%" }))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
-      <div className={`grid ${getGridClass()} gap-px rounded-xl overflow-hidden w-full max-w-[320px] min-w-[180px]`}>
-        {visibleImages.map((img, idx) => {
-          const url = toSameOriginMediaUrl(img.url || "#") || "#";
-          const isLast = idx === maxShow - 1 && hiddenCount > 0;
-          return (
-            <div
-              key={img.id}
-              className={`relative ${getItemClass(idx)} ${getItemAspect()} min-h-[100px] cursor-pointer overflow-hidden bg-slate-100`}
-              onClick={() => setLightboxIdx(idx)}
-            >
-              <ProgressiveImage
-                src={url}
-                alt={img.original_name || ""}
-                className="w-full h-full hover:scale-105 transition-transform duration-200"
-                objectFit="cover"
-                fullWidth={800}
-                preserveAnimation={(img.mime_type || "").includes("gif") || /\.gif$/i.test(img.original_name || "")}
-              />
-              {isLast && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <span className="text-white text-2xl font-bold">+{hiddenCount}</span>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Lightbox — portal в body для полноэкранного отображения */}
+      {allLoaded ? buildLayout() : fallbackLayout()}
       {lightboxIdx !== null && createPortal(
-        <ImageLightbox
-          images={images}
-          initialIndex={lightboxIdx}
-          onClose={() => setLightboxIdx(null)}
-        />,
+        <ImageLightbox images={images} initialIndex={lightboxIdx} onClose={() => setLightboxIdx(null)} />,
         document.body,
       )}
     </>

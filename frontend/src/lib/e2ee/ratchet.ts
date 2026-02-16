@@ -35,12 +35,14 @@ export interface RatchetState {
 }
 
 export function createRatchetState(sharedSecret: Uint8Array, isInitiator: boolean): RatchetState {
-  const initInfo = new Uint8Array([isInitiator ? 1 : 0]);
-  const ck = cryptoGenericHash(32, sharedSecret, initInfo);
+  // Derive two directional chain keys: initiator→responder and responder→initiator.
+  // This ensures sender's sendingChainKey matches receiver's receivingChainKey.
+  const i2rCK = cryptoGenericHash(32, sharedSecret, new Uint8Array([1]));
+  const r2iCK = cryptoGenericHash(32, sharedSecret, new Uint8Array([0]));
   return {
     rootKey: sharedSecret,
-    sendingChainKey: ck,
-    receivingChainKey: isInitiator ? null : ck,
+    sendingChainKey: isInitiator ? i2rCK : r2iCK,
+    receivingChainKey: isInitiator ? r2iCK : i2rCK,
     sendingChainN: 0,
     receivingChainN: 0,
     skippedKeys: new Map(),

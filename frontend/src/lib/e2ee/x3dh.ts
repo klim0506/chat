@@ -37,7 +37,6 @@ export function x3dhInitiate(
 
   // Convert our Ed25519 IK to X25519 for DH
   const IKA_x25519_priv = cryptoSignEd25519SkToCurve25519(ourIdentity.privateKey);
-  const IKA_x25519_pub = cryptoSignEd25519PkToCurve25519(ourIdentity.publicKey);
   const IKB_x25519 = cryptoSignEd25519PkToCurve25519(IKB);
 
   const DH1 = cryptoScalarmult(IKA_x25519_priv, SPKB);

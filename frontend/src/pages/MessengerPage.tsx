@@ -260,13 +260,16 @@ export default function MessengerPage() {
         });
       }
       if (!data.is_muted) {
-        const content = (data.message?.content as string) || "";
-        const me = useAuthStore.getState().user;
-        const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
-        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
-        playSound(isMention ? "mention" : "receive");
-        if (document.hidden) {
+        const isActive = data.chat_id === activeChatId;
+        const tabVisible = !document.hidden;
+        // Skip sound & notification if ChatPage's chat WS already handles it
+        if (isActive && tabVisible) { /* ChatPage plays sound via chat WS */ } else {
+          const content = (data.message?.content as string) || "";
+          const me = useAuthStore.getState().user;
+          const identifiers = [me?.display_name, me?.username, me?.telegram_username].filter(Boolean) as string[];
+          const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
+          playSound(isMention ? "mention" : "receive");
           showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {});
         }
       }

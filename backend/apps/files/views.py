@@ -188,7 +188,7 @@ class SecureFileServeView(APIView):
                     out_type = "image/png"
                 else:
                     img = img.convert("RGB")
-                    img.save(buf, format="WEBP", quality=85, method=6)
+                    img.save(buf, format="WEBP", quality=92, method=6)
                     out_type = "image/webp"
                 buf.seek(0)
                 resp = HttpResponse(buf.read(), content_type=out_type)

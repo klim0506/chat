@@ -3,7 +3,7 @@
  */
 
 import { e2eeApi } from "../../api/client";
-import { initiateSession, encryptForDevice } from "./session-manager";
+import { initiateSession } from "./session-manager";
 import * as keyStorage from "./key-storage";
 import type { Chat } from "../../api/client";
 
@@ -39,30 +39,23 @@ export async function prepareEncryptedMessage(
   let content = "";
 
   for (const bundle of devices) {
-    const hasSession = await keyStorage.getSession(chat.other_member.id, bundle.device_id);
-    let entry: { type: 0 | 1; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number };
-
-    if (!hasSession) {
-      const prekey = await initiateSession(
-        chat.other_member.id,
-        bundle.device_id,
-        bundle,
-        plaintext
-      );
-      entry = {
-        type: 0,
-        body: prekey.body,
-        identity_key: prekey.identity_key,
-        ephemeral_key: prekey.ephemeral_key,
-        spk_id: prekey.spk_id,
-        opk_id: prekey.opk_id,
-      };
-      content = content || prekey.body;
-    } else {
-      const enc = await encryptForDevice(chat.other_member.id, bundle.device_id, bundle, plaintext);
-      entry = { type: enc.type, body: enc.body };
-      content = content || enc.body;
-    }
+    // Always use PreKey (type 0) to guarantee the receiver can establish a session,
+    // even if their sessions were cleared or they never received a previous PreKey.
+    const prekey = await initiateSession(
+      chat.other_member.id,
+      bundle.device_id,
+      bundle,
+      plaintext
+    );
+    const entry = {
+      type: 0 as const,
+      body: prekey.body,
+      identity_key: prekey.identity_key,
+      ephemeral_key: prekey.ephemeral_key,
+      spk_id: prekey.spk_id,
+      opk_id: prekey.opk_id,
+    };
+    content = content || prekey.body;
     encryptedKeys[String(bundle.device_id)] = entry;
   }
 
@@ -72,25 +65,16 @@ export async function prepareEncryptedMessage(
         const { data: myData } = await e2eeApi.getKeyBundle(myUserId);
         const myDevices = (myData.devices ?? []).filter((d) => d.device_id !== myDeviceId);
         for (const bundle of myDevices) {
-          const hasSession = await keyStorage.getSession(myUserId, bundle.device_id);
-          let entry: { type: 0 | 1; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number };
-
-          if (!hasSession) {
-            const prekey = await initiateSession(myUserId, bundle.device_id, bundle, plaintext);
-            entry = {
-              type: 0,
-              body: prekey.body,
-              identity_key: prekey.identity_key,
-              ephemeral_key: prekey.ephemeral_key,
-              spk_id: prekey.spk_id,
-              opk_id: prekey.opk_id,
-            };
-            content = content || prekey.body;
-          } else {
-            const enc = await encryptForDevice(myUserId, bundle.device_id, bundle, plaintext);
-            entry = { type: enc.type, body: enc.body };
-            content = content || enc.body;
-          }
+          const prekey = await initiateSession(myUserId, bundle.device_id, bundle, plaintext);
+          const entry = {
+            type: 0 as const,
+            body: prekey.body,
+            identity_key: prekey.identity_key,
+            ephemeral_key: prekey.ephemeral_key,
+            spk_id: prekey.spk_id,
+            opk_id: prekey.opk_id,
+          };
+          content = content || prekey.body;
           encryptedKeys[String(bundle.device_id)] = entry;
         }
       } catch {

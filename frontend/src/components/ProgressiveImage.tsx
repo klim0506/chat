@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 
-const BLUR_PLACEHOLDER_WIDTH = 280;
+const BLUR_PLACEHOLDER_WIDTH = 420;
 
 /** URL для крошечного превью (blur placeholder). Работает для http(s) и относительных путей. */
 function getThumbnailUrl(url: string, width: number = BLUR_PLACEHOLDER_WIDTH): string {
@@ -66,7 +66,6 @@ export function ProgressiveImage({
           try {
             const u = new URL(src, window.location.origin);
             if (!u.searchParams.has("w")) u.searchParams.set("w", String(fullWidth));
-            if (!u.searchParams.has("preview")) u.searchParams.set("preview", "1");
             return u.toString();
           } catch {
             return src;
@@ -78,7 +77,9 @@ export function ProgressiveImage({
     setLoaded(true);
     setError(false);
   }, []);
-  const handleError = useCallback(() => setError(true), []);
+  const handleError = useCallback(() => {
+    setError(true);
+  }, []);
 
   const imgProps = {
     alt,
@@ -87,7 +88,7 @@ export function ProgressiveImage({
   };
 
   const content = (
-    <span className="relative block overflow-hidden rounded-lg bg-slate-100 [&>img:last-child]:relative">
+    <span className={`relative block overflow-hidden ${objectFit === "cover" ? "rounded-none w-full h-full" : "rounded-lg bg-slate-100"} [&>img:last-child]:relative`}>
       {showErrorPlaceholder ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-slate-200/80 text-slate-600 text-sm p-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
