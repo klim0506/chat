@@ -1528,9 +1528,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       let raw = d.message;
       const isEncrypted = raw.is_encrypted === true;
       const encryptedKeys = (raw.encrypted_keys as Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>) ?? {};
-      if (isEncrypted && !(getSenderId(raw as Message) === myUserId)) {
+      if (isEncrypted && !(getSenderId(raw as unknown as Message) === myUserId)) {
         const myDeviceId = await e2eeKeyStorage.getCurrentDeviceId();
-        const senderId = getSenderId(raw as Message);
+        const senderId = getSenderId(raw as unknown as Message);
         const senderDeviceId = (raw.sender_device_id as number) ?? 0;
         const myEntry = myDeviceId != null ? encryptedKeys[String(myDeviceId)] : null;
         if (myEntry) {
@@ -1549,7 +1549,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         } else {
           raw = { ...raw, content: "[нет ключа для этого устройства]" };
         }
-      } else if (isEncrypted && getSenderId(raw as Message) === myUserId) {
+      } else if (isEncrypted && getSenderId(raw as unknown as Message) === myUserId) {
         // Look up cached plaintext for our own sent encrypted messages
         const ciphertext = raw.content as string;
         const cachedPlaintext = sentPlaintextCacheRef.current.get(ciphertext);
@@ -4738,9 +4738,7 @@ const MessageBubble = memo(function MessageBubble({
   const fileIsVideo = isVideoByMime || (message.file && !fileMime && isVideoByExt);
   // Показывать как ссылку только для не-медиа; картинки и видео — всегда с превью
   const isImage = message.file && fileIsImage;
-  // Для одиночных изображений берём оригинал (без сильного сжатия превью).
-  const filePreviewUrl = fileUrl && isImage ? withPreviewParams(fileUrl, 1400) : fileUrl;
-  // filePreviewUrl is used directly in the JSX below
+  // fileUrl is used directly for all media types
   const isAudio = message.msg_type === "audio" || (message.file && (message.file as { mime_type?: string }).mime_type?.startsWith("audio/"));
   const isVideo = message.file && !isAudio && (message.msg_type === "video" || fileIsVideo);
   const isVideoCircle = message.msg_type === "video_circle" && !isAudio && message.file;

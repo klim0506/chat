@@ -329,7 +329,7 @@ export const messagesApi = {
       hasMore: res.headers?.["x-has-more"] === "true",
     };
   },
-  create: (chatId: string, data: { msg_type?: string; content?: string; file_id?: string; file_ids?: string[]; waveform?: number[]; reply_to_id?: string }) => {
+  create: (chatId: string, data: { msg_type?: string; content?: string; file_id?: string; file_ids?: string[]; waveform?: number[]; reply_to_id?: string; is_encrypted?: boolean; sender_device_id?: number; encrypted_keys?: Record<string, unknown> }) => {
     const payload: Record<string, unknown> = { ...data };
     // file_ids — для нескольких файлов в одном сообщении
     if (data.file_ids && data.file_ids.length > 0) {
