@@ -54,8 +54,8 @@ export function LegalMarkdown({ markdown }: LegalMarkdownProps) {
             </a>
           );
         },
-        code: ({ inline, children }) =>
-          inline ? (
+        code: ({ children, ...props }) =>
+          !(props as Record<string, unknown>).className ? (
             <code className="px-1 py-0.5 rounded bg-slate-100 text-slate-800 text-[0.85em]">
               {children as ReactNode}
             </code>

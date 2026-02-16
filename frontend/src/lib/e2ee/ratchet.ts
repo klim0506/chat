@@ -12,7 +12,6 @@ import {
   fromBase64,
 } from "./crypto";
 
-const RATCHET_INFO = new TextEncoder().encode("DR-v1");
 const MESSAGE_KEY_INFO = new TextEncoder().encode("MK");
 
 /** Derive next chain key and message key from current chain key. */

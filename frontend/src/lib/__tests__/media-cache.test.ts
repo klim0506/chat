@@ -36,9 +36,9 @@ vi.stubGlobal("fetch", fetchMock);
 
 describe("media-cache", () => {
   let getCachedMediaUrl: typeof import("../media-cache").getCachedMediaUrl;
-  let isMediaCached: typeof import("../media-cache").isMediaCached;
+  let _isMediaCached: typeof import("../media-cache").isMediaCached;
   let clearMediaCache: typeof import("../media-cache").clearMediaCache;
-  let getMediaCacheSize: typeof import("../media-cache").getMediaCacheSize;
+  let _getMediaCacheSize: typeof import("../media-cache").getMediaCacheSize;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -47,9 +47,9 @@ describe("media-cache", () => {
 
     const mod = await import("../media-cache");
     getCachedMediaUrl = mod.getCachedMediaUrl;
-    isMediaCached = mod.isMediaCached;
+    _isMediaCached = mod.isMediaCached;
     clearMediaCache = mod.clearMediaCache;
-    getMediaCacheSize = mod.getMediaCacheSize;
+    _getMediaCacheSize = mod.getMediaCacheSize;
   });
 
   afterEach(() => {

@@ -13,8 +13,7 @@ import {
   cryptoGenericHash,
   fromBase64,
 } from "./crypto";
-import type { KeyPair } from "./protocol";
-import type { KeyBundleDevice } from "./protocol";
+import type { KeyPair, KeyBundle } from "./protocol";
 
 const F_PAD = new Uint8Array(32).fill(0xff);
 
@@ -26,8 +25,8 @@ function kdf(ikm: Uint8Array): Uint8Array {
 /** X3DH initiator: derive SK from our keys and Bob's bundle. */
 export function x3dhInitiate(
   ourIdentity: KeyPair,
-  ourSignedPrekey: KeyPair | null,
-  bundle: KeyBundleDevice
+  _ourSignedPrekey: KeyPair | null,
+  bundle: KeyBundle
 ): { sharedSecret: Uint8Array; ephemeralKey: KeyPair } {
   const ephemeral = cryptoBoxKeypair();
 
@@ -61,7 +60,7 @@ export function x3dhInitiate(
 }
 
 /** Verify signed prekey signature. */
-export function verifySignedPrekey(bundle: KeyBundleDevice): boolean {
+export function verifySignedPrekey(bundle: KeyBundle): boolean {
   const IKB = fromBase64(bundle.identity_key);
   const SPKB = fromBase64(bundle.signed_prekey);
   const sig = fromBase64(bundle.signed_prekey_sig);
@@ -75,7 +74,7 @@ export function x3dhRespond(
   ourOpk: KeyPair | null,
   theirIdentityPk: Uint8Array,
   theirEphemeralPk: Uint8Array,
-  usedOpkId?: number
+  _usedOpkId?: number
 ): Uint8Array {
   const IKA_x25519 = cryptoSignEd25519PkToCurve25519(theirIdentityPk);
   const IKB_x25519_priv = cryptoSignEd25519SkToCurve25519(ourIdentity.privateKey);

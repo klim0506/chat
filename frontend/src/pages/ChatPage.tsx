@@ -493,18 +493,6 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
   return text.length > 60 ? text.slice(0, 60) + "…" : text;
 }
 
-function withPreviewParams(url: string, width: number): string {
-  if (!url) return url;
-  try {
-    const u = new URL(url, window.location.origin);
-    if (!u.searchParams.has("w")) u.searchParams.set("w", String(width));
-    if (!u.searchParams.has("preview")) u.searchParams.set("preview", "1");
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
 /** Видео с автовоспроизведением при появлении в зоне видимости (muted для обхода политики браузера). */
 function InlineAutoplayVideo({ src, className = "" }: { src: string; className?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);

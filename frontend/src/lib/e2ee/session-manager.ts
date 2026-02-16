@@ -9,11 +9,9 @@ import {
   createRatchetState,
   ratchetEncrypt,
   ratchetDecrypt,
-  type RatchetState,
 } from "./ratchet";
 import * as keyStorage from "./key-storage";
-import type { KeyPair } from "./protocol";
-import type { KeyBundleDevice } from "./protocol";
+import type { KeyPair, KeyBundle } from "./protocol";
 import { MSG_TYPE_PREKEY, MSG_TYPE_WHISPER } from "./protocol";
 
 export interface EncryptResult {
@@ -25,7 +23,7 @@ export interface EncryptResult {
 export async function encryptForDevice(
   remoteUserId: string,
   remoteDeviceId: number,
-  bundle: KeyBundleDevice,
+  bundle: KeyBundle,
   plaintext: string
 ): Promise<EncryptResult> {
   await init();
@@ -54,7 +52,7 @@ export async function encryptForDevice(
 export async function initiateSession(
   remoteUserId: string,
   remoteDeviceId: number,
-  bundle: KeyBundleDevice,
+  bundle: KeyBundle,
   plaintext: string
 ): Promise<{ type: 0; body: string; identity_key: string; ephemeral_key: string; spk_id: number; opk_id?: number }> {
   await init();
