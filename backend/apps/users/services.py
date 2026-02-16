@@ -91,12 +91,12 @@ def generate_code(length=6):
 
 
 def _normalize_phone(phone: str) -> str:
-    """РќРѕРјРµСЂ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹ (Р±РµР· + Рё РїСЂРѕР±РµР»РѕРІ)."""
+    """Номер только цифры (без + и пробелов)."""
     return phone.strip().replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
 
 
 def send_sms_redsms(phone: str, text: str) -> bool:
-    """RedSMS HTTP API. Р”РѕРєСѓРјРµРЅС‚Р°С†РёСЏ: https://docs.redsms.ru/http/getting-started/"""
+    """RedSMS HTTP API. Документация: https://docs.redsms.ru/http/getting-started/"""
     import os
     import requests
 
@@ -134,7 +134,7 @@ def send_sms(phone: str, text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Telegram Gateway API вЂ” send verification codes via @VerificationCodes
+# Telegram Gateway API — send verification codes via @VerificationCodes
 # ---------------------------------------------------------------------------
 
 def send_telegram_verification(phone: str, code: str) -> dict | None:

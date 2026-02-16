@@ -93,29 +93,29 @@ class SendCodeView(APIView):
         user_exists = User.objects.filter(phone=phone, username__isnull=False).exclude(username="").exists()
 
         if not can_send_sms(phone):
-            return Response({"detail": "РЎР»РµРґСѓСЋС‰РµРµ SMS РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ С‡РµСЂРµР· РјРёРЅСѓС‚Сѓ."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response({"detail": "Следующее SMS можно отправить через минуту."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         if _is_debug_phone(phone):
             debug_code = getattr(settings, "AUTH_DEBUG_CODE", "")
             if not debug_code:
-                return Response({"detail": "AUTH_DEBUG РІРєР»СЋС‡С‘РЅ Р±РµР· AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                return Response({"detail": "AUTH_DEBUG включён без AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             set_otp(phone, debug_code)
-            return Response({"detail": "Р РµР¶РёРј РѕС‚Р»Р°РґРєРё: РєРѕРґ РЅРµ РѕС‚РїСЂР°РІР»РµРЅ.", "method": "debug", "is_new": not user_exists})
+            return Response({"detail": "Режим отладки: код не отправлен.", "method": "debug", "is_new": not user_exists})
 
         code = generate_code(6)
         set_otp(phone, code)
 
-        # 1) Try Telegram verification first; fallback to SMS
+        # Send verification code via Telegram Gateway (@VerificationCodes)
         tg_result = send_telegram_verification(phone, code)
         if tg_result:
             return Response({"detail": "Код отправлен в Telegram.", "method": "telegram", "is_new": not user_exists})
 
-        # 2) Fallback: SMS via RedSMS HTTP
-        if send_sms(phone, f"MyChat: Код для входа: {code}"):
-            return Response({"detail": "РљРѕРґ РѕС‚РїСЂР°РІР»РµРЅ РїРѕ SMS.", "method": "sms", "is_new": not user_exists})
+        # TODO: RedSMS SMS fallback отключён — при необходимости вернуть send_sms() здесь
+        # if send_sms(phone, f"Код для входа в мессенджер MyChat: {code}"):
+        #     return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
 
         return Response(
-            {"detail": "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєРѕРґ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ."},
+            {"detail": "Не удалось отправить код. Попробуйте позже."},
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
@@ -130,22 +130,22 @@ class VerifyCodeView(APIView):
         phone = _normalize_phone(ser.validated_data["phone"])
         code = ser.validated_data["code"].strip()
         if incr_verify_attempts(phone) > MAX_VERIFY_ATTEMPTS:
-            return Response({"detail": "РџСЂРµРІС‹С€РµРЅРѕ С‡РёСЃР»Рѕ РїРѕРїС‹С‚РѕРє."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response({"detail": "Превышено число попыток."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         if _is_debug_phone(phone):
             debug_code = getattr(settings, "AUTH_DEBUG_CODE", "")
             if not debug_code:
-                return Response({"detail": "AUTH_DEBUG РІРєР»СЋС‡С‘РЅ Р±РµР· AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                return Response({"detail": "AUTH_DEBUG включён без AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             if code != debug_code:
-                return Response({"detail": "РќРµРІРµСЂРЅС‹Р№ РєРѕРґ."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "Неверный код."}, status=status.HTTP_400_BAD_REQUEST)
             delete_otp(phone)
         else:
             stored = get_otp(phone)
             if not stored or stored != code:
-                return Response({"detail": "РќРµРІРµСЂРЅС‹Р№ РєРѕРґ."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "Неверный код."}, status=status.HTTP_400_BAD_REQUEST)
             delete_otp(phone)
 
-        # Р РµС„РµСЂР°Р»СЊРЅР°СЏ СЃСЃС‹Р»РєР°
+        # Реферальная ссылка
         ref_code = request.data.get("ref", "").strip()
         referrer = None
         if ref_code:
@@ -170,9 +170,9 @@ class VerifyCodeView(APIView):
             },
         )
         if not user.is_active:
-            return Response({"detail": "РђРєРєР°СѓРЅС‚ РґРµР°РєС‚РёРІРёСЂРѕРІР°РЅ."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Аккаунт деактивирован."}, status=status.HTTP_403_FORBIDDEN)
 
-        # РџСЂРё РїРµСЂРІРѕР№ СЂРµРіРёСЃС‚СЂР°С†РёРё РјРѕР¶РЅРѕ Р·Р°РґР°С‚СЊ username РёР· С‚РµР»Р° Р·Р°РїСЂРѕСЃР°
+        # При первой регистрации можно задать username из тела запроса
         if created:
             raw_username = ser.validated_data.get("username") or request.data.get("username") or ""
             if raw_username and raw_username.strip():
@@ -180,7 +180,7 @@ class VerifyCodeView(APIView):
                     normalized = validate_username_format(raw_username)
                     if User.objects.filter(username__iexact=normalized).exists():
                         return Response(
-                            {"detail": "Р­С‚РѕС‚ СЋР·РµСЂРЅРµР№Рј СѓР¶Рµ Р·Р°РЅСЏС‚."},
+                            {"detail": "Этот юзернейм уже занят."},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
                     user.username = normalized
@@ -189,7 +189,7 @@ class VerifyCodeView(APIView):
                     msg = e.detail[0] if isinstance(e.detail, list) else e.detail
                     return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        # РЎРѕР·РґР°С‘Рј РїРѕРґРїРёСЃРєСѓ + РЅР°С‡РёСЃР»СЏРµРј Р·РІС‘Р·РґС‹ + С‡Р°С‚ В«РР·Р±СЂР°РЅРЅРѕРµВ» РїСЂРё РїРµСЂРІРѕР№ СЂРµРіРёСЃС‚СЂР°С†РёРё
+        # Создаём подписку + начисляем звёзды + чат «Избранное» при первой регистрации
         if created:
             from apps.payments.services import create_subscription_for_user, award_referral_stars
             from apps.chats.services import create_favorites_chat
@@ -271,16 +271,16 @@ MAX_AVATARS = 30
 
 
 class MeAvatarView(APIView):
-    """Legacy: РѕРґРЅР° Р°РІР°С‚Р°СЂРєР°. РћСЃС‚Р°РІР»РµРЅ РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё."""
+    """Legacy: одна аватарка. Оставлен для обратной совместимости."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
         file_obj = request.FILES.get("avatar")
         if not file_obj:
-            return Response({"detail": "Р¤Р°Р№Р» РЅРµ РїРµСЂРµРґР°РЅ."}, status=status.HTTP_400_BAD_REQUEST)
-        if file_obj.size > 5 * 1024 * 1024:  # 5 РњР‘
-            return Response({"detail": "Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 5 РњР‘."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
+        if file_obj.size > 5 * 1024 * 1024:  # 5 МБ
+            return Response({"detail": "Файл больше 5 МБ."}, status=status.HTTP_400_BAD_REQUEST)
         request.user.avatar = file_obj
         request.user.save(update_fields=["avatar"])
         return Response(UserSerializer(request.user, context={"request": request}).data)
@@ -292,7 +292,7 @@ class MeAvatarView(APIView):
 
 
 class MeAvatarsView(APIView):
-    """Р“Р°Р»РµСЂРµСЏ Р°РІР°С‚Р°СЂРѕРє (РґРѕ 30). GET вЂ” СЃРїРёСЃРѕРє, POST вЂ” РґРѕР±Р°РІРёС‚СЊ."""
+    """Галерея аватарок (до 30). GET — список, POST — добавить."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
@@ -305,7 +305,7 @@ class MeAvatarsView(APIView):
             if request_uri:
                 url = request_uri(url)
             data.append({"id": a.id, "url": url, "order": a.order})
-        # Legacy: РµСЃР»Рё РµСЃС‚СЊ User.avatar, РЅРѕ РЅРµС‚ РІ РіР°Р»РµСЂРµРµ вЂ” РґРѕР±Р°РІРёС‚СЊ РїРµСЂРІС‹Рј
+        # Legacy: если есть User.avatar, но нет в галерее — добавить первым
         if request.user.avatar and not avatars.exists():
             url = request.user.avatar.url
             if request_uri:
@@ -316,14 +316,14 @@ class MeAvatarsView(APIView):
     def post(self, request):
         count = UserAvatar.objects.filter(user=request.user).count()
         if request.user.avatar and count == 0:
-            count = 1  # СѓС‡С‘С‚ legacy
+            count = 1  # учёт legacy
         if count >= MAX_AVATARS:
-            return Response({"detail": f"РњР°РєСЃРёРјСѓРј {MAX_AVATARS} Р°РІР°С‚Р°СЂРѕРє."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": f"Максимум {MAX_AVATARS} аватарок."}, status=status.HTTP_400_BAD_REQUEST)
         file_obj = request.FILES.get("avatar")
         if not file_obj:
-            return Response({"detail": "Р¤Р°Р№Р» РЅРµ РїРµСЂРµРґР°РЅ."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
         if file_obj.size > 5 * 1024 * 1024:
-            return Response({"detail": "Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 5 РњР‘."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Файл больше 5 МБ."}, status=status.HTTP_400_BAD_REQUEST)
         max_order = (
             UserAvatar.objects.filter(user=request.user).aggregate(
                 m=models.Max("order")
@@ -337,13 +337,13 @@ class MeAvatarsView(APIView):
 
 
 class MeAvatarDetailView(APIView):
-    """DELETE вЂ” СѓРґР°Р»РёС‚СЊ, PATCH вЂ” РёР·РјРµРЅРёС‚СЊ order."""
+    """DELETE — удалить, PATCH — изменить order."""
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pk):
         obj = UserAvatar.objects.filter(user=request.user, id=pk).first()
         if not obj:
-            return Response({"detail": "РќРµ РЅР°Р№РґРµРЅРѕ."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Не найдено."}, status=status.HTTP_404_NOT_FOUND)
         obj.image.delete(save=False)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -351,27 +351,27 @@ class MeAvatarDetailView(APIView):
     def patch(self, request, pk):
         obj = UserAvatar.objects.filter(user=request.user, id=pk).first()
         if not obj:
-            return Response({"detail": "РќРµ РЅР°Р№РґРµРЅРѕ."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Не найдено."}, status=status.HTTP_404_NOT_FOUND)
         new_order = request.data.get("order")
         if new_order is None:
-            return Response({"detail": "РџРѕР»Рµ order РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Поле order обязательно."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             new_order = int(new_order)
         except (TypeError, ValueError):
-            return Response({"detail": "order РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С‡РёСЃР»РѕРј."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "order должен быть числом."}, status=status.HTTP_400_BAD_REQUEST)
         obj.order = new_order
         obj.save(update_fields=["order"])
         return Response({"id": obj.id, "order": obj.order})
 
 
 class MeAvatarsReorderView(APIView):
-    """POST { "order": [id1, id2, ...] } вЂ” РёР·РјРµРЅРёС‚СЊ РїРѕСЂСЏРґРѕРє."""
+    """POST { "order": [id1, id2, ...] } — изменить порядок."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         ids = request.data.get("order")
         if not isinstance(ids, list):
-            return Response({"detail": "order РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РјР°СЃСЃРёРІРѕРј id."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "order должен быть массивом id."}, status=status.HTTP_400_BAD_REQUEST)
         qs = UserAvatar.objects.filter(user=request.user)
         by_id = {a.id: a for a in qs}
         for i, id_val in enumerate(ids):

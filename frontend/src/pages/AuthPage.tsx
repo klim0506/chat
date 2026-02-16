@@ -7,6 +7,7 @@ import { authApi } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useTranslation } from "../lib/i18n";
 import logoUrl from "../../../ТЕЛЕГА.ico?url";
+import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 
 type PhoneForm = { phone: string };
 type CodeForm = { code: string };
@@ -57,6 +58,7 @@ export default function AuthPage() {
   });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   // Live username availability check
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -134,17 +136,26 @@ export default function AuthPage() {
     }
   };
 
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    setCropFile(file);
+    // Reset input so the same file can be re-selected
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+  };
+
+  const onCropConfirm = (blob: Blob) => {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-    if (!file) {
-      setAvatarFile(null);
-      setAvatarPreview(null);
-      return;
-    }
-    if (!file.type.startsWith("image/")) return;
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
+    const croppedFile = new File([blob], "avatar.png", { type: "image/png" });
+    setAvatarFile(croppedFile);
+    setAvatarPreview(URL.createObjectURL(blob));
+    setCropFile(null);
+  };
+
+  const onCropCancel = () => {
+    setCropFile(null);
   };
 
   const onSetUsername = async (data: UsernameForm) => {
@@ -249,7 +260,7 @@ export default function AuthPage() {
             </p>
             <div className="flex gap-4 items-start mb-4">
               <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
-                <input type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
+                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
                 <span className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 hover:border-blue-400 transition-colors">
                   {avatarPreview ? (
                     <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
@@ -373,6 +384,15 @@ export default function AuthPage() {
         )}
       </div>
       </div>
+
+      {/* Avatar crop modal */}
+      {cropFile && (
+        <AvatarCropConfirmModal
+          file={cropFile}
+          onConfirm={onCropConfirm}
+          onCancel={onCropCancel}
+        />
+      )}
     </div>
   );
 }
