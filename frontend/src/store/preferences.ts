@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export const MESSAGE_TEXT_SCALES = [0.85, 0.9, 1, 1.1] as const;
+export const MESSAGE_TEXT_SCALES = [0.75, 0.85, 1, 1.15, 1.3] as const;
 export type MessageTextScale = (typeof MESSAGE_TEXT_SCALES)[number];
 export type AppTheme = "light" | "dark";
 export type AppLanguage = "en" | "ru";
@@ -11,7 +11,7 @@ function normalizeScale(value: unknown): MessageTextScale {
   if (typeof num === "number" && !Number.isNaN(num) && MESSAGE_TEXT_SCALES.includes(num as MessageTextScale)) {
     return num as MessageTextScale;
   }
-  return 0.9;
+  return 1;
 }
 
 interface PreferencesState {
@@ -34,7 +34,7 @@ interface PreferencesState {
 export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
-      messageTextScale: 0.9,
+      messageTextScale: 1,
       theme: "light",
       language: "en",
       soundEnabled: true,

@@ -204,10 +204,11 @@ export default function MessengerPage() {
   /* ---------- Global notification WebSocket ---------- */
   const handleNotification = useCallback((data: {
     type: string;
-    chat_id: string;
-    chat_title: string;
-    message: { sender_display_name?: string; content?: string };
-    is_muted: boolean;
+    chat_id?: string;
+    chat_title?: string;
+    message?: { sender_display_name?: string; content?: string };
+    is_muted?: boolean;
+    is_mention?: boolean;
     // new_login_alert fields
     device?: string;
     ip?: string;
@@ -235,6 +236,19 @@ export default function MessengerPage() {
     // Handle E2EE prekeys low: upload more one-time prekeys
     if (data.type === "e2ee.prekeys_low") {
       useE2eeStore.getState().uploadPrekeysIfLow();
+      return;
+    }
+
+    if (data.type === "added_to_chat" && data.chat_id) {
+      chatsApi.get(data.chat_id).then((res) => {
+        storeUpsertChat(res.data);
+        if ("Notification" in window && Notification.permission === "granted") {
+          showMessageNotification(
+            data.chat_title || res.data.title,
+            { content: t("notification.addedToGroup") },
+          );
+        }
+      }).catch(() => {});
       return;
     }
 
@@ -358,7 +372,7 @@ export default function MessengerPage() {
     navigate("/chats", { replace: true });
   };
 
-  // Sort: pinned first (preserve pin order), then unread first, then by created_at
+  // Sort: pinned first (preserve pin order), then unread first, then by last message time
   const sortedChats = [...chats].sort((a, b) => {
     const ia = pinnedChatIds.indexOf(a.id);
     const ib = pinnedChatIds.indexOf(b.id);
@@ -373,7 +387,9 @@ export default function MessengerPage() {
     const ub = b.unread_count || 0;
     if (ua > 0 && ub === 0) return -1;
     if (ua === 0 && ub > 0) return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const aTime = (a.last_message_at || a.created_at) ?? a.created_at;
+    const bTime = (b.last_message_at || b.created_at) ?? b.created_at;
+    return new Date(bTime).getTime() - new Date(aTime).getTime();
   });
 
   const archivedCount = chats.filter((c) => c.is_archived).length;

@@ -34,12 +34,13 @@ class ChatSerializer(serializers.ModelSerializer):
     max_pins = serializers.SerializerMethodField()
     my_pinned_messages = serializers.SerializerMethodField()
     last_message_preview = serializers.SerializerMethodField()
+    last_message_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Chat
         fields = (
             "id", "title", "description", "slug", "chat_type", "is_personal", "is_favorites", "max_members", "owner",
-            "members_count", "invite_link", "is_active", "created_at",
+            "members_count", "invite_link", "is_active", "created_at", "last_message_at",
             "unread_count", "is_muted", "muted_until",
             "pin_order", "is_archived",
             "is_expanded", "expanded_until", "effective_max_members",
@@ -255,6 +256,11 @@ class ChatSerializer(serializers.ModelSerializer):
         if not text:
             return "(сообщение)"
         return text[:60] + ("…" if len(text) > 60 else "")
+
+    def get_last_message_at(self, obj):
+        """Время последнего не удалённого сообщения (для сортировки списка чатов)."""
+        at = getattr(obj, "_last_message_at", None)
+        return at.isoformat() if at else None
 
     def validate_title(self, value):
         if value is not None and len(value) > CHAT_TITLE_MAX_LENGTH:

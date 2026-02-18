@@ -707,9 +707,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [showInfo, setShowInfo] = useState(false);
-  // Profile view in the right sidebar is disabled: always show "About chat"
-  const infoUserId: string | null = null;
-  const setInfoUserId = (_: string | null) => {};
+  /** ID пользователя, чья карточка открыта в правой панели (при клике на аватар). null = инфо о чате */
+  const [infoUserId, setInfoUserId] = useState<string | null>(null);
   const [usernameShake, setUsernameShake] = useState(false);
   const [mediaLinksFilesTab, setMediaLinksFilesTab] = useState<"media" | "links" | "files" | "voice" | "participants">("media");
   const [copiedState, setCopiedState] = useState(false);
@@ -973,7 +972,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [showMuteFlyout, setShowMuteFlyout] = useState(false);
   const [muteFlyoutPos, setMuteFlyoutPos] = useState<{ left: number; top: number } | null>(null);
   const [showAvatarFullscreen, setShowAvatarFullscreen] = useState<string | null>(null);
-
+  /** ID пользователя, чья карточка открыта в правой панели (при клике на аватар). null = показывать инфо о чате */
   /* Video recording state */
   const [videoRecording, setVideoRecording] = useState(false);
   const [videoRecordingTime, setVideoRecordingTime] = useState(0);
@@ -2927,66 +2926,79 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             </button>
           )}
-          <button type="button" onClick={() => setShowInfo(!showInfo)} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="relative shrink-0">
-                {chat.is_favorites ? (
-                  <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                  </div>
-                ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
-                  <img src={toSameOriginMediaUrl(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!)} alt="" className="w-9 h-9 rounded-full object-cover" />
-                ) : (
-                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
-                    {chat.is_personal && chat.other_member
-                      ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
-                      : getAvatarInitials(chat.title || "Ч")}
-                  </div>
-                )}
-                {chat.is_personal && chat.other_member && onlineStatus[chat.other_member.id]?.is_online && (
-                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
-                )}
-              </div>
-          <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
+          <div className="flex-1 flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              {chat.is_personal && chat.other_member ? (
+                <button
+                  type="button"
+                  onClick={() => { setInfoUserId(chat.other_member!.id); setShowInfo(true); }}
+                  className="block rounded-full overflow-hidden hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                  title={t("chat.personInfo")}
+                >
+                  {(chat.other_member?.avatar_url ?? chat.other_member?.avatar) ? (
+                    <img src={toSameOriginMediaUrl((chat.other_member!.avatar_url ?? chat.other_member!.avatar)!)} alt="" className="w-9 h-9 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
+                      {getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)}
+                    </div>
+                  )}
+                  {onlineStatus[chat.other_member.id]?.is_online && (
+                    <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
+                  )}
+                </button>
+              ) : chat.is_favorites ? (
+                <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+              ) : chat.avatar_url ? (
+                <img src={toSameOriginMediaUrl(chat.avatar_url)} alt="" className="w-9 h-9 rounded-full object-cover" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
+                  {getAvatarInitials(chat.title || "Ч")}
+                </div>
+              )}
+            </div>
+            <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
+              <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
                 {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
                 {chat.is_personal && (
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" aria-label={t("chat.e2ee")}>
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                 )}
+                {isMuted && (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label={t("dashboard.muted")}>
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                  </svg>
+                )}
               </h1>
-              {isMuted && (
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label={t("dashboard.muted")}>
-                  <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
-                </svg>
-              )}
-        </div>
-            <p className="text-sm text-slate-500">
-              {chat.is_personal && chat.other_member ? (
-                typing ? (
-                  <span className="text-slate-400 italic">{typing} печатает…</span>
+              <p className="text-sm text-slate-500">
+                {chat.is_personal && chat.other_member ? (
+                  typing ? (
+                    <span className="text-slate-400 italic">{typing} печатает…</span>
+                  ) : (
+                    <>
+                      <span>{t("chat.personal")}</span>
+                      {onlineStatus[chat.other_member.id]?.is_online ? (
+                        <span className="text-green-500 ml-1">· {t("chat.online")}</span>
+                      ) : onlineStatus[chat.other_member.id]?.last_seen_display ? (
+                        <span className="ml-1">· {formatLastSeen(onlineStatus[chat.other_member.id].last_seen_display, lang)}</span>
+                      ) : null}
+                    </>
+                  )
                 ) : (
-                  <>
-                    <span>{t("chat.personal")}</span>
-                    {onlineStatus[chat.other_member.id]?.is_online ? (
-                      <span className="text-green-500 ml-1">· {t("chat.online")}</span>
-                    ) : onlineStatus[chat.other_member.id]?.last_seen_display ? (
-                      <span className="ml-1">· {formatLastSeen(onlineStatus[chat.other_member.id].last_seen_display, lang)}</span>
-                    ) : null}
-                  </>
-                )
-              ) : (
-                (() => {
-                  const onlineCount = members.filter((m) => onlineStatus[m.user.id]?.is_online && m.user.id !== myUserId).length + (onlineStatus[myUserId]?.is_online ? 1 : 0);
-                  const membersLabel = formatMembersCount(chat.members_count, lang);
-                  const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} ${t("chat.online")}` : "";
-                  const typeLabel = chat.chat_type != null ? ` · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}` : "";
-                  return membersLabel + onlineLabel + typeLabel;
-                })()
-              )}
-            </p>
-          </button>
-          <button type="button" onClick={() => setShowInfo(!showInfo)} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
+                  (() => {
+                    const onlineCount = members.filter((m) => onlineStatus[m.user.id]?.is_online && m.user.id !== myUserId).length + (onlineStatus[myUserId]?.is_online ? 1 : 0);
+                    const membersLabel = formatMembersCount(chat.members_count, lang);
+                    const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} ${t("chat.online")}` : "";
+                    const typeLabel = chat.chat_type != null ? ` · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}` : "";
+                    return membersLabel + onlineLabel + typeLabel;
+                  })()
+                )}
+              </p>
+            </button>
+          </div>
+          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
       </header>
@@ -4028,7 +4040,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               );
             })()}
 
-            {/* ===== Chat info view (original) ===== */}
+            {/* ===== Chat info view (when not showing a user profile) ===== */}
+            {!infoUserId && (
             <>
             {(leaveError || deleteError) && (
               <div className="px-4 py-2 border-b bg-red-50 border-red-100">
@@ -4422,19 +4435,26 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             const openDm = !isMe && onOpenDmWithUserId ? () => onOpenDmWithUserId(m.user.id) : undefined;
                             return (
                               <li key={m.id} className="flex items-center gap-3">
-                                <div className="relative shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => { setInfoUserId(m.user.id); }}
+                                  className="relative shrink-0 rounded-full hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                                  title={t("chat.personInfo")}
+                                >
                                   <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-semibold">{getAvatarInitials(m.user.display_name || m.user.phone)}</div>
                                   {onlineStatus[m.user.id]?.is_online && (
                                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full" />
                                   )}
-                                </div>
+                                </button>
                                 <div className="flex-1 min-w-0">
                                   {openDm ? (
                                     <button type="button" onClick={openDm} className="text-left w-full min-w-0 block truncate text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium">
                                       {m.user.display_name || m.user.phone}
                                     </button>
                                   ) : (
-                                    <p className="text-sm text-slate-800 truncate">{m.user.display_name || m.user.phone}</p>
+                                    <button type="button" onClick={() => setInfoUserId(m.user.id)} className="text-left w-full min-w-0 block truncate text-sm text-slate-800 hover:text-blue-600 font-medium">
+                                      {m.user.display_name || m.user.phone}
+                                    </button>
                                   )}
                                   {m.user.username ? (
                                     openDm ? (
@@ -4578,6 +4598,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
           </div>
             </>
+            )}
         </aside>
         </>
       )}
@@ -5247,9 +5268,13 @@ const MessageBubble = memo(function MessageBubble({
     </span>
   ) : null;
 
-  /** Время (+ ред.) + галочки — последовательно в одну линию */
+  /** Есть ли в сообщении упоминания @... (для иконки @ как в Telegram) */
+  const hasMentionInContent = (message.msg_type === "text" || message.msg_type === "emoji") && splitContentWithMentions(message.content || "").some((s) => s.type === "mention");
+
+  /** Время (+ ред.) + галочки + @ при упоминаниях — последовательно в одну линию */
   const timeEl = (
     <span className={`inline-flex flex-nowrap items-center gap-x-1 text-[10px] min-w-0 shrink-0 whitespace-nowrap ${isMine ? "text-slate-500" : "text-slate-400"}`}>
+      {hasMentionInContent && <span className="font-medium text-slate-500" title={t("chat.mentionLabel")}>@</span>}
       {timeStr}
       {editedStr && <span className="opacity-80 ml-0.5">ред. {editedStr}</span>}
       {Checkmarks}

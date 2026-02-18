@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta
 from uuid import UUID
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Subquery, OuterRef
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -61,6 +61,11 @@ class ChatViewSet(viewsets.ModelViewSet):
             queryset=Message.objects.filter(is_deleted=False).order_by("-created_at")[:1].select_related("file"),
             to_attr="_prefetched_last_message",
         )
+        # Время последнего сообщения для сортировки списка чатов
+        last_message_at_subquery = Message.objects.filter(
+            chat_id=OuterRef("pk"),
+            is_deleted=False,
+        ).order_by("-created_at").values("created_at")[:1]
 
         return (
             Chat.objects.filter(
@@ -70,13 +75,13 @@ class ChatViewSet(viewsets.ModelViewSet):
             )
             .distinct()
             .annotate(
-                # Аннотация: количество активных участников (вместо N+1 count() в сериализаторе)
                 _members_count=Count(
                     "members",
                     filter=Q(members__status=ChatMember.Status.ACTIVE),
                 ),
+                _last_message_at=Subquery(last_message_at_subquery),
             )
-            .order_by("-created_at")
+            .order_by("-_last_message_at", "-created_at")
             .select_related("owner")
             .prefetch_related("members__user", current_user_membership, last_message_prefetch)
         )
@@ -606,6 +611,20 @@ class ChatMemberViewSet(viewsets.ViewSet):
         )
         chat.refresh_from_db()
         if is_open:
+            # Notify the invited user so the chat appears in their list and they see "You were added to the group"
+            try:
+                layer = get_channel_layer()
+                if layer:
+                    async_to_sync(layer.group_send)(
+                        f"user_{invited_user.id}",
+                        {
+                            "type": "notify.added_to_chat",
+                            "chat_id": str(chat.id),
+                            "chat_title": chat.title,
+                        },
+                    )
+            except Exception:
+                pass
             return Response(ChatSerializer(chat, context={"request": request}).data, status=status.HTTP_201_CREATED)
         return Response({"detail": "Запрос на вступление отправлен. Ожидайте подтверждения от владельца."}, status=status.HTTP_202_ACCEPTED)
 

@@ -89,11 +89,25 @@ export default function DashboardPage() {
   /* ---------- Global notification WebSocket ---------- */
   const handleNotification = useCallback((data: {
     type: string;
-    chat_id: string;
-    chat_title: string;
-    message: { sender_display_name?: string; content?: string };
-    is_muted: boolean;
+    chat_id?: string;
+    chat_title?: string;
+    message?: { sender_display_name?: string; content?: string };
+    is_muted?: boolean;
   }) => {
+    if (data.type === "added_to_chat" && data.chat_id) {
+      chatsApi.get(data.chat_id).then((chat) => {
+        setChats((prev) => (prev.some((c) => c.id === chat.data.id) ? prev : [...prev, chat.data]));
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification(data.chat_title || chat.data.title, {
+              body: t("notification.addedToGroup"),
+              icon: "/logo2_not_height_png_ai.png",
+            });
+          } catch { /* */ }
+        }
+      }).catch(() => {});
+      return;
+    }
     if (data.type === "new_message") {
       // Increment unread count for the chat
       setChats((prev) =>
@@ -227,13 +241,15 @@ export default function DashboardPage() {
     };
   }, [preview, closePreview]);
 
-  // Sort: chats with unread first, then by created_at
+  // Sort: chats with unread first, then by last message time
   const sortedChats = [...chats].sort((a, b) => {
     const ua = a.unread_count || 0;
     const ub = b.unread_count || 0;
     if (ua > 0 && ub === 0) return -1;
     if (ua === 0 && ub > 0) return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const aTime = (a.last_message_at || a.created_at) ?? a.created_at;
+    const bTime = (b.last_message_at || b.created_at) ?? b.created_at;
+    return new Date(bTime).getTime() - new Date(aTime).getTime();
   });
 
   return (

@@ -1,4 +1,5 @@
 import json
+import re
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from .models import Chat, ChatMember, Message
@@ -191,18 +192,40 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return result
 
     @database_sync_to_async
-    def _get_members_to_notify(self, sender_id):
-        """Get (user_id, is_muted, chat_title) for all active members except sender."""
+    def _get_members_to_notify(self, sender_id, message_content):
+        """Get (user_id, is_muted, chat_title, is_mention) for all active members except sender."""
+        content = (message_content or "").strip()
         members = ChatMember.objects.filter(
             chat_id=self.chat_id,
             status=ChatMember.Status.ACTIVE,
-        ).exclude(user_id=sender_id).select_related("chat")
-        return [(m.user_id, m.is_muted, m.chat.title) for m in members]
+        ).exclude(user_id=sender_id).select_related("chat", "user")
+        result = []
+        for m in members:
+            is_mention = False
+            if content:
+                identifiers = []
+                u = m.user
+                if u.username:
+                    identifiers.append(re.escape(u.username))
+                if u.display_name:
+                    for part in u.display_name.split():
+                        if part and len(part) > 1:
+                            identifiers.append(re.escape(part))
+                if getattr(u, "telegram_username", None):
+                    identifiers.append(re.escape(u.telegram_username))
+                if identifiers:
+                    pattern = r"@(" + "|".join(identifiers) + r")\b"
+                    if re.search(pattern, content, re.IGNORECASE):
+                        is_mention = True
+            result.append((m.user_id, m.is_muted, m.chat.title, is_mention))
+        return result
 
     async def _notify_members(self, sender_id, msg):
         """Send new-message notification to personal groups of chat members."""
-        members = await self._get_members_to_notify(sender_id)
-        for user_id, is_muted, chat_title in members:
+        members = await self._get_members_to_notify(sender_id, msg.get("content"))
+        for user_id, is_muted, chat_title, is_mention in members:
+            # If user is mentioned, always notify (even when chat is muted)
+            notify_effectively_muted = is_muted and not is_mention
             await self.channel_layer.group_send(
                 f"user_{user_id}",
                 {
@@ -210,7 +233,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "chat_id": str(self.chat_id),
                     "chat_title": chat_title,
                     "message": msg,
-                    "is_muted": is_muted,
+                    "is_muted": notify_effectively_muted,
+                    "is_mention": is_mention,
                 },
             )
 
@@ -345,6 +369,15 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             "chat_title": event["chat_title"],
             "message": event["message"],
             "is_muted": event.get("is_muted", False),
+            "is_mention": event.get("is_mention", False),
+        }))
+
+    async def notify_added_to_chat(self, event):
+        """Notify user they were added to a group — show chat in list and show notification."""
+        await self.send(text_data=json.dumps({
+            "type": "added_to_chat",
+            "chat_id": event["chat_id"],
+            "chat_title": event["chat_title"],
         }))
 
     async def notify_new_login(self, event):

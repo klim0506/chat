@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getPermission, requestPermission, NOTIFICATIONS_SUPPORTED, type NotificationPermission } from "../lib/notifications";
 import { authApi, paymentsApi, e2eeApi, sessionsApi, type User, type SubscriptionStatus, type StarsBalance, type E2eeDevice, type UserSessionInfo } from "../api/client";
 import { useAuthStore } from "../store/auth";
-import { usePreferencesStore, MESSAGE_TEXT_SCALES } from "../store/preferences";
+import { usePreferencesStore, MESSAGE_TEXT_SCALES, type MessageTextScale } from "../store/preferences";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AvatarManagerModal } from "../components/AvatarManagerModal";
@@ -281,6 +281,23 @@ function SoundsSection() {
   );
 }
 
+const MESSAGE_PREVIEW_BASE_PX = 13;
+
+function MessageScalePreview() {
+  const scale = usePreferencesStore((s) => s.messageTextScale);
+  return (
+    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-xs text-slate-500 mb-1.5">Привет!</p>
+      <div
+        className="rounded-2xl px-3 py-1.5 bg-blue-100 text-slate-800 inline-block"
+        style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale}px` }}
+      >
+        Привет!
+      </div>
+    </div>
+  );
+}
+
 function ScaleButton({ scale, label }: { scale: (typeof MESSAGE_TEXT_SCALES)[number]; label: string }) {
   const current = usePreferencesStore((s) => s.messageTextScale);
   const setScale = usePreferencesStore((s) => s.setMessageTextScale);
@@ -519,20 +536,24 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
               </div>
 
               <div className="p-5 space-y-4">
-                {/* Масштаб текста в сообщениях */}
+                {/* Масштаб текста в сообщениях + превью «Привет!» */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.messageTextScale")}
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      [0.85, "settings.scaleSmall"],
-                      [0.9, "settings.scaleReduced"],
-                      [1, "settings.scaleNormal"],
-                      [1.1, "settings.scaleLarge"],
-                    ] as const).map(([scale, labelKey]) => (
-                      <ScaleButton key={scale} scale={scale} label={t(labelKey)} />
-                    ))}
+                  <div className="flex flex-wrap items-start gap-4">
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        [0.75, "settings.scaleSmall"],
+                        [0.85, "settings.scaleReduced"],
+                        [1, "settings.scaleNormal"],
+                        [1.15, "settings.scaleLarge"],
+                        [1.3, "settings.scaleExtraLarge"],
+                      ] as const).map(([scale, labelKey]) => (
+                        <ScaleButton key={scale} scale={scale as MessageTextScale} label={t(labelKey)} />
+                      ))}
+                    </div>
+                    <MessageScalePreview />
                   </div>
                 </div>
 

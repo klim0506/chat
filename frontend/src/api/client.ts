@@ -153,6 +153,8 @@ export interface Chat {
   invite_link: string | null;
   is_active: boolean;
   created_at: string;
+  /** Время последнего сообщения (для сортировки списка чатов) */
+  last_message_at?: string | null;
   unread_count: number;
   /** True when user manually marked chat as unread (show dot, not count) */
   manually_unread?: boolean;
