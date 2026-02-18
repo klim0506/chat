@@ -4,7 +4,8 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import { usePreferencesStore } from "./store/preferences";
-import faviconUrl from "../../ТЕЛЕГА.ico?url";
+
+const faviconUrl = "/favicon.ico";
 
 function syncDocumentPrefs() {
   const { theme, language } = usePreferencesStore.getState();

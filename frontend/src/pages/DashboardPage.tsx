@@ -240,7 +240,10 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <Link to="/chats" className="text-xl font-semibold text-slate-800">{t("dashboard.title")}</Link>
+          <Link to="/chats" className="inline-flex items-center gap-2 text-xl font-semibold text-slate-800">
+            <img src="/logo.ico" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />
+            {t("dashboard.title")}
+          </Link>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">{t("dashboard.createChat")}</button>
             <Link to="/settings" className="text-slate-500 hover:text-slate-700 transition-colors" title={t("common.settings")}>

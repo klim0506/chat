@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-import logoUrl from "../../../ТЕЛЕГА.ico?url";
+const logoUrl = "/logo.ico";
 
 export default function JoinChatPage() {
   const { t } = useTranslation();

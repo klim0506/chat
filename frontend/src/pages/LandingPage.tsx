@@ -56,12 +56,16 @@ export default function LandingPage() {
     <div className="min-h-screen bg-white text-slate-800 antialiased">
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
-          <Link to="/" className="text-lg font-semibold text-blue-600">
+          <Link to="/" className="inline-flex items-center gap-2 text-lg font-semibold text-blue-600">
+            <img src="/logo.ico" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />
             {t("landing.brand")}
           </Link>
           <nav className="flex items-center gap-4">
             <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
               {t("landing.help")}
+            </Link>
+            <Link to="/telegram-3-shaga" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
+              ????: Telegram
             </Link>
             {isAuthenticated ? (
               <Link
@@ -209,6 +213,9 @@ export default function LandingPage() {
           <nav className="flex items-center gap-6 text-sm">
             <Link to="/spravka" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.help")}
+            </Link>
+            <Link to="/telegram-3-shaga" className="text-slate-500 hover:text-slate-700 transition-colors">
+              ????: Telegram
             </Link>
             <Link to="/auth" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.login")}

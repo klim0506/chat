@@ -6,8 +6,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { authApi } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useTranslation } from "../lib/i18n";
-import logoUrl from "../../../ТЕЛЕГА.ico?url";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
+
+const logoUrl = "/logo.ico";
 
 type PhoneForm = { phone: string };
 type CodeForm = { code: string };
@@ -38,7 +39,6 @@ export default function AuthPage() {
   const [error, setError] = useState("");
   const [step, setStep] = useState<"phone" | "code" | "username">("phone");
   const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "">("");
-  const [preferredMethod, setPreferredMethod] = useState<"telegram" | "sms">("telegram");
   const [isNewAccount, setIsNewAccount] = useState(false);
   const [isNewPhone, setIsNewPhone] = useState<boolean | null>(null); // null = not yet checked
 
@@ -101,11 +101,11 @@ export default function AuthPage() {
     setLoading(true);
     setCodeMethod("");
     try {
-      const res = await authApi.sendCode(data.phone, preferredMethod === "sms" ? "sms" : undefined);
+      const res = await authApi.sendCode(data.phone);
       setPhone(data.phone);
       setStep("code");
       const resData = res.data as { method?: string; is_new?: boolean };
-      setCodeMethod(resData.method === "telegram" ? "telegram" : "sms");
+      setCodeMethod(resData.method === "sms" ? "sms" : "telegram");
       setIsNewPhone(resData.is_new ?? null);
     } catch (e: unknown) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("common.error"));
@@ -214,32 +214,9 @@ export default function AuthPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 {...phoneForm.register("phone")}
               />
-              {phoneForm.formState.errors.phone && (
-                <p className="text-red-500 text-sm mt-1">{phoneForm.formState.errors.phone.message}</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-2">{t("auth.codeDeliveryMethod")}</label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPreferredMethod("telegram")}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    preferredMethod === "telegram" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  Telegram
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreferredMethod("sms")}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    preferredMethod === "sms" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  SMS
-                </button>
-              </div>
+            {phoneForm.formState.errors.phone && (
+              <p className="text-red-500 text-sm mt-1">{phoneForm.formState.errors.phone.message}</p>
+            )}
             </div>
             <p className="text-xs text-gray-400">
               {t("auth.codeHint")}
@@ -349,30 +326,6 @@ export default function AuthPage() {
               )}
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
-            {codeMethod === "telegram" && (
-              <p className="text-sm text-gray-500">
-                {t("auth.didntReceiveCode")}{" "}
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setError("");
-                    setLoading(true);
-                    try {
-                      const res = await authApi.sendCode(phone, "sms");
-                      setCodeMethod((res.data as { method?: string }).method === "sms" ? "sms" : "telegram");
-                    } catch (e: unknown) {
-                      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("common.error"));
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  disabled={loading}
-                  className="text-blue-600 hover:underline disabled:opacity-50"
-                >
-                  {t("auth.sendViaSms")}
-                </button>
-              </p>
-            )}
             <button
               type="submit"
               disabled={loading}
