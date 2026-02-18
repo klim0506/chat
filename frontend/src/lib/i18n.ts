@@ -22,6 +22,7 @@ const translations = {
   "common.copy": { en: "Copy", ru: "Копировать" },
   "common.copied": { en: "Copied", ru: "Скопировано" },
   "common.open": { en: "Open", ru: "Открыть" },
+  "common.download": { en: "Download", ru: "Скачать" },
   "common.delete": { en: "Delete", ru: "Удалить" },
   "common.send": { en: "Send", ru: "Отправить" },
   "common.search": { en: "Search", ru: "Поиск" },
@@ -38,7 +39,7 @@ const translations = {
   "common.encryptedMessage": { en: "Encrypted message", ru: "Зашифрованное сообщение" },
 
   // ─── Landing page ────────────────────────────────────────
-  "landing.brand": { en: "Private Chats", ru: "Приватные чаты" },
+  "landing.brand": { en: "Pingy", ru: "Pingy" },
   "landing.help": { en: "Help", ru: "Справка" },
   "landing.dashboard": { en: "Chats", ru: "Чаты" },
   "landing.login": { en: "Log in", ru: "Войти" },
@@ -94,7 +95,7 @@ const translations = {
   },
   "landing.cta.loginOrRegister": { en: "Log in or register", ru: "Войти или зарегистрироваться" },
   "landing.cta.createNew": { en: "Create new chat", ru: "Создать новый чат" },
-  "landing.footer.copy": { en: "© Private Chats", ru: "© Приватные чаты" },
+  "landing.footer.copy": { en: "© Pingy", ru: "© Pingy" },
 
   // ─── Settings page ───────────────────────────────────────
   "settings.profile": { en: "Profile", ru: "Профиль" },
@@ -340,6 +341,11 @@ const translations = {
   "chat.media": { en: "Media", ru: "Медиа" },
   "chat.links": { en: "Links", ru: "Ссылки" },
   "chat.files": { en: "Files", ru: "Файлы" },
+  "chat.voiceMessages": { en: "Voice messages", ru: "Голосовые" },
+  "chat.voiceMessage": { en: "Voice message", ru: "Голосовое сообщение" },
+  "chat.videoCircles": { en: "Video circles", ru: "Кружочки" },
+  "chat.noVoiceMessages": { en: "No voice messages", ru: "Нет голосовых" },
+  "chat.noVideoCircles": { en: "No video circles", ru: "Нет кружочков" },
   "chat.messagePlaceholder": { en: "Message...", ru: "Сообщение..." },
   "chat.attachFile": { en: "Attach file", ru: "Прикрепить файл" },
   "chat.emoji": { en: "Emoji", ru: "Эмодзи" },

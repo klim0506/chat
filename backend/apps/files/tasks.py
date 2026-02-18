@@ -64,20 +64,27 @@ def optimize_uploaded_image(file_id: str) -> None:
         return
 
     original_size = full_path.stat().st_size
-    if original_size <= 250 * 1024:
+    # Avoid re-encoding small images and reduce quality loss on typical photos.
+    # We mainly optimize large uploads where bandwidth/storage matters.
+    if original_size <= 900 * 1024:
         return
 
     with Image.open(full_path) as img:
         img = ImageOps.exif_transpose(img)
-        max_dim = 2560
-        if img.width > max_dim or img.height > max_dim:
+        max_dim = 4096
+        needs_resize = img.width > max_dim or img.height > max_dim
+        if needs_resize:
             img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        else:
+            # If we don't need to resize, avoid lossy recompression for already-encoded formats.
+            if ext in {".jpg", ".jpeg", ".webp"}:
+                return
 
         temp_path = full_path.with_suffix(f"{full_path.suffix}.opt")
         if ext in {".jpg", ".jpeg"}:
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
-            img.save(temp_path, format="JPEG", quality=82, optimize=True, progressive=True)
+            img.save(temp_path, format="JPEG", quality=92, optimize=True, progressive=True)
         elif ext == ".png":
             if img.mode not in ("RGB", "RGBA", "P", "L"):
                 img = img.convert("RGBA")
@@ -85,7 +92,7 @@ def optimize_uploaded_image(file_id: str) -> None:
         else:
             if img.mode not in ("RGB", "RGBA"):
                 img = img.convert("RGB")
-            img.save(temp_path, format="WEBP", quality=82, method=6)
+            img.save(temp_path, format="WEBP", quality=92, method=6)
 
     optimized_size = temp_path.stat().st_size if temp_path.exists() else original_size
     if optimized_size < original_size:
@@ -130,4 +137,3 @@ def scan_uploaded_file(file_id: str) -> None:
 
     if not infected:
         optimize_uploaded_image.delay(str(att.id))
-

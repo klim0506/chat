@@ -105,6 +105,7 @@ npm run run:all
 - `REDIS_URL` (`redis://localhost:6379/0`)
 - `REDSMS_LOGIN`, `REDSMS_API_KEY`, `REDSMS_FROM`
 - `TELEGRAM_BOT_USERNAME`, `TELEGRAM_BOT_SECRET`
+- `TELEGRAM_GATEWAY_TOKEN` (Telegram Gateway: коды в чат “Verification Codes” / @VerificationCodes)
 - `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`
 
 ## E2E тестирование и скрипты

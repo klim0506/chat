@@ -44,6 +44,116 @@ const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
 const VIRTUAL_OVERSCAN = 10;
 
+type VoiceInfoKind = "voice" | "circle";
+type VoiceInfoItem = { kind: VoiceInfoKind; msg: Message };
+
+function VoiceInfoList({
+  items,
+  locale,
+  voiceLabel,
+  circleLabel,
+  onJump,
+}: {
+  items: VoiceInfoItem[];
+  locale: string;
+  voiceLabel: string;
+  circleLabel: string;
+  onJump: (messageId: string) => void;
+}) {
+  const [durations, setDurations] = useState<Record<string, number>>({});
+
+  const resolveUrl = useCallback((msg: Message) => {
+    const raw =
+      msg.file && typeof msg.file === "object" && "url" in msg.file
+        ? ((msg.file as { url?: string | null }).url || "")
+        : "";
+    return toSameOriginMediaUrl(raw) || raw;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending: HTMLMediaElement[] = [];
+
+    items.forEach(({ kind, msg }) => {
+      if (!msg?.id) return;
+      if (durations[msg.id] != null) return;
+      const url = resolveUrl(msg);
+      if (!url) return;
+
+      const el = kind === "circle" ? document.createElement("video") : new Audio();
+      el.preload = "metadata";
+      el.src = url;
+      pending.push(el);
+
+      const onLoaded = () => {
+        if (cancelled) return;
+        const d = Number(el.duration);
+        setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: Number.isFinite(d) && d > 0 ? d : 0 }));
+      };
+      const onError = () => {
+        if (cancelled) return;
+        setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: 0 }));
+      };
+
+      el.addEventListener("loadedmetadata", onLoaded);
+      el.addEventListener("error", onError);
+
+      (el as unknown as { __voiceCleanup?: () => void }).__voiceCleanup = () => {
+        el.removeEventListener("loadedmetadata", onLoaded);
+        el.removeEventListener("error", onError);
+        try { el.src = ""; el.load(); } catch { /* ignore */ }
+      };
+    });
+
+    return () => {
+      cancelled = true;
+      pending.forEach((el) => {
+        const cleanup = (el as unknown as { __voiceCleanup?: () => void }).__voiceCleanup;
+        cleanup?.();
+      });
+    };
+  }, [items, durations, resolveUrl]);
+
+  return (
+    <ul className="space-y-1">
+      {items.map(({ kind, msg }) => {
+        const d = msg.created_at ? new Date(msg.created_at) : null;
+        const dateStr = d ? d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit" }) : "";
+        const timeStr = d ? d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) : "";
+        const dur = durations[msg.id];
+        const durStr = dur != null ? formatAudioTime(dur) : "…";
+        return (
+          <li key={msg.id}>
+            <button
+              type="button"
+              onClick={() => onJump(msg.id)}
+              className="w-full text-left text-sm text-slate-700 hover:bg-slate-50 px-2 py-1.5 rounded flex items-center gap-2"
+            >
+              {kind === "voice" ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <circle cx="12" cy="12" r="7"/>
+                  <polygon points="11 10 16 12 11 14 11 10"/>
+                </svg>
+              )}
+              <span className="truncate flex-1 min-w-0">{kind === "voice" ? voiceLabel : circleLabel}</span>
+              <span className="shrink-0 text-xs text-slate-500 tabular-nums">
+                {dateStr} {timeStr}{durStr ? ` · ${durStr}` : ""}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean;
@@ -442,7 +552,22 @@ function MarkdownMessageContent({
   );
 }
 
-/** Приводит сообщение из API/WS к единому виду (reactions, read_status и т.д.). */
+const MemoMarkdownMessageContent = memo(MarkdownMessageContent);
+
+const MemoImageTileGrid = memo(
+  function MemoImageTileGrid({
+    images,
+    imagesKey,
+  }: {
+    images: { id: string; url?: string | null; original_name?: string; mime_type?: string }[];
+    imagesKey: string;
+  }) {
+    return <ImageTileGrid key={imagesKey} images={images} />;
+  },
+  (prev, next) => prev.imagesKey === next.imagesKey,
+);
+
+/** Normalize API/WS message shape (reactions, read status, etc.). */
 function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | null; my_reaction?: string | null }): Message {
   let files = msg.files ?? [];
   if (!Array.isArray(files)) files = [];
@@ -494,7 +619,15 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
 }
 
 /** Видео с автовоспроизведением при появлении в зоне видимости (muted для обхода политики браузера). */
-function InlineAutoplayVideo({ src, className = "" }: { src: string; className?: string }) {
+function InlineAutoplayVideo({
+  src,
+  className = "",
+  controls = true,
+}: {
+  src: string;
+  className?: string;
+  controls?: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -502,6 +635,7 @@ function InlineAutoplayVideo({ src, className = "" }: { src: string; className?:
     const el = videoRef.current;
     const container = containerRef.current;
     if (!el || !container) return;
+    try { el.load(); } catch {}
     const io = new IntersectionObserver(
       (entries) => {
         const e = entries[0];
@@ -529,7 +663,7 @@ function InlineAutoplayVideo({ src, className = "" }: { src: string; className?:
         playsInline
         muted
         loop
-        controls
+        controls={controls}
       />
     </div>
   );
@@ -573,11 +707,52 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [showInfo, setShowInfo] = useState(false);
-  /** User ID to show in the info panel (profile view); null = show chat info */
-  const [infoUserId, setInfoUserId] = useState<string | null>(null);
+  // Profile view in the right sidebar is disabled: always show "About chat"
+  const infoUserId: string | null = null;
+  const setInfoUserId = (_: string | null) => {};
   const [usernameShake, setUsernameShake] = useState(false);
-  const [mediaLinksFilesTab, setMediaLinksFilesTab] = useState<"media" | "links" | "files" | "participants">("media");
+  const [mediaLinksFilesTab, setMediaLinksFilesTab] = useState<"media" | "links" | "files" | "voice" | "participants">("media");
   const [copiedState, setCopiedState] = useState(false);
+
+  const canPinForAll = useMemo(
+    () => !!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"))),
+    [chat, members, myUserId],
+  );
+  const pinnedForAllIds = useMemo(
+    () => chat?.pinned_messages?.map((m) => m.id) ?? (chat?.pinned_message ? [chat.pinned_message.id] : []),
+    [chat?.pinned_messages, chat?.pinned_message],
+  );
+  const maxPins = chat?.max_pins ?? 1;
+  const myPinnedIds = useMemo(() => chat?.my_pinned_messages?.map((m) => m.id) ?? [], [chat?.my_pinned_messages]);
+
+  const handleMessageUpdated = useCallback(
+    (updated: Message) => {
+      if (!chatId) return;
+      storeUpsertMessage(chatId, storeNormalizeMessage(updated));
+    },
+    [chatId, storeUpsertMessage],
+  );
+  const handleMessageDeleted = useCallback(
+    (messageId: string) => {
+      if (!chatId) return;
+      storeUpdateMessage(chatId, messageId, { is_deleted: true });
+    },
+    [chatId, storeUpdateMessage],
+  );
+  const handleStartEditInInput = useCallback((messageId: string, content: string) => {
+    setEditingMessageId(messageId);
+    setInputAndEditable((content || "").trim());
+  }, []);
+  const handleReply = useCallback((m: Message) => {
+    setReplyToMessage(m);
+    inputEditableRef.current?.focus();
+  }, []);
+  const handleForward = useCallback((m: Message) => setForwardModalMessage(m), []);
+  const handleAvatarClick = useCallback(() => {
+    setShowInfo(true);
+    if (!chat?.is_personal) setMediaLinksFilesTab("participants");
+  }, [chat?.is_personal]);
+
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   /** Режим голоса: запись файла или AI-транскрипция в поле ввода. Переключается правым кликом по кнопке микрофона. */
@@ -619,7 +794,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   /** Telegram-style pinned messages: index currently shown */
   const [pinnedIndex, setPinnedIndex] = useState(0);
   /** Просмотр одного изображения в модалке поверх чата */
-  const [singleImagePreview, setSingleImagePreview] = useState<{ url: string; fileName?: string } | null>(null);
   /** Файлы для предпросмотра перед отправкой (модалка). asFileOnly: отправлять всё как file (drop в верхнюю зону) */
   const [pendingFilesForPreview, setPendingFilesForPreview] = useState<File[] | null>(null);
   const [pendingFilesAsFileOnly, setPendingFilesAsFileOnly] = useState(false);
@@ -882,7 +1056,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     if (anchor) {
       (anchor.previousElementSibling as HTMLElement)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
       setTimeout(() => flashHighlightMessage(anchor), 350);
-      setShowInfo(false); setInfoUserId(null);
+      setShowInfo(false);
       return;
     }
     const idx = messageIndexById.get(messageId);
@@ -895,7 +1069,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         setTimeout(() => flashHighlightMessage(delayedAnchor), 350);
       });
     }
-    setShowInfo(false); setInfoUserId(null);
+    setShowInfo(false);
   }, [messageIndexById, virtualState.offsets, flashHighlightMessage]);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1898,15 +2072,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     const images = files.filter((f) => f.type.startsWith("image/"));
     const videos = files.filter((f) => f.type.startsWith("video/"));
     const others = files.filter((f) => !f.type.startsWith("image/") && !f.type.startsWith("video/"));
-    if (images.length > 1) {
+    if (images.length >= 1) {
       const compressed = await Promise.all(images.map((f) => compressImage(f)));
       sendMultiImageMessage(compressed);
-    } else if (images.length === 1 && others.length === 0 && videos.length === 0) {
-      const one = await compressImage(images[0]);
-      sendFileMessage(one);
-    } else if (images.length === 1) {
-      const one = await compressImage(images[0]);
-      sendFileMessage(one);
     }
     videos.forEach((f) => sendFileMessage(f));
     others.forEach((f) => sendFileMessage(f));
@@ -2614,14 +2782,6 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
       {/* Модалка просмотра одного изображения — затемнение + картинка по центру */}
-      {singleImagePreview && createPortal(
-        <SingleImageModal
-          url={singleImagePreview.url}
-          fileName={singleImagePreview.fileName}
-          onClose={() => setSingleImagePreview(null)}
-        />,
-        document.body,
-      )}
       {/* Forward modal */}
       {forwardModalMessage && chatId && (
         <ForwardModal
@@ -2698,7 +2858,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             </button>
           )}
-          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
+          <button type="button" onClick={() => setShowInfo(!showInfo)} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
             <div className="flex items-center gap-3">
               <div className="relative shrink-0">
                 {chat.is_favorites ? (
@@ -2757,7 +2917,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               )}
             </p>
           </button>
-          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
+          <button type="button" onClick={() => setShowInfo(!showInfo)} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
       </header>
@@ -2999,20 +3159,17 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           isLastInGroup={isLastInGroup}
                           chatId={chatId!}
                           textScale={textScale}
-                          onMessageUpdated={(updated) =>
-                            storeUpsertMessage(chatId!, storeNormalizeMessage(updated))
-                          }
-                          onMessageDeleted={(id) => storeUpdateMessage(chatId!, id, { is_deleted: true })}
-                          onStartEditInInput={(id, content) => { setEditingMessageId(id); setInputAndEditable((content || "").trim()); }}
-                          onImageClick={(url, fileName) => setSingleImagePreview({ url, fileName })}
-                          canPinForAll={!!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin")))}
-                          pinnedForAllIds={chat?.pinned_messages?.map((m) => m.id) ?? (chat?.pinned_message ? [chat.pinned_message.id] : [])}
-                          maxPins={chat?.max_pins ?? 1}
-                          myPinnedIds={chat?.my_pinned_messages?.map((m) => m.id) ?? []}
+                          onMessageUpdated={handleMessageUpdated}
+                          onMessageDeleted={handleMessageDeleted}
+                          onStartEditInInput={handleStartEditInInput}
+                          canPinForAll={canPinForAll}
+                          pinnedForAllIds={pinnedForAllIds}
+                          maxPins={maxPins}
+                          myPinnedIds={myPinnedIds}
                           onPinChange={refreshChat}
-                          onReply={(m) => { setReplyToMessage(m); inputEditableRef.current?.focus(); }}
-                          onForward={(m) => setForwardModalMessage(m)}
-                          onAvatarClick={(userId?: string) => { setInfoUserId(userId ?? null); setShowInfo(true); }}
+                          onReply={handleReply}
+                          onForward={handleForward}
+                          onAvatarClick={handleAvatarClick}
                         />
                         <div
                           ref={(el) => {
@@ -3504,7 +3661,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           {/* Backdrop (mobile only): tap to close */}
           <div
             className="fixed inset-0 z-40 bg-black/30 md:hidden"
-            onClick={() => { setShowInfo(false); setInfoUserId(null); }}
+            onClick={() => setShowInfo(false)}
             aria-hidden
           />
           <aside
@@ -3516,13 +3673,13 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             <div className="p-3 border-b flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowInfo(false); setInfoUserId(null); }}
+                onClick={() => setShowInfo(false)}
                 className="md:hidden p-2 -ml-1 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
                 aria-label={t("common.close")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
-              {!infoUserId && <div className="relative shrink-0" ref={infoMenuRef}>
+              <div className="relative shrink-0" ref={infoMenuRef}>
                 <button
                   type="button"
                   onClick={() => setShowInfoMenu((v) => !v)}
@@ -3606,9 +3763,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       </div>
                     );
                   })()}
-              </div>}
-              <h2 className="text-lg font-semibold text-slate-800 truncate flex-1 text-center min-w-0">{infoUserId ? t("chat.profileTitle") : t("chat.aboutChat")}</h2>
-              <button type="button" onClick={() => { setShowInfo(false); setInfoUserId(null); }} className="text-slate-400 hover:text-slate-600 p-1 shrink-0">&#10005;</button>
+              </div>
+              <h2 className="text-lg font-semibold text-slate-800 truncate flex-1 text-center min-w-0">{t("chat.aboutChat")}</h2>
+              <button type="button" onClick={() => setShowInfo(false)} className="text-slate-400 hover:text-slate-600 p-1 shrink-0">&#10005;</button>
             </div>
 
             {/* ===== User profile view ===== */}
@@ -3628,6 +3785,32 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               const isOnline = onlineStatus[profileUser.id]?.is_online;
               const lastSeen = onlineStatus[profileUser.id]?.last_seen_display;
               const isMe = profileUser.id === myUserId;
+              const isImage = (msg: Message) => {
+                if (msg.msg_type === "image") return true;
+                const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
+                return !!(mime && mime.startsWith("image/"));
+              };
+              const isVideo = (msg: Message) => {
+                if (msg.msg_type === "audio") return false;
+                if (msg.msg_type === "video_circle") return false;
+                if (msg.msg_type === "video") return true;
+                const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
+                return !!(mime && mime.startsWith("video/"));
+              };
+              const isCircle = (msg: Message) => msg?.msg_type === "video_circle" && !!msg.file;
+              const isAudioMsg = (msg: Message) => {
+                const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
+                return !!msg?.file && (msg.msg_type === "audio" || (!!mime && mime.startsWith("audio/")));
+              };
+              const isImageOrVideo = (msg: Message) => isImage(msg) || isVideo(msg);
+              const mediaCount = messages.filter((m) => m && isImageOrVideo(m)).length;
+              const filesCount = messages.filter((m) => {
+                if (!m || !m.file) return false;
+                if (isImageOrVideo(m)) return false;
+                if (isAudioMsg(m)) return false;
+                if (isCircle(m)) return false;
+                return m.msg_type === "file" || (m.file && typeof m.file === "object");
+              }).length;
               return (
                 <div className="flex-1 overflow-y-auto">
                   {/* Back to chat info */}
@@ -3687,14 +3870,43 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                       </div>
                     )}
 
-                    {/* Role badge (for group members) */}
-                    {member && (
-                      <div className="mt-2">
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${member.role === "admin" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
-                          {member.role === "admin" ? t("chat.administrator") : t("chat.member")}
-                        </span>
+                    {/* Media / Files shortcuts (Telegram-like) */}
+                    <div className="w-full mt-4">
+                      <div className="w-full rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <button
+                          type="button"
+                          onClick={() => { setInfoUserId(null); setMediaLinksFilesTab("media"); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-left"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500 shrink-0">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="m21 15-5-5L5 21" />
+                          </svg>
+                          <span className="flex-1 min-w-0 text-sm text-slate-800">{t("chat.media")}</span>
+                          <span className="text-xs text-slate-500 tabular-nums">{mediaCount}</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
+                            <path d="m9 18 6-6-6-6" />
+                          </svg>
+                        </button>
+                        <div className="h-px bg-slate-200" />
+                        <button
+                          type="button"
+                          onClick={() => { setInfoUserId(null); setMediaLinksFilesTab("files"); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-left"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500 shrink-0">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                          <span className="flex-1 min-w-0 text-sm text-slate-800">{t("chat.files")}</span>
+                          <span className="text-xs text-slate-500 tabular-nums">{filesCount}</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
+                            <path d="m9 18 6-6-6-6" />
+                          </svg>
+                        </button>
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Actions */}
@@ -3715,7 +3927,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             })()}
 
             {/* ===== Chat info view (original) ===== */}
-            {!infoUserId && <>
+            <>
             {(leaveError || deleteError) && (
               <div className="px-4 py-2 border-b bg-red-50 border-red-100">
                 <p className="text-xs text-red-600">{leaveError || deleteError}</p>
@@ -4005,18 +4217,28 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               };
               const isVideo = (msg: Message) => {
                 if (msg.msg_type === "audio") return false;
-                if (msg.msg_type === "video" || msg.msg_type === "video_circle") return true;
+                if (msg.msg_type === "video_circle") return false;
+                if (msg.msg_type === "video") return true;
                 const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
                 return !!(mime && mime.startsWith("video/"));
+              };
+              const isCircle = (msg: Message) => msg?.msg_type === "video_circle" && !!msg.file;
+              const isAudioMsg = (msg: Message) => {
+                const mime = (msg.file && typeof msg.file === "object" && "mime_type" in msg.file) ? (msg.file as { mime_type?: string }).mime_type : "";
+                return !!msg?.file && (msg.msg_type === "audio" || (!!mime && mime.startsWith("audio/")));
               };
               const isImageOrVideo = (msg: Message) => isImage(msg) || isVideo(msg);
               const mediaMessages = messages.filter((m) => m && isImageOrVideo(m));
               const urlRe = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
               const linkMessages = messages.filter((m) => m?.content && urlRe.test(m.content));
+              const voiceMessages = messages.filter((m) => m && isAudioMsg(m));
+              const circleMessages = messages.filter((m) => m && isCircle(m));
               const fileMessages = messages.filter((m) => {
                 if (!m || !m.file) return false;
                 if (isImageOrVideo(m)) return false;
-                return m.msg_type === "file" || m.msg_type === "audio" || (m.file && typeof m.file === "object");
+                if (isAudioMsg(m)) return false;
+                if (isCircle(m)) return false;
+                return m.msg_type === "file" || (m.file && typeof m.file === "object");
               });
               const thumbUrl = (msg: Message) => {
                 const f = msg.file && typeof msg.file === "object" && "url" in msg.file ? (msg.file as { url?: string }).url : null;
@@ -4024,15 +4246,17 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                 return f || files[0]?.url;
               };
               const showParticipants = isGroup && !chat.is_favorites;
-              const tabs: { id: "media" | "links" | "files" | "participants"; label: string }[] = showParticipants
+              const tabs: { id: "media" | "links" | "files" | "voice" | "participants"; label: string }[] = showParticipants
                 ? [
                     { id: "participants" as const, label: t("chat.participants") },
                     { id: "media", label: t("chat.media") },
+                    { id: "voice", label: t("chat.voiceMessages") },
                     { id: "links", label: t("chat.links") },
                     { id: "files", label: t("chat.files") },
                   ]
                 : [
                     { id: "media", label: t("chat.media") },
+                    { id: "voice", label: t("chat.voiceMessages") },
                     { id: "links", label: t("chat.links") },
                     { id: "files", label: t("chat.files") },
                   ];
@@ -4202,6 +4426,33 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                         {linkMessages.length === 0 && <p className="text-xs text-slate-500">{t("chat.noLinks")}</p>}
                       </ul>
                     )}
+                    {mediaLinksFilesTab === "voice" && (
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {(() => {
+                          const voiceItems: VoiceInfoItem[] = [
+                            ...voiceMessages.map((m) => ({ kind: "voice" as const, msg: m })),
+                            ...circleMessages.map((m) => ({ kind: "circle" as const, msg: m })),
+                          ].sort((a, b) => {
+                            const ta = Date.parse(a.msg.created_at || "") || 0;
+                            const tb = Date.parse(b.msg.created_at || "") || 0;
+                            return ta - tb;
+                          });
+
+                          const last = voiceItems.slice(-30).reverse();
+                          return last.length > 0 ? (
+                            <VoiceInfoList
+                              items={last}
+                              locale={getLocale(lang)}
+                              voiceLabel={t("chat.voiceMessage")}
+                              circleLabel={t("chat.videoCircle")}
+                              onJump={(id) => scrollToMessageId(id)}
+                            />
+                          ) : (
+                            <p className="text-xs text-slate-500">{t("chat.noVoiceMessages")}</p>
+                          );
+                        })()}
+                      </div>
+                    )}
                     {mediaLinksFilesTab === "files" && (
                       <ul className="space-y-1 max-h-40 overflow-y-auto">
                         {fileMessages.slice(-20).reverse().map((msg) => {
@@ -4224,7 +4475,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             })()}
 
           </div>
-            </>}
+            </>
         </aside>
         </>
       )}
@@ -4598,42 +4849,6 @@ function ForwardModal({ message, sourceChatId, onClose, onForwardComplete }: { m
   );
 }
 
-function SingleImageModal({ url, fileName, onClose }: { url: string; fileName?: string; onClose: () => void }) {
-  const { t } = useTranslation();
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-  const resolvedUrl = toSameOriginMediaUrl(url) || url;
-  return (
-    <div
-      className="fixed inset-0 z-[110] bg-black/90 flex items-center justify-center"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div className="w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-        <ProgressiveImage
-          src={resolvedUrl}
-          alt={fileName || ""}
-          className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg shadow-2xl"
-          loading="eager"
-          preserveAnimation={/\.gif$/i.test(fileName || "")}
-          useOriginalQuality
-        />
-      </div>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-        className="fixed top-4 right-4 z-[111] bg-white/90 hover:bg-white text-slate-800 rounded-full w-9 h-9 flex items-center justify-center shadow-lg transition-colors"
-        aria-label={t("common.close")}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
-    </div>
-  );
-}
-
 type MessageBubbleProps = {
   message: Message;
   isMine: boolean;
@@ -4648,7 +4863,6 @@ type MessageBubbleProps = {
   /** Для сообщений только из эмодзи — редактировать в поле ввода, а не инлайном */
   onStartEditInInput?: (messageId: string, content: string) => void;
   /** Клик по одиночному изображению — открыть в модалке вместо новой вкладки */
-  onImageClick?: (url: string, fileName?: string) => void;
   /** Может ли текущий пользователь закрепить сообщение для всех (админ/владелец) */
   canPinForAll?: boolean;
   /** ID сообщений, закреплённых для всех в чате */
@@ -4677,7 +4891,6 @@ const MessageBubble = memo(function MessageBubble({
   onMessageUpdated,
   onMessageDeleted,
   onStartEditInInput,
-  onImageClick,
   canPinForAll,
   pinnedForAllIds,
   maxPins,
@@ -4694,6 +4907,7 @@ const MessageBubble = memo(function MessageBubble({
   const pickerVisible = !isMine && (hoverDelayPassed || pickerHover);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.content || "");
+  const [videoLightboxOpen, setVideoLightboxOpen] = useState(false);
   const [reactionLoading, setReactionLoading] = useState(false);
   const [reactionLimitToast, setReactionLimitToast] = useState(false);
   const reactionLimitToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4807,8 +5021,10 @@ const MessageBubble = memo(function MessageBubble({
   // Несколько изображений — плитка; учитываем mime и расширение
   const allFiles = (message.files ?? []).filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
   const imageFiles = allFiles.filter((f) => (f.mime_type || "").startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|svg|heic)$/i.test(f.original_name || ""));
-  const isMultiImage = imageFiles.length > 1;
-  const isImageBubble = isVideoCircle || isMultiImage || (isFile && isImage);
+  const isImageGroup = isFile && imageFiles.length >= 1 && imageFiles.length === allFiles.length;
+  const imageFilesKey = imageFiles.map((f) => `${f.id}:${f.url ?? ""}:${f.original_name ?? ""}:${f.mime_type ?? ""}`).join("|");
+  // Media bubbles (no background/padding like text bubbles)
+  const isImageBubble = isVideoCircle || isVideo || isImageGroup || (isFile && isImage);
 
   const locale = getLocale(lang);
   const timeStr = new Date(message.created_at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
@@ -4819,16 +5035,16 @@ const MessageBubble = memo(function MessageBubble({
   const readStatus = isMine ? (isPendingOutbox ? "pending" : (message.read_status || "delivered")) : null;
   const Checkmarks = readStatus === "pending" ? (
     <span className="ml-1 inline-flex" title={t("chat.sending")}>
-      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 animate-pulse"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-pulse opacity-80"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     </span>
   ) : readStatus === "read" ? (
     <span className="ml-1 inline-flex" title={t("chat.read")}>
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-1"><path d="M20 6 9 17l-5-5"/></svg>
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 -ml-2.5"><path d="M20 6 9 17l-5-5"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="-ml-1"><path d="M20 6 9 17l-5-5"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="-ml-2.5"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
   ) : readStatus === "delivered" ? (
     <span className="ml-1 inline-flex" title={t("chat.delivered")}>
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600"><path d="M20 6 9 17l-5-5"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
     </span>
   ) : null;
 
@@ -5101,7 +5317,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
         <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`}>
-        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : isMultiImage ? `rounded-2xl p-0 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}` : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
+        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_PX * textScale}px` }}>
           {/* Forwarded header */}
           {message.forwarded_from && (
             <div className="flex items-center gap-1 text-xs text-slate-500 italic mb-0.5 -mt-0.5">
@@ -5183,17 +5399,37 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           ) : isVideoCircle ? (
             <div className="min-w-0 max-w-full">
-              <VideoCirclePlayer src={fileUrl} />
+              <VideoCirclePlayer src={fileUrl} ownerId={message.id} />
               <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isVideo ? (
             <div className="min-w-0 max-w-full">
-              <InlineAutoplayVideo src={fileUrl} className="max-w-[300px] max-h-80 rounded-lg" />
+              <button
+                type="button"
+                className="relative block max-w-[300px] max-h-80 rounded-lg overflow-hidden"
+                onClick={() => setVideoLightboxOpen(true)}
+                aria-label={t("common.open")}
+              >
+                <InlineAutoplayVideo
+                  src={fileUrl}
+                  className="w-full h-full max-w-[300px] max-h-80 rounded-lg pointer-events-none"
+                  controls={false}
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/15 hover:bg-black/20 transition-colors">
+                  <div className="w-12 h-12 rounded-full bg-black/55 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                  </div>
+                </div>
+              </button>
               <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
+              {videoLightboxOpen && createPortal(
+                <VideoLightbox src={fileUrl} originalName={fileName || "video"} onClose={() => setVideoLightboxOpen(false)} />,
+                document.body,
+              )}
             </div>
           ) : isGif ? (
             <div className="min-w-0 max-w-full">
@@ -5215,47 +5451,26 @@ const MessageBubble = memo(function MessageBubble({
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
-          ) : isMultiImage ? (
+          ) : isImageGroup ? (
             <div className="relative min-w-0 max-w-full">
-              <ImageTileGrid images={imageFiles} />
+              <MemoImageTileGrid images={imageFiles} imagesKey={imageFilesKey} />
               {/* Time/reactions overlay on bottom-right of image grid */}
               <div className="absolute bottom-1.5 left-2 flex items-center gap-x-1 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-white [&_span]:!text-white/90">
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
             </div>
           ) : isFile && message.file ? (
-            <div className={`min-w-0 max-w-full ${isImage ? "min-w-[180px]" : ""}`}>
-              {isImage ? (
-                onImageClick ? (
-                  <ProgressiveImage
-                    src={fileUrl}
-                    alt={fileName}
-                    className="w-full max-w-[520px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
-                    wrapper="button"
-                    onClick={() => onImageClick(fileUrl, fileName)}
-                    preserveAnimation={fileMime.includes("gif")}
-                    fullWidth={1200}
-                  />
-                ) : (
-                  <ProgressiveImage
-                    src={fileUrl}
-                    alt={fileName}
-                    className="w-full max-w-[520px] rounded-xl cursor-pointer border border-slate-200/30 shadow-sm"
-                    wrapper="a"
-                    href={fileUrl}
-                    preserveAnimation={fileMime.includes("gif")}
-                    fullWidth={1200}
-                  />
-                )
-              ) : isAudio ? (
+            <div className="min-w-0 max-w-full">
+              {isAudio ? (
                 (message as { waveform?: number[] }).waveform?.length ? (
                   <AudioMessagePlayer
                     fileUrl={fileUrl}
                     waveform={(message as { waveform?: number[] }).waveform!}
                     isMine={isMine}
+                    ownerId={message.id}
                   />
                 ) : (
-                  <SimpleAudioPlayer fileUrl={fileUrl} isMine={isMine} />
+                  <SimpleAudioPlayer fileUrl={fileUrl} isMine={isMine} ownerId={message.id} />
                 )
               ) : (
                 <a
@@ -5277,7 +5492,7 @@ const MessageBubble = memo(function MessageBubble({
           ) : isShortText ? (
             <>
               <div className="inline-flex items-baseline gap-x-1.5 flex-nowrap leading-snug whitespace-nowrap">
-                <MarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
+                <MemoMarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
                 {timeEl}
               </div>
               {hasReactions && (
@@ -5289,7 +5504,7 @@ const MessageBubble = memo(function MessageBubble({
           ) : (
             <>
               <div className="relative leading-snug max-w-full">
-                <MarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
+                <MemoMarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
                 <span className="invisible inline-flex items-center whitespace-nowrap ml-1.5 text-[10px]">{timeEl}</span>
                 <span className="absolute bottom-[1px] right-0 z-10">{timeEl}</span>
               </div>
@@ -5558,11 +5773,37 @@ function formatAudioTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+type ExclusiveSoundStopFn = () => void;
+
+const exclusiveSound = (() => {
+  let currentId: string | null = null;
+  const stopHandlers = new Map<string, ExclusiveSoundStopFn>();
+  return {
+    register(id: string, stop: ExclusiveSoundStopFn) {
+      stopHandlers.set(id, stop);
+      return () => {
+        stopHandlers.delete(id);
+        if (currentId === id) currentId = null;
+      };
+    },
+    request(id: string) {
+      if (currentId && currentId !== id) stopHandlers.get(currentId)?.();
+      currentId = id;
+    },
+    release(id: string) {
+      if (currentId === id) currentId = null;
+    },
+    isCurrent(id: string) {
+      return currentId === id;
+    },
+  };
+})();
+
 /* ================================================================
    SimpleAudioPlayer — аудио без волны: кнопка play, прогресс-бар, длительность
    ================================================================ */
 
-function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boolean }) {
+function SimpleAudioPlayer({ fileUrl, isMine, ownerId }: { fileUrl: string; isMine: boolean; ownerId: string }) {
   const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -5590,23 +5831,30 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+    const unregister = exclusiveSound.register(ownerId, () => {
+      try { el.pause(); } catch {}
+    });
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
     const onTimeUpdate = () => {
       setCurrentTime(el.currentTime);
-      if (duration <= 0) syncDuration(el);
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
-    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); };
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); exclusiveSound.release(ownerId); };
+    const onPlay = () => { exclusiveSound.request(ownerId); setIsPlaying(true); };
+    const onPause = () => { setIsPlaying(false); exclusiveSound.release(ownerId); };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("ended", onEnded);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    try { el.load(); } catch {}
     syncDuration(el);
     return () => {
+      unregister();
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("durationchange", onDurationChange);
@@ -5614,12 +5862,15 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [syncDuration]);
+  }, [fileUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
     if (!el) return;
-    if (el.paused) el.play();
+    if (el.paused) {
+      exclusiveSound.request(ownerId);
+      el.play();
+    }
     else el.pause();
   };
 
@@ -5635,7 +5886,7 @@ function SimpleAudioPlayer({ fileUrl, isMine }: { fileUrl: string; isMine: boole
 
   return (
     <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
-      <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
+      <audio ref={audioRef} src={fileUrl} preload="metadata" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
       <button
         type="button"
         onClick={togglePlay}
@@ -5731,7 +5982,7 @@ function AudioWaveform({
    AudioMessagePlayer — волна + отдельная кнопка play, без белого блока
    ================================================================ */
 
-function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; waveform: number[]; isMine: boolean }) {
+function AudioMessagePlayer({ fileUrl, waveform, isMine, ownerId }: { fileUrl: string; waveform: number[]; isMine: boolean; ownerId: string }) {
   const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -5747,23 +5998,30 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+    const unregister = exclusiveSound.register(ownerId, () => {
+      try { el.pause(); } catch {}
+    });
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
     const onTimeUpdate = () => {
       setCurrentTime(el.currentTime);
-      if (duration <= 0) syncDuration(el);
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
-    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); };
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); exclusiveSound.release(ownerId); };
+    const onPlay = () => { exclusiveSound.request(ownerId); setIsPlaying(true); };
+    const onPause = () => { setIsPlaying(false); exclusiveSound.release(ownerId); };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("ended", onEnded);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    try { el.load(); } catch {}
     syncDuration(el);
     return () => {
+      unregister();
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("durationchange", onDurationChange);
@@ -5771,12 +6029,15 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [syncDuration]);
+  }, [fileUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
     if (!el) return;
-    if (el.paused) el.play();
+    if (el.paused) {
+      exclusiveSound.request(ownerId);
+      el.play();
+    }
     else el.pause();
   };
 
@@ -5790,7 +6051,7 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine }: { fileUrl: string; wa
 
   return (
     <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
-      <audio ref={audioRef} src={fileUrl} preload="metadata" className="hidden" />
+      <audio ref={audioRef} src={fileUrl} preload="metadata" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
       <button
         type="button"
         onClick={togglePlay}
@@ -6071,6 +6332,8 @@ function ImageLightbox({
   const [idx, setIdx] = useState(initialIndex);
   const img = images[idx];
   const url = toSameOriginMediaUrl(img?.url || "#") || "#";
+  const downloadName = (img?.original_name || `image-${idx + 1}`).replace(/[\\/:*?"<>|]+/g, "_");
+  const canDownload = url && url !== "#";
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -6125,17 +6388,112 @@ function ImageLightbox({
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
+      {/* Скачать — в правом нижнем углу */}
+      <a
+        href={canDownload ? url : undefined}
+        download={canDownload ? downloadName : undefined}
+        target={canDownload ? "_blank" : undefined}
+        rel={canDownload ? "noopener noreferrer" : undefined}
+        onClick={(e) => e.stopPropagation()}
+        aria-disabled={!canDownload}
+        className={`fixed bottom-4 right-4 z-[101] bg-white/90 hover:bg-white text-slate-800 rounded-full w-10 h-10 flex items-center justify-center shadow-lg transition-colors ${
+          canDownload ? "" : "opacity-50 pointer-events-none"
+        }`}
+        title={t("common.download")}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </a>
     </div>
   );
 }
 
-function VideoCirclePlayer({ src }: { src: string }) {
+function VideoLightbox({
+  src,
+  originalName,
+  onClose,
+}: {
+  src: string;
+  originalName: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const url = src || "#";
+  const downloadName = (originalName || "video").replace(/[\\/:*?"<>|]+/g, "_");
+  const canDownload = url && url !== "#";
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={onClose}>
+      <div className="relative w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+        <video
+          src={url}
+          className="max-w-full max-h-full object-contain rounded-lg"
+          controls
+          playsInline
+          autoPlay
+        />
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        className="fixed top-4 right-4 z-[101] bg-white/90 hover:bg-white text-slate-800 rounded-full w-9 h-9 flex items-center justify-center shadow-lg transition-colors"
+        aria-label={t("common.close")}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+      <a
+        href={canDownload ? url : undefined}
+        download={canDownload ? downloadName : undefined}
+        target={canDownload ? "_blank" : undefined}
+        rel={canDownload ? "noopener noreferrer" : undefined}
+        onClick={(e) => e.stopPropagation()}
+        aria-disabled={!canDownload}
+        className={`fixed bottom-4 right-4 z-[101] bg-white/90 hover:bg-white text-slate-800 rounded-full w-10 h-10 flex items-center justify-center shadow-lg transition-colors ${
+          canDownload ? "" : "opacity-50 pointer-events-none"
+        }`}
+        title={t("common.download")}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </a>
+    </div>
+  );
+}
+
+function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const progress = duration > 0 ? currentTime / duration : 0;
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const unregister = exclusiveSound.register(ownerId, () => {
+      el.muted = true;
+      setMuted(true);
+    });
+    return () => {
+      unregister();
+      exclusiveSound.release(ownerId);
+    };
+  }, [ownerId]);
 
   const syncDuration = useCallback((el: HTMLVideoElement) => {
     const d = el.duration;
@@ -6145,9 +6503,12 @@ function VideoCirclePlayer({ src }: { src: string }) {
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+    setPlaying(false);
+    setMuted(true);
+    setCurrentTime(0);
+    setDuration(0);
     const onTimeUpdate = () => {
       setCurrentTime(el.currentTime);
-      if (duration <= 0) syncDuration(el);
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
@@ -6156,6 +6517,7 @@ function VideoCirclePlayer({ src }: { src: string }) {
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("ended", onEnded);
+    try { el.load(); } catch {}
     syncDuration(el);
     return () => {
       el.removeEventListener("timeupdate", onTimeUpdate);
@@ -6163,41 +6525,71 @@ function VideoCirclePlayer({ src }: { src: string }) {
       el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("ended", onEnded);
     };
-  }, [syncDuration, duration]);
+  }, [src, syncDuration]);
 
   /* Автовоспроизведение при появлении в зоне видимости (muted) */
   useEffect(() => {
     const el = videoRef.current;
     const container = containerRef.current;
     if (!el || !container) return;
-    el.muted = true;
     const io = new IntersectionObserver(
       (entries) => {
         const e = entries[0];
         if (!e) return;
         if (e.isIntersecting) {
+          // Autoplay should stay muted unless the user taps the circle.
+          if (!muted) return;
+          el.muted = true;
           el.play().then(() => setPlaying(true)).catch(() => {});
         } else {
           el.pause();
           setPlaying(false);
+          // Leaving viewport: revert to muted autoplay behavior; also release "sound ownership".
+          if (!muted) {
+            el.muted = true;
+            setMuted(true);
+            exclusiveSound.release(ownerId);
+          }
         }
       },
       { threshold: 0.25, rootMargin: "50px" }
     );
     io.observe(container);
     return () => io.disconnect();
-  }, [src]);
+  }, [src, muted, ownerId]);
 
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) {
-      v.play().catch(() => {});
-      setPlaying(true);
-    } else {
-      v.pause();
-      setPlaying(false);
+    // If it's playing muted (autoplay), first click should enable sound.
+    if (!v.paused && muted) {
+      exclusiveSound.request(ownerId);
+      v.muted = false;
+      v.volume = 1;
+      setMuted(false);
+      return;
     }
+    if (v.paused) {
+      exclusiveSound.request(ownerId);
+      v.muted = false;
+      v.volume = 1;
+      setMuted(false);
+      v.play()
+        .then(() => setPlaying(true))
+        .catch(() => {
+          // Fallback: if unmuted play is blocked, at least show the circle playing muted.
+          v.muted = true;
+          setMuted(true);
+          exclusiveSound.release(ownerId);
+          v.play().then(() => setPlaying(true)).catch(() => {});
+        });
+      return;
+    }
+    v.pause();
+    setPlaying(false);
+    exclusiveSound.release(ownerId);
+    v.muted = true;
+    setMuted(true);
   };
 
   const handleBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -6225,7 +6617,7 @@ function VideoCirclePlayer({ src }: { src: string }) {
           preload="metadata"
           playsInline
           loop
-          muted
+          muted={muted}
           onEnded={() => { setPlaying(false); setCurrentTime(0); }}
         />
         {/* Play overlay */}
@@ -6233,6 +6625,15 @@ function VideoCirclePlayer({ src }: { src: string }) {
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors rounded-full">
             <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="white" stroke="none">
               <polygon points="8 5 19 12 8 19 8 5" />
+            </svg>
+          </div>
+        )}
+        {muted && (
+          <div className="absolute bottom-2 right-2 bg-black/45 text-white rounded-full p-1.5 pointer-events-none">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
             </svg>
           </div>
         )}

@@ -102,8 +102,8 @@ export interface StarsBalance {
 export type UserSearchResult = Pick<User, "id" | "username" | "display_name" | "avatar_url">;
 
 export const authApi = {
-  sendCode: (phone: string, method?: "sms" | "telegram") =>
-    api.post<{ detail: string; method?: string }>("/auth/send-code/", { phone, ...(method ? { method } : {}) }),
+  sendCode: (phone: string) =>
+    api.post<{ detail: string; method?: string }>("/auth/send-code/", { phone }),
   verifyCode: (phone: string, code: string, ref?: string, username?: string) =>
     api.post<{ access: string; refresh: string; user: User }>("/auth/verify-code/", {
       phone,

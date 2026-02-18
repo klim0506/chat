@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = "private-chats-v1";
+const CACHE_NAME = "pingy-v1";
 
 // Shell files that make the app work offline.
 // Vite hashed filenames are handled by the runtime cache below.

@@ -17,7 +17,7 @@ from .serializers import (
 )
 from .services import (
     generate_code,
-    set_otp,
+    set_otp_and_mark_sent,
     get_otp,
     delete_otp,
     can_send_sms,
@@ -88,31 +88,38 @@ class SendCodeView(APIView):
         ser = SendCodeSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         phone = _normalize_phone(ser.validated_data["phone"])
+        method = ser.validated_data.get("method")  # sms|telegram (default: telegram first)
 
         # Check if the phone is already registered (for referral banner on frontend)
         user_exists = User.objects.filter(phone=phone, username__isnull=False).exclude(username="").exists()
 
         if not can_send_sms(phone):
-            return Response({"detail": "Следующее SMS можно отправить через минуту."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response({"detail": "Следующий код можно запросить через минуту."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         if _is_debug_phone(phone):
             debug_code = getattr(settings, "AUTH_DEBUG_CODE", "")
             if not debug_code:
                 return Response({"detail": "AUTH_DEBUG включён без AUTH_DEBUG_CODE."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            set_otp(phone, debug_code)
+            set_otp_and_mark_sent(phone, debug_code)
             return Response({"detail": "Режим отладки: код не отправлен.", "method": "debug", "is_new": not user_exists})
 
         code = generate_code(6)
-        set_otp(phone, code)
 
-        # Send verification code via Telegram Gateway (@VerificationCodes)
+        if method == "sms":
+            if send_sms(phone, f"Код для входа: {code}"):
+                set_otp_and_mark_sent(phone, code)
+                return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
+            return Response({"detail": "Не удалось отправить код. Попробуйте позже."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        # Default: Telegram Gateway (@VerificationCodes) first, then SMS fallback
         tg_result = send_telegram_verification(phone, code)
-        if tg_result:
+        if tg_result is not None:
+            set_otp_and_mark_sent(phone, code)
             return Response({"detail": "Код отправлен в Telegram.", "method": "telegram", "is_new": not user_exists})
 
-        # TODO: RedSMS SMS fallback отключён — при необходимости вернуть send_sms() здесь
-        # if send_sms(phone, f"Код для входа в мессенджер MyChat: {code}"):
-        #     return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
+        if send_sms(phone, f"Код для входа: {code}"):
+            set_otp_and_mark_sent(phone, code)
+            return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
 
         return Response(
             {"detail": "Не удалось отправить код. Попробуйте позже."},
@@ -422,6 +429,5 @@ class UserSearchView(APIView):
                     pass
             results.append(data)
         return Response({"results": results})
-
 
 

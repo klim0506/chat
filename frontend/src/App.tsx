@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuthStore } from "./store/auth";
 import { useUnreadBadge } from "./hooks/useUnreadBadge";
@@ -7,6 +7,8 @@ import { isStandalone } from "./lib/pwa";
 // Lazy-loaded pages — каждая страница загружается отдельным чанком
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
+const Telegram3StepsLandingPage = lazy(() => import("./pages/Telegram3StepsLandingPage"));
+const BusinessChatRedirectPage = lazy(() => import("./pages/BusinessChatRedirectPage"));
 const MessengerPage = lazy(() => import("./pages/MessengerPage"));
 const JoinChatPage = lazy(() => import("./pages/JoinChatPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -39,6 +41,18 @@ function JoinChatRoute() {
   return <JoinChatPage />;
 }
 
+function StaticLandingRedirect() {
+  useEffect(() => {
+    window.location.replace("/landing/index.html");
+  }, []);
+
+  return (
+    <div className="flex items-center justify-center h-screen w-screen">
+      <div className="text-gray-600">Открываю лендинг…</div>
+    </div>
+  );
+}
+
 /** User is fully registered only when they have both tokens and a username. */
 function useFullyRegistered() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -56,6 +70,9 @@ function App() {
       <Routes>
         <Route path="/" element={isStandalone() ? (isFullyRegistered ? <Navigate to="/chats" replace /> : <Navigate to="/auth" replace />) : <LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/landing" element={<StaticLandingRedirect />} />
+        <Route path="/telegram-3-shaga" element={<Telegram3StepsLandingPage />} />
+        <Route path="/buisneschat" element={<BusinessChatRedirectPage />} />
         <Route path="/spravka" element={<SpravkaLayout />}>
           <Route index element={<SpravkaIndexPage />} />
           <Route path="chats" element={<SpravkaChatsPage />} />

@@ -3,9 +3,9 @@ export type LegalLang = "ru" | "en";
 export type LegalText = { ru: string; en: string };
 
 export const LEGAL_CONFIG = {
-  serviceName: { ru: "Приватные чаты", en: "Private Chats" },
+  serviceName: { ru: "Pingy", en: "Pingy" },
   operatorName: { ru: "ООО «Пример»", en: "Example LLC" },
-  contactEmail: "support@example.com",
+  contactEmail: "support@pingychat.com",
   // ISO date (YYYY-MM-DD)
   lastUpdated: "2026-02-13",
 } as const;
@@ -31,4 +31,3 @@ export function applyLegalTemplate(markdown: string, lang: LegalLang): string {
   const tokens = getLegalTokens(lang);
   return markdown.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (m, key: string) => tokens[key] ?? m);
 }
-

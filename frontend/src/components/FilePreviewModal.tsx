@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslation } from "../lib/i18n";
 
 export interface FilePreviewItem {
@@ -55,6 +55,7 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel }: F
   const [items, setItems] = useState<FilePreviewItem[]>(() =>
     initialFiles.map((f, i) => ({ file: f, id: `${f.name}-${f.size}-${i}-${Date.now()}` }))
   );
+  const itemsRef = useRef<FilePreviewItem[]>(items);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
 
   const mediaItems = items.filter((it) => isMedia(it.file));
@@ -97,17 +98,49 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel }: F
     setItems((prev) => prev.filter((it) => it.id !== id));
   };
 
-  const handleConfirm = () => {
-    if (items.length === 0) {
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  const handleConfirm = useCallback(() => {
+    if (itemsRef.current.length === 0) {
       onCancel();
       return;
     }
-    onConfirm(items.map((it) => it.file));
-  };
+    onConfirm(itemsRef.current.map((it) => it.file));
+  }, [onConfirm, onCancel]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     onCancel();
-  };
+  }, [onCancel]);
+
+  useEffect(() => {
+    const shouldIgnoreTarget = (el: Element | null) => {
+      if (!el) return false;
+      const tag = (el as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if ((el as HTMLElement).isContentEditable) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleCancel();
+        return;
+      }
+      if (e.key !== "Enter") return;
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.repeat) return;
+      if (shouldIgnoreTarget(document.activeElement)) return;
+      e.preventDefault();
+      handleConfirm();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleCancel, handleConfirm]);
 
   const getGridClass = (count: number) => {
     if (count <= 1) return "grid-cols-1";

@@ -21,6 +21,8 @@ export interface ProgressiveImageProps {
   className?: string;
   /** object-contain | object-cover */
   objectFit?: "contain" | "cover";
+  /** Stretch wrapper/content to fill parent (use with a sized container). */
+  fill?: boolean;
   loading?: "lazy" | "eager";
   decoding?: "async" | "sync" | "auto";
   onClick?: () => void;
@@ -43,6 +45,7 @@ export function ProgressiveImage({
   alt = "",
   className = "",
   objectFit = "contain",
+  fill = false,
   loading = "lazy",
   decoding = "async",
   onClick,
@@ -87,8 +90,9 @@ export function ProgressiveImage({
     decoding,
   };
 
+  const fillCls = fill ? "w-full h-full" : "";
   const content = (
-    <span className={`relative block overflow-hidden ${objectFit === "cover" ? "rounded-none w-full h-full" : "rounded-lg bg-slate-100"} [&>img:last-child]:relative`}>
+    <span className={`relative block overflow-hidden ${fillCls} ${objectFit === "cover" ? "rounded-none w-full h-full" : "rounded-lg bg-slate-100"} [&>img:last-child]:relative`}>
       {showErrorPlaceholder ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-slate-200/80 text-slate-600 text-sm p-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
@@ -120,7 +124,7 @@ export function ProgressiveImage({
             onLoad={handleLoad}
             onError={handleError}
             className={`block transition-opacity duration-300 ${
-              objectFit === "cover" ? "w-full h-full object-cover" : "object-contain"
+              objectFit === "cover" ? "w-full h-full object-cover" : `${fill ? "w-full h-full " : ""}object-contain`
             } ${loaded ? "opacity-100" : "opacity-0"} ${className}`}
           />
         </>
@@ -128,7 +132,9 @@ export function ProgressiveImage({
     </span>
   );
 
-  const wrapperCls = objectFit === "cover" ? "block min-w-0 max-w-full w-full h-full" : "block min-w-0 max-w-full";
+  const wrapperCls = objectFit === "cover"
+    ? "block min-w-0 max-w-full w-full h-full"
+    : `block min-w-0 max-w-full ${fill ? "w-full h-full" : ""}`.trim();
 
   if (wrapper === "button" && onClick) {
     return (

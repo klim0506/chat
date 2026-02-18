@@ -153,53 +153,72 @@ def send_telegram_verification(phone: str, code: str) -> dict | None:
     if not dest.startswith("+"):
         dest = "+" + dest
 
-    try:
-        resp = requests.post(
-            "https://gatewayapi.telegram.org/sendVerificationMessage",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "phone_number": dest,
-                "code": code,
-                "ttl": 300,
-            },
-            timeout=10,
-        )
-        try:
-            data = resp.json()
-        except ValueError:
-            logger.warning(
-                "Telegram Gateway non-JSON response: status=%s body=%s",
-                resp.status_code,
-                (resp.text or "")[:500],
-            )
-            return None
+    payload = {
+        "phone_number": dest,
+        "code": str(code),
+        "ttl": REDIS_OTP_TTL,
+    }
 
-        if resp.status_code == 200 and data.get("ok"):
-            logger.info(f"Telegram Gateway code sent to {dest}, request_id={data['result'].get('request_id')}")
-            return data["result"]
-        logger.warning(
-            "Telegram Gateway error: status=%s error=%s body=%s",
-            resp.status_code,
-            data.get("error"),
-            str(data)[:500],
-        )
-        return None
-    except Exception as e:
-        logger.error(f"Telegram Gateway request failed: {e}")
-        return None
+    last_error: str | None = None
+    for attempt in range(1, 3):
+        try:
+            resp = requests.post(
+                "https://gatewayapi.telegram.org/sendVerificationMessage",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=(3.05, 12),
+            )
+            try:
+                data = resp.json()
+            except ValueError:
+                last_error = f"non-JSON response status={resp.status_code} body={(resp.text or '')[:200]}"
+                logger.warning("Telegram Gateway %s", last_error)
+                continue
+
+            if resp.status_code == 200 and data.get("ok"):
+                logger.info(
+                    "Telegram Gateway code sent to %s, request_id=%s",
+                    dest,
+                    data.get("result", {}).get("request_id"),
+                )
+                return data.get("result") or {}
+
+            last_error = f"status={resp.status_code} error={data.get('error')} body={str(data)[:200]}"
+            logger.warning("Telegram Gateway error (attempt %s/2): %s", attempt, last_error)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("Telegram Gateway request failed (attempt %s/2): %s", attempt, last_error)
+            continue
+
+    if last_error:
+        logger.error("Telegram Gateway failed for %s: %s", dest, last_error)
+    return None
 
 
 def set_otp(phone: str, code: str) -> None:
     if _redis_available():
         r = get_redis()
         r.setex(REDIS_OTP_KEY.format(phone=phone), REDIS_OTP_TTL, code)
-        r.setex(REDIS_SMS_SENT_KEY.format(phone=phone), REDIS_SMS_RATE_TTL, "1")
     else:
         _mem_setex(REDIS_OTP_KEY.format(phone=phone), REDIS_OTP_TTL, code)
+
+
+def mark_code_sent(phone: str) -> None:
+    """Per-phone rate limit marker to prevent spamming send-code."""
+    if _redis_available():
+        get_redis().setex(REDIS_SMS_SENT_KEY.format(phone=phone), REDIS_SMS_RATE_TTL, "1")
+    else:
         _mem_setex(REDIS_SMS_SENT_KEY.format(phone=phone), REDIS_SMS_RATE_TTL, "1")
+
+
+def set_otp_and_mark_sent(phone: str, code: str) -> None:
+    """Store OTP and set per-phone send marker (call only after successful delivery)."""
+    set_otp(phone, code)
+    mark_code_sent(phone)
 
 
 def get_otp(phone: str) -> str | None:
@@ -220,10 +239,10 @@ def delete_otp(phone: str) -> None:
 
 
 def can_send_sms(phone: str) -> bool:
+    # Backwards-compatible name: used for any auth code delivery method.
     if _redis_available():
         return get_redis().get(REDIS_SMS_SENT_KEY.format(phone=phone)) is None
-    else:
-        return _mem_get(REDIS_SMS_SENT_KEY.format(phone=phone)) is None
+    return _mem_get(REDIS_SMS_SENT_KEY.format(phone=phone)) is None
 
 
 def incr_verify_attempts(phone: str) -> int:

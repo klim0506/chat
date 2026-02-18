@@ -1,0 +1,6 @@
+[submodule "android"]
+	path = android
+	url = https://github.com/klim0506/private-chats-android.git
+[submodule "desktop"]
+	path = desktop
+	url = https://github.com/klim0506/private-chats-desktop.git

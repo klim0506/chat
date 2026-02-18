@@ -12,7 +12,7 @@ test.describe("Mobile viewport, Sessions UI, legal pages", () => {
   test("spravka page renders on mobile", async ({ page }) => {
     await page.goto("/spravka");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("text=Справка").or(page.locator("text=Приватные чаты"))).toBeVisible();
+    await expect(page.locator("text=Справка").or(page.locator("text=Pingy"))).toBeVisible();
   });
 
   test("landing page fits mobile viewport", async ({ page }) => {

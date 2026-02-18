@@ -41,7 +41,7 @@ test.describe("Single tab: i18n, chat-actions, pinned, privacy, usernames", () =
   test("spravka/legal pages load", async ({ page }) => {
     await page.goto("/spravka");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("text=Справка").or(page.locator("text=Приватные чаты"))).toBeVisible();
+    await expect(page.locator("text=Справка").or(page.locator("text=Pingy"))).toBeVisible();
 
     await page.goto("/spravka/security");
     await page.waitForLoadState("networkidle");
