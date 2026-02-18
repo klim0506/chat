@@ -51,7 +51,7 @@ export function showMessageNotification(
   try {
     const n = new Notification(chatTitle || "Новое сообщение", {
       body: getNotificationBody(message),
-      icon: options?.icon ?? "/favicon.ico",
+      icon: options?.icon ?? "/logo2_not_height_png_ai.png",
     });
     n.onclick = () => {
       window.focus();

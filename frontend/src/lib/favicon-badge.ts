@@ -20,7 +20,7 @@ export function updateFaviconBadge(count: number): void {
     originalFaviconLink = link;
     const href = link.getAttribute("href");
     if (href && !href.startsWith("data:")) originalFaviconUrl = href;
-    else if (!originalFaviconUrl) originalFaviconUrl = "/favicon.ico";
+    else if (!originalFaviconUrl) originalFaviconUrl = "/ico_png_ai_16x16.ico";
   }
 
   if (count <= 0) {
@@ -105,6 +105,6 @@ export function updateFaviconBadge(count: number): void {
     }
   };
 
-  const baseUrl = originalFaviconUrl || "/favicon.ico";
-  img.src = baseUrl.startsWith("data:") ? "/favicon.ico" : new URL(baseUrl, window.location.origin).toString();
+  const baseUrl = originalFaviconUrl || "/ico_png_ai_16x16.ico";
+  img.src = baseUrl.startsWith("data:") ? "/ico_png_ai_16x16.ico" : new URL(baseUrl, window.location.origin).toString();
 }

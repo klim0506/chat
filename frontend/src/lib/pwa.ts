@@ -60,11 +60,11 @@ export async function showNotification(
     if (reg) {
       reg.showNotification(title, {
         body,
-        icon: icon || "/logo.ico",
-        badge: "/favicon.ico",
+        icon: icon || "/logo2_not_height_png_ai.png",
+        badge: "/logo2_not_height_png_ai.png",
       });
     } else {
-      new Notification(title, { body, icon: icon || "/logo.ico" });
+      new Notification(title, { body, icon: icon || "/logo2_not_height_png_ai.png" });
     }
   }
 }

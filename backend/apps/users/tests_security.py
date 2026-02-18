@@ -76,3 +76,44 @@ class AuthRateLimitTest(TestCase):
                 format="json",
             )
         self.assertEqual(res.status_code, 429, f"Ожидался 429 (throttle), получен {res.status_code}")
+
+
+
+class SendCodePerMinuteLimitTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            }
+        },
+        REST_FRAMEWORK={
+            "DEFAULT_AUTHENTICATION_CLASSES": ["apps.users.auth.JWTAuthentication"],
+            "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+            "DEFAULT_THROTTLE_RATES": {"auth_send_code": "100/min"},
+        },
+    )
+    @patch("apps.users.services._redis_available", return_value=False)
+    @patch("apps.users.views.send_telegram_verification", return_value=None)
+    @patch("apps.users.views.send_sms", return_value=True)
+    def test_soft_limit_blocks_only_after_two_requests(self, mock_sms, mock_tg, mock_no_redis):
+        from apps.users import services
+
+        services._mem_store.clear()
+        phone = "+79990009991"
+
+        res1 = self.client.post("/api/auth/send-code/", {"phone": phone}, format="json")
+        res2 = self.client.post("/api/auth/send-code/", {"phone": phone}, format="json")
+        res3 = self.client.post("/api/auth/send-code/", {"phone": phone}, format="json")
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res3.status_code, 429)
+        expected_detail = (
+            "\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u043a\u043e\u0434 "
+            "\u043c\u043e\u0436\u043d\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u0442\u044c "
+            "\u0447\u0435\u0440\u0435\u0437 \u043c\u0438\u043d\u0443\u0442\u0443."
+        )
+        self.assertEqual(res3.data.get("detail"), expected_detail)

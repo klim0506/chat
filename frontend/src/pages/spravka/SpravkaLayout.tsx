@@ -18,9 +18,8 @@ export default function SpravkaLayout() {
     <div className="min-h-screen bg-slate-50 text-slate-800 antialiased">
       <header className="border-b border-slate-200 bg-white sticky top-0 z-10">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-4xl">
-          <Link to="/" className="inline-flex items-center gap-2 text-lg font-semibold text-blue-600 hover:text-blue-700">
-            <img src="/logo.ico" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />
-            {t("landing.brand")}
+          <Link to="/" aria-label={t("landing.brand")} className="inline-flex items-center text-blue-600 hover:text-blue-700">
+            <img src="/logo2_not_height_png_ai.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <Link to="/" className="text-slate-500 hover:text-slate-700 text-sm">
             {t("notFound.toHome")}

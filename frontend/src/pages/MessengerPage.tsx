@@ -51,6 +51,7 @@ function withPreviewParams(url: string | null | undefined, width: number): strin
 
 export default function MessengerPage() {
   const { t, lang } = useTranslation();
+  const tRef = useRef(t);
   const { chatId: urlChatId } = useParams<{ chatId: string }>();
   const location = useLocation();
   const showSettings = location.pathname === "/chats/settings";
@@ -107,6 +108,10 @@ export default function MessengerPage() {
   const [referralLink, setReferralLink] = useState(window.location.origin);
   const MAX_PINNED = 5;
   const lastSyncedPinnedRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   // Fetch referral code for invite links
   useEffect(() => {
@@ -182,11 +187,11 @@ export default function MessengerPage() {
         if (status === 403) {
           setNeedsSub(true);
         } else {
-          setError(t("dashboard.loadError"));
+          setError(tRef.current("dashboard.loadError"));
         }
       })
       .finally(() => setLoading(false));
-  }, [t]);
+  }, [loadChats]);
 
   /* ---------- New-login toast ---------- */
   const [newLoginToast, setNewLoginToast] = useState<{ device: string; ip: string } | null>(null);
@@ -1226,106 +1231,107 @@ export default function MessengerPage() {
         ) : (
           <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-50 p-6">
           {(() => {
-            const onlyFavorites = chats.length === 1 && chats[0]?.is_favorites;
-            const favChatId = onlyFavorites ? chats[0].id : null;
-            if (onlyFavorites) {
-              return (
-                <div className="text-center max-w-md">
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5">
-                    <span className="text-2xl">👋</span>
-                  </div>
-                  <h2 className="text-xl font-semibold text-slate-800 mb-2">{t("messenger.welcomeTitle")}</h2>
-                  <p className="text-sm text-slate-500 mb-6">{t("messenger.welcomeDesc")}</p>
-                  <div className="flex flex-col gap-3">
-                    <div className="w-full">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!inviteFriendsExpanded && navigator.clipboard?.writeText) {
-                            navigator.clipboard.writeText(referralLink).then(() => {
-                              setInviteFriendsCopied(true);
-                              setTimeout(() => setInviteFriendsCopied(false), 2000);
-                            });
-                          }
-                          setInviteFriendsExpanded((v) => !v);
-                        }}
-                        className={`flex items-center gap-3 w-full rounded-xl bg-white border px-4 py-3.5 text-left hover:border-purple-300 hover:shadow-sm transition-all group ${inviteFriendsExpanded ? "border-purple-300 rounded-b-none" : "border-slate-200"}`}
-                      >
-                        <span className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shrink-0 group-hover:bg-purple-200 transition-colors">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-slate-800">
-                            {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
-                          </p>
-                          <p className="text-xs text-slate-400">{t("messenger.welcomeInviteFriendsDesc")}</p>
+            const favChat = chats.find((chat) => chat.is_favorites) ?? null;
+            const favChatId = favChat?.id ?? null;
+
+            return (
+              <div className="text-center max-w-md">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5">
+                  <span className="text-2xl">👋</span>
+                </div>
+                <h2 className="text-xl font-semibold text-slate-800 mb-2">{t("messenger.welcomeTitle")}</h2>
+                <p className="text-sm text-slate-500 mb-6">{t("messenger.welcomeDesc")}</p>
+                <div className="flex flex-col gap-3">
+                  <div className="w-full">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!inviteFriendsExpanded && navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(referralLink).then(() => {
+                            setInviteFriendsCopied(true);
+                            setTimeout(() => setInviteFriendsCopied(false), 2000);
+                          });
+                        }
+                        setInviteFriendsExpanded((v) => !v);
+                      }}
+                      className={`flex items-center gap-3 w-full rounded-xl bg-white border px-4 py-3.5 text-left hover:border-purple-300 hover:shadow-sm transition-all group ${inviteFriendsExpanded ? "border-purple-300 rounded-b-none" : "border-slate-200"}`}
+                    >
+                      <span className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shrink-0 group-hover:bg-purple-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800">
+                          {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
+                        </p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeInviteFriendsDesc")}</p>
+                      </div>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-slate-400 shrink-0 transition-transform duration-200 ${inviteFriendsExpanded ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div className={`overflow-hidden transition-all duration-200 ease-out ${inviteFriendsExpanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"}`}>
+                      <div className="bg-white border border-t-0 border-purple-300 rounded-b-xl px-4 py-3 flex items-center gap-2">
+                        <div className="flex items-center bg-slate-50 rounded-lg px-3 py-2 min-w-0 flex-1">
+                          <span className="text-xs text-slate-500 truncate select-all">{referralLink}</span>
                         </div>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-slate-400 shrink-0 transition-transform duration-200 ${inviteFriendsExpanded ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
-                      </button>
-                      <div className={`overflow-hidden transition-all duration-200 ease-out ${inviteFriendsExpanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"}`}>
-                        <div className="bg-white border border-t-0 border-purple-300 rounded-b-xl px-4 py-3 flex items-center gap-2">
-                          <div className="flex items-center bg-slate-50 rounded-lg px-3 py-2 min-w-0 flex-1">
-                            <span className="text-xs text-slate-500 truncate select-all">{referralLink}</span>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (navigator.clipboard?.writeText) {
+                                navigator.clipboard.writeText(referralLink).then(() => {
+                                  setInviteFriendsCopied(true);
+                                  setTimeout(() => setInviteFriendsCopied(false), 2000);
+                                });
+                              }
+                            }}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 transition-colors whitespace-nowrap shrink-0"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
+                          </button>
+                          {typeof navigator.share === "function" && (
                             <button
                               type="button"
                               onClick={() => {
-                                if (navigator.clipboard?.writeText) {
-                                  navigator.clipboard.writeText(referralLink).then(() => {
-                                    setInviteFriendsCopied(true);
-                                    setTimeout(() => setInviteFriendsCopied(false), 2000);
-                                  });
-                                }
+                                navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
                               }}
-                              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 transition-colors whitespace-nowrap shrink-0"
+                              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                              {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                              {t("messenger.inviteShare")}
                             </button>
-                            {typeof navigator.share === "function" && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
-                                }}
-                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                                {t("messenger.inviteShare")}
-                              </button>
-                            )}
-                        </div>
+                          )}
                       </div>
                     </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateChatModal(true)}
+                    className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
+                  >
+                    <span className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0 group-hover:bg-blue-200 transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeCreateGroup")}</p>
+                      <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowJoinByLinkModal(true)}
+                    className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
+                  >
+                    <span className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0 group-hover:bg-green-200 transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeJoin")}</p>
+                      <p className="text-xs text-slate-400">{t("messenger.welcomeJoinDesc")}</p>
+                    </div>
+                  </button>
+                  {favChatId && (
                     <button
                       type="button"
-                      onClick={() => setShowCreateChatModal(true)}
-                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
-                    >
-                      <span className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0 group-hover:bg-blue-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeCreateGroup")}</p>
-                        <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowJoinByLinkModal(true)}
-                      className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all group"
-                    >
-                      <span className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0 group-hover:bg-green-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeJoin")}</p>
-                        <p className="text-xs text-slate-400">{t("messenger.welcomeJoinDesc")}</p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => favChatId && openChat(favChatId)}
+                      onClick={() => openChat(favChatId)}
                       className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-amber-300 hover:shadow-sm transition-all group"
                     >
                       <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-200 transition-colors">
@@ -1336,43 +1342,8 @@ export default function MessengerPage() {
                         <p className="text-xs text-slate-400">{t("messenger.welcomeFavoritesDesc")}</p>
                       </div>
                     </button>
-                  </div>
+                  )}
                 </div>
-              );
-            }
-            return (
-              <div className="text-center max-w-sm">
-                <div className="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                </div>
-                <h2 className="text-lg font-medium text-slate-600 mb-1">{t("messenger.selectChat")}</h2>
-                <p className="text-sm text-slate-500 mb-4">
-                  {chats.length === 0
-                    ? t("messenger.selectChatEmpty")
-                    : t("messenger.selectChatDesc")}
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateChatModal(true)}
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                    {t("dashboard.createChat")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowJoinByLinkModal(true)}
-                    className="inline-flex items-center justify-center gap-2 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
-                  >
-                    {t("messenger.joinByLink")}
-                  </button>
-                </div>
-                <p className="text-slate-400 text-xs mt-4">
-                  {t("messenger.profileAndSubscription")}
-                </p>
               </div>
             );
           })()}

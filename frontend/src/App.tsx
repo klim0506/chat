@@ -7,6 +7,7 @@ import { isStandalone } from "./lib/pwa";
 // Lazy-loaded pages — каждая страница загружается отдельным чанком
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
+const Lending2Page = lazy(() => import("./pages/Lending2Page"));
 const Telegram3StepsLandingPage = lazy(() => import("./pages/Telegram3StepsLandingPage"));
 const BusinessChatRedirectPage = lazy(() => import("./pages/BusinessChatRedirectPage"));
 const MessengerPage = lazy(() => import("./pages/MessengerPage"));
@@ -69,6 +70,8 @@ function App() {
     <Suspense fallback={<div className="flex items-center justify-center h-screen w-screen"><div className="w-8 h-8 border-3 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>}>
       <Routes>
         <Route path="/" element={isStandalone() ? (isFullyRegistered ? <Navigate to="/chats" replace /> : <Navigate to="/auth" replace />) : <LandingPage />} />
+        <Route path="/lending2" element={<Lending2Page />} />
+        <Route path="/landing2" element={<Navigate to="/lending2" replace />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/landing" element={<StaticLandingRedirect />} />
         <Route path="/telegram-3-shaga" element={<Telegram3StepsLandingPage />} />

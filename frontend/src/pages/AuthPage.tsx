@@ -8,7 +8,7 @@ import { useAuthStore } from "../store/auth";
 import { useTranslation } from "../lib/i18n";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 
-const logoUrl = "/logo.ico";
+const logoUrl = "/logo2_not_height_png_ai.png";
 
 type PhoneForm = { phone: string };
 type CodeForm = { code: string };
@@ -190,7 +190,7 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 p-4">
       <div className="absolute left-4 top-4">
-        <img src={logoUrl} alt={t("auth.logo")} className="h-8 w-8 object-contain" />
+        <img src={logoUrl} alt={t("auth.logo")} className="h-[3.75rem] w-auto object-contain" />
       </div>
       <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-md p-6">

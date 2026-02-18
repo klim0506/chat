@@ -14,6 +14,7 @@ REDIS_OTP_KEY = "otp:code:{phone}"
 REDIS_SMS_SENT_KEY = "otp:sent:{phone}"
 REDIS_VERIFY_ATTEMPTS_KEY = "otp:attempts:{phone}"
 MAX_VERIFY_ATTEMPTS = 5
+MAX_SEND_CODE_REQUESTS_PER_MINUTE = 2
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +209,15 @@ def set_otp(phone: str, code: str) -> None:
 
 
 def mark_code_sent(phone: str) -> None:
-    """Per-phone rate limit marker to prevent spamming send-code."""
+    """Increment per-phone send-code counter in a rolling 60s window."""
+    key = REDIS_SMS_SENT_KEY.format(phone=phone)
     if _redis_available():
-        get_redis().setex(REDIS_SMS_SENT_KEY.format(phone=phone), REDIS_SMS_RATE_TTL, "1")
+        redis = get_redis()
+        count = redis.incr(key)
+        if count == 1:
+            redis.expire(key, REDIS_SMS_RATE_TTL)
     else:
-        _mem_setex(REDIS_SMS_SENT_KEY.format(phone=phone), REDIS_SMS_RATE_TTL, "1")
+        _mem_incr(key, REDIS_SMS_RATE_TTL)
 
 
 def set_otp_and_mark_sent(phone: str, code: str) -> None:
@@ -240,9 +245,21 @@ def delete_otp(phone: str) -> None:
 
 def can_send_sms(phone: str) -> bool:
     # Backwards-compatible name: used for any auth code delivery method.
+    key = REDIS_SMS_SENT_KEY.format(phone=phone)
     if _redis_available():
-        return get_redis().get(REDIS_SMS_SENT_KEY.format(phone=phone)) is None
-    return _mem_get(REDIS_SMS_SENT_KEY.format(phone=phone)) is None
+        raw_count = get_redis().get(key)
+    else:
+        raw_count = _mem_get(key)
+
+    if raw_count is None:
+        return True
+
+    try:
+        sent_count = int(raw_count.decode() if isinstance(raw_count, bytes) else raw_count)
+    except (TypeError, ValueError):
+        return False
+
+    return sent_count < MAX_SEND_CODE_REQUESTS_PER_MINUTE
 
 
 def incr_verify_attempts(phone: str) -> int:

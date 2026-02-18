@@ -1,10 +1,125 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "../lib/i18n";
 import { useAuthStore } from "../store/auth";
+import { usePreferencesStore, type AppLanguage } from "../store/preferences";
+
+const PREFERENCES_STORAGE_KEY = "preferences";
+const GEO_TIMEOUT_MS = 3500;
+
+function safeGetItem(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage errors (private mode, quotas, etc.)
+  }
+}
+
+function getCountryCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as { country_code?: unknown; countryCode?: unknown; success?: unknown };
+  if (data.success === false) return null;
+  const raw = typeof data.country_code === "string"
+    ? data.country_code
+    : typeof data.countryCode === "string"
+      ? data.countryCode
+      : null;
+  return raw ? raw.toUpperCase() : null;
+}
+
+async function fetchCountryCode(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return getCountryCode(payload);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export default function LandingPage() {
   const { t } = useTranslation();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const setLanguage = usePreferencesStore((s) => s.setLanguage);
+  const [suggestedLanguage, setSuggestedLanguage] = useState<AppLanguage | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const detectLanguageByIp = async () => {
+      const hasStoredPreferences = safeGetItem(PREFERENCES_STORAGE_KEY) !== null;
+      const currentLanguage = usePreferencesStore.getState().language;
+
+      const providers = [
+        "https://ipwho.is/?fields=success,country_code",
+        "https://ipapi.co/json/",
+      ];
+
+      let countryCode: string | null = null;
+      for (const provider of providers) {
+        countryCode = await fetchCountryCode(provider);
+        if (countryCode) break;
+      }
+      if (!countryCode || cancelled) return;
+
+      const recommendedLanguage: AppLanguage = countryCode === "RU" ? "ru" : "en";
+
+      if (!hasStoredPreferences) {
+        if (currentLanguage !== recommendedLanguage) setLanguage(recommendedLanguage);
+        return;
+      }
+
+      const dismissKey = `landing-lang-suggest-dismissed-${recommendedLanguage}`;
+      const isDismissed = safeGetItem(dismissKey) === "1";
+      if (!isDismissed && currentLanguage !== recommendedLanguage) {
+        setSuggestedLanguage(recommendedLanguage);
+      }
+    };
+
+    void detectLanguageByIp();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setLanguage]);
+
+  const applySuggestedLanguage = () => {
+    if (!suggestedLanguage) return;
+    setLanguage(suggestedLanguage);
+    safeSetItem(`landing-lang-suggest-dismissed-${suggestedLanguage}`, "1");
+    setSuggestedLanguage(null);
+  };
+
+  const dismissLanguageSuggestion = () => {
+    if (!suggestedLanguage) return;
+    safeSetItem(`landing-lang-suggest-dismissed-${suggestedLanguage}`, "1");
+    setSuggestedLanguage(null);
+  };
+
+  const suggestionCopy = suggestedLanguage === "ru"
+    ? {
+        title: "Похоже, вы из России. Переключить сайт на русский?",
+        apply: "Переключить на русский",
+        dismiss: "Оставить English",
+      }
+    : {
+        title: "Looks like you're outside Russia. Switch site to English?",
+        apply: "Switch to English",
+        dismiss: "Keep Russian",
+      };
 
   const features = [
     {
@@ -56,9 +171,8 @@ export default function LandingPage() {
     <div className="min-h-screen bg-white text-slate-800 antialiased">
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
-          <Link to="/" className="inline-flex items-center gap-2 text-lg font-semibold text-blue-600">
-            <img src="/logo.ico" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />
-            {t("landing.brand")}
+          <Link to="/" aria-label={t("landing.brand")} className="inline-flex items-center text-blue-600">
+            <img src="/logo2_not_height_png_ai.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
             <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
@@ -82,6 +196,30 @@ export default function LandingPage() {
           </nav>
         </div>
       </header>
+
+      {suggestedLanguage && (
+        <section className="border-b border-blue-100 bg-blue-50">
+          <div className="container mx-auto px-4 py-3 max-w-4xl flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-blue-900">{suggestionCopy.title}</p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={applySuggestedLanguage}
+                className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                {suggestionCopy.apply}
+              </button>
+              <button
+                type="button"
+                onClick={dismissLanguageSuggestion}
+                className="px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                {suggestionCopy.dismiss}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <main>
         <section className="container mx-auto px-4 pt-16 pb-20 md:pt-24 md:pb-28 max-w-4xl">

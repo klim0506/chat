@@ -32,9 +32,8 @@ export default function Telegram3StepsLandingPage() {
     <div className="min-h-screen bg-white text-slate-800 antialiased">
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
-          <Link to="/" className="inline-flex items-center gap-2 text-lg font-semibold text-blue-600">
-            <img src="/logo.ico" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />
-            Pingy
+          <Link to="/" aria-label="Pingy" className="inline-flex items-center text-blue-600">
+            <img src="/logo2_not_height_png_ai.png" alt="Pingy" className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
             <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">

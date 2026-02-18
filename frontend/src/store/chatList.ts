@@ -61,9 +61,13 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
     // 1. Instant render from IndexedDB cache (only if owned by current user)
     try {
       const cached = await db.chats.toArray();
-      // Filter: only show chats that belong to current user (or have no _userId — legacy entries)
+      // Filter: only show chats that belong to current user.
+      const legacyIds = cached.filter((c) => !c._userId).map((c) => c.id);
+      if (legacyIds.length > 0) {
+        db.chats.bulkDelete(legacyIds).catch(() => {});
+      }
       const ownedChats = currentUserId
-        ? cached.filter((c) => c._userId === currentUserId || !c._userId)
+        ? cached.filter((c) => c._userId === currentUserId)
         : [];
       if (ownedChats.length > 0) {
         const chats = ownedChats.map(stripCacheMeta);
@@ -199,12 +203,15 @@ function stripCacheMeta(cached: CachedChat): Chat {
 async function persistChats(chats: Chat[]) {
   const now = new Date().toISOString();
   const userId = useAuthStore.getState().user?.id;
+  if (!userId) return;
   const rows: CachedChat[] = chats.map((c) => ({ ...c, _cachedAt: now, _userId: userId }));
   await db.chats.bulkPut(rows);
 }
 
 async function persistChat(chat: Chat) {
   const userId = useAuthStore.getState().user?.id;
+  if (!userId) return;
   const row: CachedChat = { ...chat, _cachedAt: new Date().toISOString(), _userId: userId };
   await db.chats.put(row);
 }
+

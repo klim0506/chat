@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-const logoUrl = "/logo.ico";
+const logoUrl = "/logo2_not_height_png_ai.png";
 
 export default function JoinChatPage() {
   const { t } = useTranslation();
@@ -55,7 +55,7 @@ export default function JoinChatPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-4 relative">
       <div className="absolute left-4 top-4">
-        <img src={logoUrl} alt="Логотип" className="h-8 w-8 object-contain" />
+        <img src={logoUrl} alt="Логотип" className="h-[3.75rem] w-auto object-contain" />
       </div>
       <div className="flex-1 flex items-center justify-center">
       <div className="bg-white rounded-xl border p-6 max-w-md w-full text-center">

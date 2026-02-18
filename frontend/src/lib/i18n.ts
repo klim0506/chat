@@ -220,12 +220,6 @@ const translations = {
   "messenger.createFirst": { en: "Create first chat", ru: "Создать первый чат" },
   "messenger.haveInvite": { en: "Have an invite link?", ru: "Есть ссылка-приглашение?" },
   "messenger.joinChat": { en: "Join chat", ru: "Вступить в чат" },
-  "messenger.selectChat": { en: "Select a chat", ru: "Выберите чат" },
-  "messenger.selectChatEmpty": {
-    en: "Create your first chat or join a chat via an invite link — your conversation will open here.",
-    ru: "Создайте первый чат или вступите в чат по пригласительной ссылке — тогда здесь откроется переписка.",
-  },
-  "messenger.selectChatDesc": { en: "Select a chat from the list on the left or create a new one.", ru: "Выберите чат из списка слева или создайте новый." },
   "messenger.welcomeTitle": { en: "Welcome!", ru: "Добро пожаловать!" },
   "messenger.welcomeDesc": {
     en: "Your account is ready. In addition to creating a group and joining a group via invite link, you can also invite friends and try Favorites.",
@@ -290,7 +284,6 @@ const translations = {
   "messenger.noUsersFound": { en: "Nobody found", ru: "Никого не найдено" },
   "messenger.muted": { en: "Muted", ru: "Без звука" },
   "messenger.openChatError": { en: "Could not open chat", ru: "Не удалось открыть чат" },
-  "messenger.profileAndSubscription": { en: "Profile and subscription settings — in menu (⋮) in the chat list header.", ru: "Настройки профиля и подписки — в меню (⋮) в шапке списка чатов." },
   "messenger.pinned": { en: "Pinned", ru: "Закреплён" },
   "messenger.resizeSidebar": { en: "Resize chat list", ru: "Изменить ширину списка чатов" },
 

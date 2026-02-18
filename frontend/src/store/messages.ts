@@ -101,9 +101,12 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     // 1. Load from IndexedDB cache (instant, filtered by owner)
     try {
       const cached = await db.messages.where("chatId").equals(chatId).sortBy("created_at");
-      // Only use cache entries belonging to current user (or legacy entries without _userId)
+      const legacyIds = cached.filter((m) => !m._userId).map((m) => m.id);
+      if (legacyIds.length > 0) {
+        db.messages.bulkDelete(legacyIds).catch(() => {});
+      }
       const owned = currentUserId
-        ? cached.filter((m) => m._userId === currentUserId || !m._userId)
+        ? cached.filter((m) => m._userId === currentUserId)
         : [];
       if (owned.length > 0) {
         const msgs = owned.map(stripCacheMeta);
@@ -227,7 +230,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     });
     // Persist single message
     const userId = useAuthStore.getState().user?.id;
-    db.messages.put(toCachedMessage(msg, userId)).catch(() => {});
+    if (userId) db.messages.put(toCachedMessage(msg, userId)).catch(() => {});
   },
 
   updateMessage: (chatId, messageId, updates) => {
@@ -242,7 +245,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     const updated = msgs?.find((m) => m.id === messageId);
     if (updated) {
       const userId = useAuthStore.getState().user?.id;
-      db.messages.put(toCachedMessage(updated, userId)).catch(() => {});
+      if (userId) db.messages.put(toCachedMessage(updated, userId)).catch(() => {});
     }
   },
 
@@ -255,7 +258,7 @@ export const useMessagesStore = create<MessagesState>()((set, get) => ({
     // Remove temp from DB, add server message
     const userId = useAuthStore.getState().user?.id;
     db.messages.delete(tempId).catch(() => {});
-    db.messages.put(toCachedMessage(serverMsg, userId)).catch(() => {});
+    if (userId) db.messages.put(toCachedMessage(serverMsg, userId)).catch(() => {});
   },
 
   getMessages: (chatId) => get().byChat[chatId] ?? [],
@@ -293,6 +296,7 @@ function stripCacheMeta(cached: CachedMessage): Message {
 
 async function persistMessages(chatId: string, msgs: Message[]) {
   const userId = useAuthStore.getState().user?.id;
+  if (!userId) return;
   const rows = msgs.map((m) => toCachedMessage({ ...m, chat: chatId }, userId));
   await db.messages.bulkPut(rows);
 }
