@@ -12,7 +12,7 @@ type NewsCard = {
   title: string;
   description: string;
   date: string;
-  coverClass: string;
+  image: string;
 };
 
 type Reason = {
@@ -53,14 +53,14 @@ const newsCards: NewsCard[] = [
     description:
       "Сегодня мы представляем большое обновление интерфейса Pingy для Android, включая набор новых визуальных тем и анимаций.",
     date: "9 фев. 2026",
-    coverClass: "tg2-news-cover--warm",
+    image: "news_design.jpg",
   },
   {
     title: "Краткие пересказы от ИИ, новый дизайн и многое другое",
     description:
       "В первом обновлении 2026 года мы добавили набор подсказок от ИИ и обновили внешний вид чатов на iOS и Web.",
     date: "3 янв. 2026",
-    coverClass: "tg2-news-cover--cool",
+    image: "news_ai.jpg",
   },
 ];
 
@@ -87,8 +87,8 @@ const reasons: Reason[] = [
   },
   {
     icon: "tl_card_cloud.gif",
-    title: "Файлы",
-    text: "Нет ограничений на размер мультимедиа и архивов.",
+    title: "Силища",
+    text: "Нет ограничений на размер мультимедиа и чатов.",
   },
   {
     icon: "tl_card_open.gif",
@@ -113,14 +113,6 @@ const reasons: Reason[] = [
 ];
 
 const footerColumns: FooterColumn[] = [
-  {
-    title: "Pingy",
-    items: [
-      { label: "О проекте", to: "/" },
-      { label: "Для мобильных и компьютеров", href: "#apps" },
-      { label: "Быстрый и безопасный чат", href: "#reasons" },
-    ],
-  },
   {
     title: "О Pingy",
     items: [
@@ -168,7 +160,7 @@ function FooterLink({ item }: { item: FooterItem }) {
 export default function Lending2Page() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const dashboardLink = isAuthenticated ? "/chats" : "/auth";
-  const dashboardLabel = isAuthenticated ? "Открыть чаты" : "Log in";
+  const dashboardLabel = isAuthenticated ? "Открыть чаты" : "Войти";
   const assetBase = import.meta.env.BASE_URL;
   const asset = (fileName: string) => `${assetBase}lending2/${fileName}`;
 
@@ -195,20 +187,13 @@ export default function Lending2Page() {
             <a href="https://twitter.com/telegram" target="_blank" rel="noreferrer">
               Twitter
             </a>
-            <Link to={dashboardLink} className="tg2-open-chats-btn">
-              {dashboardLabel}
-            </Link>
+            <Link to={dashboardLink}>{dashboardLabel}</Link>
           </div>
         </div>
       </header>
 
-      <main className="tg2-container">
-        <section className="tg2-hero" id="home">
-          <div className="tg2-brand">
-            <img src={asset("t_logo_2x.png")} alt="Pingy" className="tg2-logo" />
-            <h1>Pingy</h1>
-            <p>новая эра в общении</p>
-          </div>
+      <main className="tg2-container tg2-main">
+        <section className="tg2-top" id="home">
           <aside className="tg2-quick-news">
             <h2>Свежие новости</h2>
             <ul>
@@ -220,6 +205,12 @@ export default function Lending2Page() {
               ))}
             </ul>
           </aside>
+
+          <div className="tg2-brand">
+            <img src={asset("t_logo_2x.png")} alt="Pingy" className="tg2-logo" />
+            <h1>Pingy</h1>
+            <p>новая эра в общении</p>
+          </div>
         </section>
 
         <section className="tg2-platforms" id="apps">
@@ -231,6 +222,7 @@ export default function Lending2Page() {
                 Pingy для Android
               </Link>
             </article>
+
             <article className="tg2-platform-card tg2-platform-card--ios">
               <img src={asset("SiteiOS_2x.jpg")} alt="Pingy для iPhone / iPad" className="tg2-platform-image" />
               <Link to="/telegram-3-shaga" className="tg2-platform-link">
@@ -239,6 +231,7 @@ export default function Lending2Page() {
               </Link>
             </article>
           </div>
+
           <article className="tg2-desktop-platform">
             <img src={asset("SiteDesktop_2x.jpg")} alt="Pingy для ПК и macOS" className="tg2-desktop-image" />
             <div className="tg2-desktop-links">
@@ -253,7 +246,7 @@ export default function Lending2Page() {
           <div className="tg2-news-grid">
             {newsCards.map((card) => (
               <article key={card.title} className="tg2-news-card">
-                <div className={`tg2-news-cover ${card.coverClass}`} aria-hidden="true" />
+                <img src={asset(card.image)} alt={card.title} className="tg2-news-cover" loading="lazy" />
                 <h3>{card.title}</h3>
                 <p>{card.description}</p>
                 <time>{card.date}</time>
@@ -294,6 +287,11 @@ export default function Lending2Page() {
 
       <footer className="tg2-footer">
         <div className="tg2-container tg2-footer-grid">
+          <section className="tg2-footer-about">
+            <h3>Pingy</h3>
+            <p>Pingy — это облачный мессенджер для мобильных устройств и компьютеров. Быстрый и безопасный.</p>
+          </section>
+
           {footerColumns.map((column) => (
             <section key={column.title}>
               <h3>{column.title}</h3>
