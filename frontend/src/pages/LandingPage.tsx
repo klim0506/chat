@@ -64,9 +64,6 @@ export default function LandingPage() {
             <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
               {t("landing.help")}
             </Link>
-            <Link to="/telegram-3-shaga" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
-              ????: Telegram
-            </Link>
             {isAuthenticated ? (
               <Link
                 to="/chats"
@@ -213,9 +210,6 @@ export default function LandingPage() {
           <nav className="flex items-center gap-6 text-sm">
             <Link to="/spravka" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.help")}
-            </Link>
-            <Link to="/telegram-3-shaga" className="text-slate-500 hover:text-slate-700 transition-colors">
-              ????: Telegram
             </Link>
             <Link to="/auth" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.login")}
