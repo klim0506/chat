@@ -63,7 +63,7 @@ class AuthRateLimitTest(TestCase):
         },
     )
     @patch("apps.users.views.can_send_sms", return_value=True)
-    @patch("apps.users.views.send_telegram_verification", return_value=None)
+    @patch("apps.users.views.send_telegram_verification", return_value=(None, None))
     @patch("apps.users.views.send_sms", return_value=True)
     def test_send_code_throttled_after_limit(self, mock_sms, mock_tg, mock_can):
         """После превышения лимита send-code возвращает 429."""
@@ -96,7 +96,7 @@ class SendCodePerMinuteLimitTest(TestCase):
         },
     )
     @patch("apps.users.services._redis_available", return_value=False)
-    @patch("apps.users.views.send_telegram_verification", return_value=None)
+    @patch("apps.users.views.send_telegram_verification", return_value=(None, None))
     @patch("apps.users.views.send_sms", return_value=True)
     def test_soft_limit_blocks_only_after_two_requests(self, mock_sms, mock_tg, mock_no_redis):
         from apps.users import services

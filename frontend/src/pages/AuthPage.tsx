@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,7 +8,7 @@ import { useAuthStore } from "../store/auth";
 import { useTranslation } from "../lib/i18n";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 
-const logoUrl = "/logo2_not_height_png_ai.png";
+const logoUrl = "/logo2_not_height_png_ai_transparent.png";
 
 type PhoneForm = { phone: string };
 type CodeForm = { code: string };
@@ -190,7 +190,9 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 p-4">
       <div className="absolute left-4 top-4">
-        <img src={logoUrl} alt={t("auth.logo")} className="h-[3.75rem] w-auto object-contain" />
+        <Link to="/" className="inline-block cursor-pointer opacity-90 hover:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded" aria-label={t("landing.brand")}>
+          <img src={logoUrl} alt={t("auth.logo")} className="h-[3.75rem] w-auto object-contain" />
+        </Link>
       </div>
       <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-md p-6">

@@ -546,6 +546,13 @@ const translations = {
   "auth.usernameTakenLive": { en: "This username is already taken", ru: "Этот юзернейм уже занят" },
   "auth.usernameChecking": { en: "Checking...", ru: "Проверка..." },
 
+  // ─── Alpha banner (env-controlled) ─────────────────────────
+  "alphaBanner.title": { en: "Alpha testing", ru: "Альфа-тестирование" },
+  "alphaBanner.body": {
+    en: "The service is in alpha. Data may not be fully protected, may be lost, and bugs may occur.",
+    ru: "Сервис в стадии альфа-тестирования. Данные пока могут быть недостаточно защищены, утеряны; возможны сбои и баги.",
+  },
+
   // ─── JoinChat page ────────────────────────────────────────
   "joinPage.missingParams": { en: "Link is missing slug or code parameters.", ru: "В ссылке отсутствуют параметры slug или code." },
   "joinPage.alreadyInChat": { en: "You are already in this chat.", ru: "Вы уже в чате." },
@@ -567,13 +574,13 @@ const translations = {
   "avatar.defaultText": { en: "Text", ru: "Текст" },
   "sticker.searchGif": { en: "Search GIF...", ru: "Поиск GIF..." },
 
-  // ─── Spravka (Help) pages ─────────────────────────────────
-  "spravka.title": { en: "Help", ru: "Справка" },
-  "spravka.chats": { en: "Chats", ru: "Чаты" },
-  "spravka.referral": { en: "Referral program", ru: "Реферальная программа" },
-  "spravka.security": { en: "Security", ru: "Безопасность" },
-  "spravka.channels": { en: "Channels", ru: "Каналы" },
-  "spravka.bots": { en: "Bots", ru: "Боты" },
+  // ─── Wiki (Help) pages ────────────────────────────────────
+  "wiki.title": { en: "Wiki", ru: "Wiki" },
+  "wiki.chats": { en: "Chats", ru: "Чаты" },
+  "wiki.referral": { en: "Referral program", ru: "Реферальная программа" },
+  "wiki.security": { en: "Security", ru: "Безопасность" },
+  "wiki.channels": { en: "Channels", ru: "Каналы" },
+  "wiki.bots": { en: "Bots", ru: "Боты" },
   "pin.pinned": { en: "Pinned", ru: "Закреплено" },
   "pin.forYou": { en: "for you", ru: "для вас" },
   "pin.pinnedForYou": { en: "Pinned for you", ru: "Закреплено для вас" },

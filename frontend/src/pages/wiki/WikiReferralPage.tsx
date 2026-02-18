@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useDocumentHead } from "../../hooks/useDocumentHead";
 
-export default function SpravkaReferralPage() {
+export default function WikiReferralPage() {
   useDocumentHead(
     "Реферальная программа: как получить ссылку, звёзды за приглашение",
     "Как получить реферальную ссылку в платформе чатов, сколько звёзд дают за приглашение друга, как потратить звёзды на расширение чата."
@@ -32,7 +32,7 @@ export default function SpravkaReferralPage() {
 
       <section>
         <h2 className="text-xl font-bold text-slate-900 mt-10 mb-3">Что получает пригласивший</h2>
-        <p className="text-slate-700"><strong>10 звёзд</strong> за каждого нового пользователя по вашей реферальной ссылке. Звёзды начисляются один раз за каждого. Тратить можно на расширение чатов: 50 звёзд — до 100 участников, 100 звёзд — до 1000 (<Link to="/spravka/chats" className="text-blue-600 hover:underline">Чаты</Link>).</p>
+        <p className="text-slate-700"><strong>10 звёзд</strong> за каждого нового пользователя по вашей реферальной ссылке. Звёзды начисляются один раз за каждого. Тратить можно на расширение чатов: 50 звёзд — до 100 участников, 100 звёзд — до 1000 (<Link to="/wiki/chats" className="text-blue-600 hover:underline">Чаты</Link>).</p>
       </section>
 
       <section>
@@ -41,11 +41,11 @@ export default function SpravkaReferralPage() {
       </section>
 
       <p className="mt-10 text-slate-500 text-sm">
-        <Link to="/spravka/chats" className="text-blue-600 hover:underline">← Чаты</Link>
+        <Link to="/wiki/chats" className="text-blue-600 hover:underline">← Чаты</Link>
         {" · "}
-        <Link to="/spravka" className="text-blue-600 hover:underline">Справка</Link>
+        <Link to="/wiki" className="text-blue-600 hover:underline">Wiki</Link>
         {" · "}
-        <Link to="/spravka/security" className="text-blue-600 hover:underline">Безопасность →</Link>
+        <Link to="/wiki/security" className="text-blue-600 hover:underline">Безопасность →</Link>
       </p>
     </article>
   );

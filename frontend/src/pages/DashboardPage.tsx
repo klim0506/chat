@@ -101,7 +101,7 @@ export default function DashboardPage() {
           try {
             new Notification(data.chat_title || chat.data.title, {
               body: t("notification.addedToGroup"),
-              icon: "/logo2_not_height_png_ai.png",
+              icon: "/logo2_not_height_png_ai_transparent.png",
             });
           } catch { /* */ }
         }
@@ -127,7 +127,7 @@ export default function DashboardPage() {
           try {
             new Notification(data.chat_title || t("dashboard.newMessage"), {
               body: data.message?.content || t("common.fileMsg"),
-              icon: "/logo2_not_height_png_ai.png",
+              icon: "/logo2_not_height_png_ai_transparent.png",
             });
           } catch { /* */ }
         }
@@ -257,7 +257,7 @@ export default function DashboardPage() {
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <Link to="/chats" aria-label={t("dashboard.title")} className="inline-flex items-center">
-            <img src="/logo2_not_height_png_ai.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
+            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">{t("dashboard.createChat")}</button>

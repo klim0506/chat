@@ -117,8 +117,8 @@ const footerColumns: FooterColumn[] = [
     title: "О Pingy",
     items: [
       { label: "FAQ", href: "#faq" },
-      { label: "Приватность", to: "/spravka/security" },
-      { label: "Для СМИ", to: "/spravka" },
+      { label: "Приватность", to: "/wiki/security" },
+      { label: "Для СМИ", to: "/wiki" },
     ],
   },
   {
@@ -140,9 +140,9 @@ const footerColumns: FooterColumn[] = [
   {
     title: "Платформы",
     items: [
-      { label: "API", to: "/spravka" },
-      { label: "Переводы", to: "/spravka" },
-      { label: "Instant View", to: "/spravka" },
+      { label: "API", to: "/wiki" },
+      { label: "Переводы", to: "/wiki" },
+      { label: "Instant View", to: "/wiki" },
     ],
   },
 ];
@@ -179,8 +179,8 @@ export default function Lending2Page() {
             </a>
             <a href="#faq">FAQ</a>
             <a href="#apps">Приложения</a>
-            <Link to="/spravka">API</Link>
-            <Link to="/spravka/security">Модерация</Link>
+            <Link to="/wiki">API</Link>
+            <Link to="/wiki/security">Модерация</Link>
           </nav>
           <div className="tg2-meta-nav">
             <a href="#home">RU</a>

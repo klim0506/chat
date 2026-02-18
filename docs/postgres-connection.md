@@ -1,13 +1,28 @@
-﻿# PostgreSQL для проекта
+# PostgreSQL для проекта
 
-## Параметры базы
+**Локальная разработка** — ниже. **Продакшен** (как разместить БД на сервере/в облаке): см. [postgres-production.md](postgres-production.md).
+
+## Что нужно от вас (разработка)
+
+Чтобы всё сделать автоматически одной командой:
+
+1. **Установите и запустите Docker Desktop** (если ещё не установлен): [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+2. В корне проекта выполните: **`start_postgres.bat`**
+
+Скрипт поднимет контейнер PostgreSQL, переключит `backend\.env` на использование БД и применит миграции. После этого запускайте приложение как обычно: `start.bat`.
+
+Если хотите использовать **локально установленный PostgreSQL** (без Docker): установите PostgreSQL, создайте базу `chatdb` и пользователя `postgres`, в `backend\.env` укажите `USE_SQLITE=False` и `DATABASE_URL=postgres://postgres:ВАШ_ПАРОЛЬ@localhost:5432/chatdb` (порт 5432 — стандартный для локальной установки).
+
+---
+
+## Параметры базы (Docker)
 - Host: `localhost`
 - Port: `5433`
 - DB: `chatdb`
 - User: `postgres`
 - Password: `postgres`
 
-## Запуск
+## Запуск вручную (только контейнер)
 ```bash
 docker compose up -d db
 ```

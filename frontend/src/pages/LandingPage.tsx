@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "../lib/i18n";
 import { useAuthStore } from "../store/auth";
 import { usePreferencesStore, type AppLanguage } from "../store/preferences";
+import { api } from "../api/client";
 
 const PREFERENCES_STORAGE_KEY = "preferences";
 const GEO_TIMEOUT_MS = 3500;
@@ -35,21 +36,6 @@ function getCountryCode(payload: unknown): string | null {
   return raw ? raw.toUpperCase() : null;
 }
 
-async function fetchCountryCode(url: string): Promise<string | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
-    if (!response.ok) return null;
-    const payload = await response.json();
-    return getCountryCode(payload);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 export default function LandingPage() {
   const { t } = useTranslation();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -63,15 +49,17 @@ export default function LandingPage() {
       const hasStoredPreferences = safeGetItem(PREFERENCES_STORAGE_KEY) !== null;
       const currentLanguage = usePreferencesStore.getState().language;
 
-      const providers = [
-        "https://ipwho.is/?fields=success,country_code",
-        "https://ipapi.co/json/",
-      ];
-
       let countryCode: string | null = null;
-      for (const provider of providers) {
-        countryCode = await fetchCountryCode(provider);
-        if (countryCode) break;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
+        const { data } = await api.get<{ country_code?: string | null }>("/geo/country-code/", {
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        countryCode = getCountryCode(data);
+      } catch {
+        // Backend geo or network failure; keep current language
       }
       if (!countryCode || cancelled) return;
 
@@ -172,10 +160,10 @@ export default function LandingPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
           <Link to="/" aria-label={t("landing.brand")} className="inline-flex items-center text-blue-600">
-            <img src="/logo2_not_height_png_ai.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
+            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
-            <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
+            <Link to="/wiki" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
               {t("landing.help")}
             </Link>
             {isAuthenticated ? (
@@ -346,7 +334,7 @@ export default function LandingPage() {
         <div className="container mx-auto px-4 max-w-4xl flex flex-col sm:flex-row justify-between items-center gap-3">
           <span className="text-slate-500 text-sm">{t("landing.footer.copy")}</span>
           <nav className="flex items-center gap-6 text-sm">
-            <Link to="/spravka" className="text-slate-500 hover:text-slate-700 transition-colors">
+            <Link to="/wiki" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.help")}
             </Link>
             <Link to="/auth" className="text-slate-500 hover:text-slate-700 transition-colors">

@@ -38,12 +38,12 @@ test.describe("Single tab: i18n, chat-actions, pinned, privacy, usernames", () =
     expect(hasPrivacy || (await page.locator("text=Приватность").count()) > 0).toBeTruthy();
   });
 
-  test("spravka/legal pages load", async ({ page }) => {
-    await page.goto("/spravka");
+  test("wiki/legal pages load", async ({ page }) => {
+    await page.goto("/wiki");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("text=Справка").or(page.locator("text=Pingy"))).toBeVisible();
 
-    await page.goto("/spravka/security");
+    await page.goto("/wiki/security");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("text=Безопасность").or(page.locator("text=Справка"))).toBeVisible();
   });
