@@ -3,14 +3,14 @@ import { expect, test } from "@playwright/test";
 const MOBILE_VIEWPORT = { width: 375, height: 812 };
 
 /**
- * E2E mobile: viewport 375x812, Sessions UI, legal/spravka pages.
+ * E2E mobile: viewport 375x812, Sessions UI, legal/wiki pages.
  * Run: npx playwright test mobile-sessions-legal --project=chromium
  */
 test.describe("Mobile viewport, Sessions UI, legal pages", () => {
   test.use({ viewport: MOBILE_VIEWPORT });
 
-  test("spravka page renders on mobile", async ({ page }) => {
-    await page.goto("/spravka");
+  test("wiki page renders on mobile", async ({ page }) => {
+    await page.goto("/wiki");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("text=Справка").or(page.locator("text=Pingy"))).toBeVisible();
   });

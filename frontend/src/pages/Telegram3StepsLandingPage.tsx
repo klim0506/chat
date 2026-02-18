@@ -33,10 +33,10 @@ export default function Telegram3StepsLandingPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
           <Link to="/" aria-label="Pingy" className="inline-flex items-center text-blue-600">
-            <img src="/logo2_not_height_png_ai.png" alt="Pingy" className="h-[3.75rem] w-auto object-contain" />
+            <img src="/logo2_not_height_png_ai_transparent.png" alt="Pingy" className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
-            <Link to="/spravka" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
+            <Link to="/wiki" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
               Справка
             </Link>
             {!isAuthenticated ? (
@@ -158,7 +158,7 @@ export default function Telegram3StepsLandingPage() {
         <div className="container mx-auto px-4 max-w-4xl flex flex-col sm:flex-row justify-between items-center gap-3">
           <span className="text-slate-500 text-sm">© {new Date().getFullYear()} Pingy</span>
           <nav className="flex items-center gap-6 text-sm">
-            <Link to="/spravka" className="text-slate-500 hover:text-slate-700 transition-colors">
+            <Link to="/wiki" className="text-slate-500 hover:text-slate-700 transition-colors">
               Справка
             </Link>
             <Link to="/auth" className="text-slate-500 hover:text-slate-700 transition-colors">

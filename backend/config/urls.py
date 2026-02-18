@@ -4,6 +4,8 @@ from django.contrib import admin
 from django.http import HttpResponseRedirect
 from django.urls import path, include
 
+from config.geo_views import CountryCodeView
+
 
 def redirect_join_to_frontend(request, _rest):
     """Редирект пригласительной ссылки на фронтенд (при открытии /chat/join/... на бэкенде)."""
@@ -16,6 +18,7 @@ def redirect_join_to_frontend(request, _rest):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("apps.users.urls")),
+    path("api/geo/country-code/", CountryCodeView.as_view(), name="geo-country-code"),
     path("api/chats/", include("apps.chats.urls")),
     path("api/payments/", include("apps.payments.urls")),
     path("api/files/", include("apps.files.urls")),

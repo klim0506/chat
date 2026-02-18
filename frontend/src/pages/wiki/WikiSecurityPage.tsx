@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useDocumentHead } from "../../hooks/useDocumentHead";
 
-export default function SpravkaSecurityPage() {
+export default function WikiSecurityPage() {
   useDocumentHead(
     "Безопасность чатов: вход по коду, защита доступа, файлы",
     "Как устроена безопасность: вход без пароля по SMS и Telegram, доступ в чат только по ссылке, защита файлов. Безопасны ли чаты и личные данные."
@@ -37,11 +37,11 @@ export default function SpravkaSecurityPage() {
       </section>
 
       <p className="mt-10 text-slate-500 text-sm">
-        <Link to="/spravka/referral" className="text-blue-600 hover:underline">← Реферальная программа</Link>
+        <Link to="/wiki/referral" className="text-blue-600 hover:underline">← Реферальная программа</Link>
         {" · "}
-        <Link to="/spravka" className="text-blue-600 hover:underline">Справка</Link>
+        <Link to="/wiki" className="text-blue-600 hover:underline">Wiki</Link>
         {" · "}
-        <Link to="/spravka/channels" className="text-blue-600 hover:underline">Каналы →</Link>
+        <Link to="/wiki/channels" className="text-blue-600 hover:underline">Каналы →</Link>
       </p>
     </article>
   );

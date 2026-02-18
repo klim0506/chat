@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-const logoUrl = "/logo2_not_height_png_ai.png";
+const logoUrl = "/logo2_not_height_png_ai_transparent.png";
 
 export default function JoinChatPage() {
   const { t } = useTranslation();

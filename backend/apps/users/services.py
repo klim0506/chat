@@ -135,20 +135,33 @@ def send_sms(phone: str, text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Telegram Gateway API — send verification codes via @VerificationCodes
+# Telegram Gateway API — официальный бот для верификации по номеру
+# https://core.telegram.org/gateway/api, https://gateway.telegram.org/account/api
 # ---------------------------------------------------------------------------
 
-def send_telegram_verification(phone: str, code: str) -> dict | None:
+# ttl для sendVerificationMessage: 30–3600 секунд (документация API)
+TELEGRAM_GATEWAY_TTL = max(30, min(3600, REDIS_OTP_TTL))
+
+# Сообщения для типичных ошибок API (пользователю)
+TELEGRAM_GATEWAY_ERROR_MESSAGES = {
+    "ACCESS_TOKEN_INVALID": "Неверный или истёкший токен Telegram Gateway. Получите новый на https://gateway.telegram.org/account/api",
+    "PHONE_NUMBER_INVALID": "Номер телефона должен быть в формате E.164 (например +79001234567).",
+    "PHONE_NUMBER_NOT_REGISTERED": "Этот номер не привязан к Telegram. Установите Telegram и привяжите номер или используйте другой способ входа.",
+}
+
+
+def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str | None]:
     """
-    Send a verification code via Telegram Gateway API (@VerificationCodes bot).
-    Returns the request status dict on success, None on failure.
+    Отправка кода через Telegram Gateway API (официальный бот верификации).
+    Возвращает (result_dict, None) при успехе, (None, error_message) при ответе API с ok=false,
+    (None, None) при отсутствии токена или сетевой ошибке (можно пробовать SMS).
     """
     import requests
 
-    token = getattr(settings, "TELEGRAM_GATEWAY_TOKEN", "")
+    token = (getattr(settings, "TELEGRAM_GATEWAY_TOKEN", None) or "").strip()
     if not token:
         logger.info("TELEGRAM_GATEWAY_TOKEN not set, skipping Telegram Gateway")
-        return None
+        return (None, None)
 
     dest = phone.strip()
     if not dest.startswith("+"):
@@ -157,10 +170,11 @@ def send_telegram_verification(phone: str, code: str) -> dict | None:
     payload = {
         "phone_number": dest,
         "code": str(code),
-        "ttl": REDIS_OTP_TTL,
+        "ttl": TELEGRAM_GATEWAY_TTL,
     }
 
     last_error: str | None = None
+    api_error_code: str | None = None  # код из data["error"] для 503
     for attempt in range(1, 3):
         try:
             resp = requests.post(
@@ -186,9 +200,11 @@ def send_telegram_verification(phone: str, code: str) -> dict | None:
                     dest,
                     data.get("result", {}).get("request_id"),
                 )
-                return data.get("result") or {}
+                return (data.get("result") or {}, None)
 
-            last_error = f"status={resp.status_code} error={data.get('error')} body={str(data)[:200]}"
+            # Ответ API с ошибкой — возвращаем код, чтобы отдать 503 с понятным текстом
+            api_error_code = data.get("error") if isinstance(data.get("error"), str) else None
+            last_error = f"status={resp.status_code} error={api_error_code} body={str(data)[:200]}"
             logger.warning("Telegram Gateway error (attempt %s/2): %s", attempt, last_error)
         except Exception as e:
             last_error = str(e)
@@ -197,7 +213,14 @@ def send_telegram_verification(phone: str, code: str) -> dict | None:
 
     if last_error:
         logger.error("Telegram Gateway failed for %s: %s", dest, last_error)
-    return None
+    # Если API вернул явную ошибку — отдаём её клиенту (503), иначе None (пробуем SMS)
+    user_message = None
+    if api_error_code:
+        user_message = TELEGRAM_GATEWAY_ERROR_MESSAGES.get(
+            api_error_code,
+            f"Telegram Gateway: {api_error_code}.",
+        )
+    return (None, user_message)
 
 
 def set_otp(phone: str, code: str) -> None:

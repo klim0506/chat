@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useDocumentHead } from "../../hooks/useDocumentHead";
 
-export default function SpravkaChatsPage() {
+export default function WikiChatsPage() {
   useDocumentHead(
     "Как создать чат, пригласить по ссылке, голосовое и отложенное сообщение",
     "Инструкция: как создать чат (группу), пригласить по ссылке, отправить голосовое сообщение, отложенное сообщение, отключить уведомления. Лимиты участников и роли."
@@ -39,7 +39,7 @@ export default function SpravkaChatsPage() {
         <h2 className="text-xl font-bold text-slate-900 mt-10 mb-3">Сколько человек может быть в чате</h2>
         <ul className="list-disc pl-6 text-slate-700 space-y-1">
           <li>По умолчанию — до <strong>10 участников</strong>.</li>
-          <li>Прокачка за звёзды: <strong>10 → 100</strong> (50 звёзд), <strong>100 → 1000</strong> (100 звёзд), навсегда. Звёзды — по <Link to="/spravka/referral" className="text-blue-600 hover:underline">реферальной программе</Link>.</li>
+          <li>Прокачка за звёзды: <strong>10 → 100</strong> (50 звёзд), <strong>100 → 1000</strong> (100 звёзд), навсегда. Звёзды — по <Link to="/wiki/referral" className="text-blue-600 hover:underline">реферальной программе</Link>.</li>
         </ul>
       </section>
 
@@ -70,13 +70,13 @@ export default function SpravkaChatsPage() {
 
       <section>
         <h2 className="text-xl font-bold text-slate-900 mt-10 mb-3">Подписка</h2>
-        <p className="text-slate-700">Пользоваться чатами можно при активной подписке. При регистрации — пробный период (7 дней; по <Link to="/spravka/referral" className="text-blue-600 hover:underline">реферальной ссылке</Link> — 14 дней). Дальше — по тарифам платформы (YooKassa).</p>
+        <p className="text-slate-700">Пользоваться чатами можно при активной подписке. При регистрации — пробный период (7 дней; по <Link to="/wiki/referral" className="text-blue-600 hover:underline">реферальной ссылке</Link> — 14 дней). Дальше — по тарифам платформы (YooKassa).</p>
       </section>
 
       <p className="mt-10 text-slate-500 text-sm">
-        <Link to="/spravka" className="text-blue-600 hover:underline">← Справка</Link>
+        <Link to="/wiki" className="text-blue-600 hover:underline">← Wiki</Link>
         {" · "}
-        <Link to="/spravka/referral" className="text-blue-600 hover:underline">Реферальная программа →</Link>
+        <Link to="/wiki/referral" className="text-blue-600 hover:underline">Реферальная программа →</Link>
       </p>
     </article>
   );

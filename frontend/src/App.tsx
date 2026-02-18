@@ -1,26 +1,23 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuthStore } from "./store/auth";
 import { useUnreadBadge } from "./hooks/useUnreadBadge";
 import { isStandalone } from "./lib/pwa";
+import { AlphaBannerModal } from "./components/AlphaBannerModal";
 
 // Lazy-loaded pages — каждая страница загружается отдельным чанком
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
-const Lending2Page = lazy(() => import("./pages/Lending2Page"));
-const Telegram3StepsLandingPage = lazy(() => import("./pages/Telegram3StepsLandingPage"));
-const BusinessChatRedirectPage = lazy(() => import("./pages/BusinessChatRedirectPage"));
 const MessengerPage = lazy(() => import("./pages/MessengerPage"));
 const JoinChatPage = lazy(() => import("./pages/JoinChatPage"));
-const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
-const SpravkaLayout = lazy(() => import("./pages/spravka/SpravkaLayout"));
-const SpravkaIndexPage = lazy(() => import("./pages/spravka/SpravkaIndexPage"));
-const SpravkaChatsPage = lazy(() => import("./pages/spravka/SpravkaChatsPage"));
-const SpravkaReferralPage = lazy(() => import("./pages/spravka/SpravkaReferralPage"));
-const SpravkaSecurityPage = lazy(() => import("./pages/spravka/SpravkaSecurityPage"));
-const SpravkaChannelsPage = lazy(() => import("./pages/spravka/SpravkaChannelsPage"));
-const SpravkaBotsPage = lazy(() => import("./pages/spravka/SpravkaBotsPage"));
+const WikiLayout = lazy(() => import("./pages/wiki/WikiLayout"));
+const WikiIndexPage = lazy(() => import("./pages/wiki/WikiIndexPage"));
+const WikiChatsPage = lazy(() => import("./pages/wiki/WikiChatsPage"));
+const WikiReferralPage = lazy(() => import("./pages/wiki/WikiReferralPage"));
+const WikiSecurityPage = lazy(() => import("./pages/wiki/WikiSecurityPage"));
+const WikiChannelsPage = lazy(() => import("./pages/wiki/WikiChannelsPage"));
+const WikiBotsPage = lazy(() => import("./pages/wiki/WikiBotsPage"));
 
 function JoinChatRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -42,18 +39,6 @@ function JoinChatRoute() {
   return <JoinChatPage />;
 }
 
-function StaticLandingRedirect() {
-  useEffect(() => {
-    window.location.replace("/landing/index.html");
-  }, []);
-
-  return (
-    <div className="flex items-center justify-center h-screen w-screen">
-      <div className="text-gray-600">Открываю лендинг…</div>
-    </div>
-  );
-}
-
 /** User is fully registered only when they have both tokens and a username. */
 function useFullyRegistered() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -66,33 +51,28 @@ function App() {
   const isFullyRegistered = useFullyRegistered();
   useUnreadBadge(!!isAuthenticated); // Updates document.title and favicon from unread store
 
+  const showAlphaBanner =
+    import.meta.env.VITE_ALPHA_BANNER_ENABLED === "true" && isFullyRegistered;
+
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-screen w-screen"><div className="w-8 h-8 border-3 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>}>
+      {showAlphaBanner && <AlphaBannerModal />}
       <Routes>
         <Route path="/" element={isStandalone() ? (isFullyRegistered ? <Navigate to="/chats" replace /> : <Navigate to="/auth" replace />) : <LandingPage />} />
-        <Route path="/lending2" element={<Lending2Page />} />
-        <Route path="/landing2" element={<Navigate to="/lending2" replace />} />
         <Route path="/auth" element={<AuthPage />} />
-        <Route path="/landing" element={<StaticLandingRedirect />} />
-        <Route path="/telegram-3-shaga" element={<Telegram3StepsLandingPage />} />
-        <Route path="/buisneschat" element={<BusinessChatRedirectPage />} />
-        <Route path="/spravka" element={<SpravkaLayout />}>
-          <Route index element={<SpravkaIndexPage />} />
-          <Route path="chats" element={<SpravkaChatsPage />} />
-          <Route path="referral" element={<SpravkaReferralPage />} />
-          <Route path="security" element={<SpravkaSecurityPage />} />
-          <Route path="channels" element={<SpravkaChannelsPage />} />
-          <Route path="bots" element={<SpravkaBotsPage />} />
+        <Route path="/wiki" element={<WikiLayout />}>
+          <Route index element={<WikiIndexPage />} />
+          <Route path="chats" element={<WikiChatsPage />} />
+          <Route path="referral" element={<WikiReferralPage />} />
+          <Route path="security" element={<WikiSecurityPage />} />
+          <Route path="channels" element={<WikiChannelsPage />} />
+          <Route path="bots" element={<WikiBotsPage />} />
         </Route>
         <Route path="/chats" element={isFullyRegistered ? <MessengerPage /> : <Navigate to="/auth" replace />} />
         <Route path="/chats/settings" element={isFullyRegistered ? <MessengerPage /> : <Navigate to="/auth" replace />} />
-        {/* Redirect old /dashboard URLs */}
-        <Route path="/dashboard" element={<Navigate to="/chats" replace />} />
-        <Route path="/dashboard/settings" element={<Navigate to="/chats/settings" replace />} />
         <Route path="/chat/:chatId" element={isFullyRegistered ? <MessengerPage /> : <Navigate to="/auth" replace />} />
         <Route path="/chat/join" element={<JoinChatRoute />} />
         <Route path="/chat/join/:slug" element={<JoinChatRoute />} />
-        <Route path="/settings" element={isFullyRegistered ? <SettingsPage /> : <Navigate to="/auth" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>

@@ -111,8 +111,10 @@ class SendCodeView(APIView):
                 return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
             return Response({"detail": "Не удалось отправить код. Попробуйте позже."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        # Default: Telegram Gateway (@VerificationCodes) first, then SMS fallback
-        tg_result = send_telegram_verification(phone, code)
+        # Сначала Telegram Gateway (официальный бот верификации), при ошибке API — 503, иначе fallback на SMS
+        tg_result, tg_error = send_telegram_verification(phone, code)
+        if tg_error:
+            return Response({"detail": tg_error}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         if tg_result is not None:
             set_otp_and_mark_sent(phone, code)
             return Response({"detail": "Код отправлен в Telegram.", "method": "telegram", "is_new": not user_exists})
