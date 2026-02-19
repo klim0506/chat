@@ -1,6 +1,15 @@
 import re
+from django.conf import settings as django_settings
 from rest_framework import serializers
 from .models import User, UserAvatar
+
+
+def _absolute_media_url(url: str) -> str:
+    """Если url относительный — вернуть путь от корня с MEDIA_URL."""
+    if not url or url.startswith("/") or url.startswith("http"):
+        return url or ""
+    media = (django_settings.MEDIA_URL or "/media/").rstrip("/")
+    return f"{media}/{url.lstrip('/')}"
 
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 
@@ -104,6 +113,7 @@ class UserSerializer(serializers.ModelSerializer):
                     url = request_uri(url)
                 except Exception:
                     pass
+            url = _absolute_media_url(url)
             result.append({"id": a.id, "url": url, "order": a.order})
         if not result and obj.avatar:
             try:
@@ -113,6 +123,7 @@ class UserSerializer(serializers.ModelSerializer):
                         url = request_uri(url)
                     except Exception:
                         pass
+                url = _absolute_media_url(url)
                 result.append({"id": "legacy", "url": url, "order": 0})
             except (ValueError, OSError):
                 pass

@@ -289,7 +289,9 @@ export default function MessengerPage() {
           const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
           playSound(isMention ? "mention" : "receive");
-          showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {});
+          showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {}, {
+            chatId: data.chat_id,
+          });
         }
       }
     }
@@ -1206,7 +1208,7 @@ export default function MessengerPage() {
             </div>
           </>
         ) : activeChatId ? (
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col h-[100dvh] max-h-[100dvh] md:h-auto md:max-h-none">
             <ChatPage
               key={activeChatId}
               chatId={activeChatId}

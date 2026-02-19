@@ -5,7 +5,7 @@ import App from "./App";
 import "./index.css";
 import { usePreferencesStore } from "./store/preferences";
 
-const faviconUrl = "/ico_png_ai_16x16.ico";
+const faviconUrl = "/icons/icon-96x96.png";
 
 function syncDocumentPrefs() {
   const { theme, language } = usePreferencesStore.getState();

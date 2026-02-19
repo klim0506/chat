@@ -300,6 +300,17 @@ code {
   margin: 14px 0 18px;
 }
 
+.hero__downloads {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 18px;
+}
+
+.hero__downloads .btn {
+  font-size: 14px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -364,6 +375,13 @@ code {
 
 .btn--tiny {
   padding: 10px 12px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.btn--small {
+  padding: 10px 14px;
   border-radius: 14px;
   font-weight: 600;
   font-size: 13px;
