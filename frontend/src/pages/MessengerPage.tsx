@@ -252,16 +252,17 @@ export default function MessengerPage() {
       return;
     }
 
-    if (data.type === "new_message") {
+    if (data.type === "new_message" && data.chat_id) {
+      const chatId = data.chat_id;
       const preview = data.message ? formatMessagePreview(data.message, lang) : undefined;
       const currentChats = useChatListStore.getState().chats;
-      const found = currentChats.some((c) => c.id === data.chat_id);
+      const found = currentChats.some((c) => c.id === chatId);
 
       if (found) {
         // Update existing chat in store; auto-unarchive when new message arrives (Telegram-style)
-        const isActive = data.chat_id === activeChatId;
-        const chat = currentChats.find((c) => c.id === data.chat_id);
-        storeUpdateChat(data.chat_id, {
+        const isActive = chatId === activeChatId;
+        const chat = currentChats.find((c) => c.id === chatId);
+        storeUpdateChat(chatId, {
           unread_count: isActive
             ? (chat?.unread_count || 0)
             : (chat?.unread_count || 0) + 1,
@@ -269,9 +270,9 @@ export default function MessengerPage() {
           ...(chat?.is_archived ? { is_archived: false } : {}),
         });
       } else {
-        chatsApi.get(data.chat_id).then((res) => {
+        chatsApi.get(chatId).then((res) => {
           storeUpsertChat(res.data, {
-            unread_count: activeChatId === data.chat_id ? res.data.unread_count : (res.data.unread_count || 0) + 1,
+            unread_count: activeChatId === chatId ? res.data.unread_count : (res.data.unread_count || 0) + 1,
             last_message_preview: preview ?? res.data.last_message_preview,
           });
         }).catch(() => {
@@ -279,7 +280,7 @@ export default function MessengerPage() {
         });
       }
       if (!data.is_muted) {
-        const isActive = data.chat_id === activeChatId;
+        const isActive = chatId === activeChatId;
         const tabVisible = !document.hidden;
         // Skip sound & notification if ChatPage's chat WS already handles it
         if (isActive && tabVisible) { /* ChatPage plays sound via chat WS */ } else {
@@ -289,7 +290,9 @@ export default function MessengerPage() {
           const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
           playSound(isMention ? "mention" : "receive");
-          showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {});
+          showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {}, {
+            chatId,
+          });
         }
       }
     }
@@ -827,7 +830,9 @@ export default function MessengerPage() {
       >
         {/* Sidebar header */}
         <div className="border-b px-4 py-3 flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-slate-800 flex-1">{t("messenger.chats")}</h1>
+          <h1 className="flex-1 flex items-center min-w-0">
+            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("messenger.chats")} className="h-7 w-auto object-contain" />
+          </h1>
           <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors" title={t("dashboard.createChat")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
@@ -1037,42 +1042,40 @@ export default function MessengerPage() {
                               }`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                               </div>
-                            ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
-                              <>
-                                <img
-                                  src={
-                                    withPreviewParams(
-                                      toSameOriginMediaUrl(
-                                        chat.is_personal && chat.other_member
-                                          ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
-                                          : chat.avatar_url
-                                      ),
-                                      96
-                                    ) || ""
-                                  }
-                                  alt=""
-                                  className="w-12 h-12 rounded-full object-cover"
-                                  loading="lazy"
-                                  decoding="async"
-                                  onError={(e) => { const img = e.currentTarget; img.style.display = 'none'; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ''; }}
-                                />
-                                <div style={{ display: 'none' }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                            ) : (() => {
+                              const rawUrl = chat.is_personal && chat.other_member
+                                ? (chat.other_member.avatar_url ?? chat.other_member.avatar)
+                                : chat.avatar_url;
+                              const src = rawUrl ? (withPreviewParams(toSameOriginMediaUrl(rawUrl), 96) ?? "") : "";
+                              const showImg = Boolean(src);
+                              return showImg ? (
+                                <>
+                                  <img
+                                    src={src}
+                                    alt=""
+                                    className="w-12 h-12 rounded-full object-cover"
+                                    loading="lazy"
+                                    decoding="async"
+                                    onError={(e) => { const img = e.currentTarget; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ""; }}
+                                  />
+                                  <div style={{ display: "none" }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                                    isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
+                                  }`}>
+                                    {chat.is_personal && chat.other_member
+                                      ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
+                                      : getAvatarInitials(chat.title || "Ч")}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
                                   isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                 }`}>
                                   {chat.is_personal && chat.other_member
                                     ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
                                     : getAvatarInitials(chat.title || "Ч")}
                                 </div>
-                              </>
-                            ) : (
-                              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
-                                isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
-                              }`}>
-                                {chat.is_personal && chat.other_member
-                                  ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
-                                  : getAvatarInitials(chat.title || "Ч")}
-                              </div>
-                            )}
+                              );
+                            })()}
                             {chat.is_personal && chat.other_member?.is_online && (
                               <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
                             )}
@@ -1206,7 +1209,7 @@ export default function MessengerPage() {
             </div>
           </>
         ) : activeChatId ? (
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col h-[100dvh] max-h-[100dvh] md:h-auto md:max-h-none">
             <ChatPage
               key={activeChatId}
               chatId={activeChatId}

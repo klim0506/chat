@@ -41,23 +41,56 @@ export function getNotificationBody(message: {
   }
 }
 
-/** Показать уведомление о новом сообщении (если разрешено и браузер поддерживает) */
+const NOTIFICATION_ICON = "/icons/icon-192x192.png";
+
+/**
+ * Показать уведомление о новом сообщении.
+ * На мобильном PWA использует Service Worker (reg.showNotification), чтобы пуш
+ * приходил на телефон даже при свёрнутом или фоновом приложении.
+ */
 export function showMessageNotification(
   chatTitle: string,
   message: { msg_type?: string; content?: string; sender_display_name?: string },
-  options?: { icon?: string }
+  options?: { icon?: string; chatId?: string }
 ): void {
   if (!NOTIFICATIONS_SUPPORTED || Notification.permission !== "granted") return;
-  try {
-    const n = new Notification(chatTitle || "Новое сообщение", {
-      body: getNotificationBody(message),
-      icon: options?.icon ?? "/logo2_not_height_png_ai.png",
-    });
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
-  } catch {
-    // ignore
-  }
+  const title = chatTitle || "Новое сообщение";
+  const body = getNotificationBody(message);
+  const icon = options?.icon ?? NOTIFICATION_ICON;
+  const chatId = options?.chatId;
+  const url = chatId ? `/chat/${chatId}` : "/chats";
+
+  const showViaSW = async () => {
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg) {
+        await reg.showNotification(title, {
+          body,
+          icon,
+          badge: icon,
+          tag: chatId ? `msg-${chatId}` : "message",
+          data: { url },
+        } as NotificationOptions);
+        return;
+      }
+    } catch {
+      /* fallback to page Notification */
+    }
+    try {
+      const n = new Notification(title, { body, icon });
+      n.onclick = () => {
+        window.focus();
+        try {
+          window.location.href = url;
+        } catch {
+          /* ignore */
+        }
+        n.close();
+      };
+    } catch {
+      /* ignore */
+    }
+  };
+
+  showViaSW();
 }

@@ -7,12 +7,14 @@
 import sharp from "sharp";
 import path from "path";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Default to an existing 512x512 icon in the repo.
-// If you have a better brand logo, point SOURCE to it.
-const SOURCE = path.resolve(__dirname, "../public/icons/icon-512x512.png");
+// Pingy app icon: prefer public/pingy.png, fallback to logo.
+const pingyPath = path.resolve(__dirname, "../public/pingy.png");
+const logoPath = path.resolve(__dirname, "../public/logo2_not_height_png_ai.png");
+const SOURCE = existsSync(pingyPath) ? pingyPath : logoPath;
 const OUT_DIR = path.resolve(__dirname, "../public/icons");
 
 const sizes = [48, 72, 96, 128, 144, 152, 192, 384, 512];

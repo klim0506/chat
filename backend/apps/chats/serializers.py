@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 from .models import Chat, ChatMember, Message, MessageReaction, ScheduledMessage, UserPinnedMessage, ChatPinnedMessage, REACTION_EMOJIS, DEFAULT_MAX_MEMBERS
 from apps.files.serializers import FileAttachmentSerializer
@@ -133,18 +134,18 @@ class ChatSerializer(serializers.ModelSerializer):
     def get_avatar_url(self, obj):
         if not obj.avatar:
             return None
+        from apps.files.protected_media import make_protected_media_url
         request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(obj.avatar.url)
-        return obj.avatar.url
+        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
+        return make_protected_media_url(obj.avatar.name, request, base_url=base or None)
 
     def get_background_url(self, obj):
         if not obj.background:
             return None
+        from apps.files.protected_media import make_protected_media_url
         request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(obj.background.url)
-        return obj.background.url
+        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
+        return make_protected_media_url(obj.background.name, request, base_url=base or None)
 
     def get_other_member(self, obj):
         """Для личного чата (2 активных участника) — тот, с кем ведётся переписка."""

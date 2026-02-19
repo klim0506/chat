@@ -18,6 +18,8 @@ const WikiReferralPage = lazy(() => import("./pages/wiki/WikiReferralPage"));
 const WikiSecurityPage = lazy(() => import("./pages/wiki/WikiSecurityPage"));
 const WikiChannelsPage = lazy(() => import("./pages/wiki/WikiChannelsPage"));
 const WikiBotsPage = lazy(() => import("./pages/wiki/WikiBotsPage"));
+const DesktopDownloadPage = lazy(() => import("./pages/DesktopDownloadPage"));
+const AndroidDownloadPage = lazy(() => import("./pages/AndroidDownloadPage"));
 
 function JoinChatRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -60,6 +62,8 @@ function App() {
       <Routes>
         <Route path="/" element={isStandalone() ? (isFullyRegistered ? <Navigate to="/chats" replace /> : <Navigate to="/auth" replace />) : <LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/downloads/desktop" element={<DesktopDownloadPage />} />
+        <Route path="/downloads/android" element={<AndroidDownloadPage />} />
         <Route path="/wiki" element={<WikiLayout />}>
           <Route index element={<WikiIndexPage />} />
           <Route path="chats" element={<WikiChatsPage />} />

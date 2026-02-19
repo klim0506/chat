@@ -306,20 +306,25 @@ class MeAvatarsView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def get(self, request):
+        from apps.files.protected_media import make_protected_media_url
+
         avatars = UserAvatar.objects.filter(user=request.user).order_by("order", "id")
         data = []
-        request_uri = getattr(request, "build_absolute_uri", None)
         for a in avatars:
-            url = a.image.url
-            if request_uri:
-                url = request_uri(url)
-            data.append({"id": a.id, "url": url, "order": a.order})
-        # Legacy: если есть User.avatar, но нет в галерее — добавить первым
+            try:
+                if a.image:
+                    url = make_protected_media_url(a.image.name, request)
+                    if url:
+                        data.append({"id": a.id, "url": url, "order": a.order})
+            except (ValueError, OSError):
+                continue
         if request.user.avatar and not avatars.exists():
-            url = request.user.avatar.url
-            if request_uri:
-                url = request_uri(url)
-            data.append({"id": "legacy", "url": url, "order": 0})
+            try:
+                url = make_protected_media_url(request.user.avatar.name, request)
+                if url:
+                    data.append({"id": "legacy", "url": url, "order": 0})
+            except (ValueError, OSError):
+                pass
         return Response(data)
 
     def post(self, request):
@@ -339,9 +344,8 @@ class MeAvatarsView(APIView):
             )["m"] or -1
         )
         obj = UserAvatar.objects.create(user=request.user, image=file_obj, order=max_order + 1)
-        url = obj.image.url
-        if getattr(request, "build_absolute_uri", None):
-            url = request.build_absolute_uri(url)
+        from apps.files.protected_media import make_protected_media_url
+        url = make_protected_media_url(obj.image.name, request) or ""
         return Response({"id": obj.id, "url": url, "order": obj.order}, status=status.HTTP_201_CREATED)
 
 
@@ -416,19 +420,8 @@ class UserSearchView(APIView):
                 "id": str(u.id),
                 "username": u.username,
                 "display_name": u.display_name or u.username or "",
-                "avatar_url": None,
+                "avatar_url": u.get_avatar_url(request),
             }
-            if u.avatar:
-                try:
-                    url = u.avatar.url
-                    if getattr(request, "build_absolute_uri", None):
-                        try:
-                            url = request.build_absolute_uri(url)
-                        except Exception:
-                            pass
-                    data["avatar_url"] = url
-                except (ValueError, OSError):
-                    pass
             results.append(data)
         return Response({"results": results})
 

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { db } from "../lib/db";
+import { isStandalone } from "../lib/pwa";
 
 interface AuthUser {
   id: string;
@@ -74,7 +75,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "auth-storage",
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() =>
+        isStandalone() ? localStorage : sessionStorage
+      ),
     }
   )
 );

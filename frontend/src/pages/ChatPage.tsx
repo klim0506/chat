@@ -618,52 +618,24 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
   return text.length > 60 ? text.slice(0, 60) + "…" : text;
 }
 
-/** Видео с автовоспроизведением при появлении в зоне видимости (muted для обхода политики браузера). */
+/** Видео в сообщении: без автопроигрывания. Показ первого кадра; воспроизведение по клику (открывается лайтбокс или управление в компоненте). */
 function InlineAutoplayVideo({
   src,
   className = "",
-  controls = true,
 }: {
   src: string;
   className?: string;
   controls?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    const container = containerRef.current;
-    if (!el || !container) return;
-    try { el.load(); } catch {}
-    const io = new IntersectionObserver(
-      (entries) => {
-        const e = entries[0];
-        if (!e) return;
-        if (e.isIntersecting) {
-          el.muted = true;
-          el.play().catch(() => {});
-        } else {
-          el.pause();
-        }
-      },
-      { threshold: 0.25, rootMargin: "50px" }
-    );
-    io.observe(container);
-    return () => io.disconnect();
-  }, [src]);
-
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <video
         ref={videoRef}
         src={src}
         className={className}
         preload="metadata"
         playsInline
-        muted
-        loop
-        controls={controls}
       />
     </div>
   );
@@ -2913,8 +2885,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           </div>
         )}
 
-        {/* Header */}
-      <header className="border-b bg-white px-4 py-2 flex items-center gap-4">
+        {/* Header — sticky on mobile so it stays visible when keyboard opens */}
+      <header className="sticky top-0 z-30 shrink-0 border-b bg-white px-4 py-2 flex items-center gap-4">
           {onBack && (
             <button
               type="button"
@@ -6654,7 +6626,7 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
     };
   }, [src, syncDuration]);
 
-  /* Автовоспроизведение при появлении в зоне видимости (muted) */
+  /* При уходе из зоны видимости — ставим на паузу и сбрасываем звук */
   useEffect(() => {
     const el = videoRef.current;
     const container = containerRef.current;
@@ -6663,15 +6635,9 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
       (entries) => {
         const e = entries[0];
         if (!e) return;
-        if (e.isIntersecting) {
-          // Autoplay should stay muted unless the user taps the circle.
-          if (!muted) return;
-          el.muted = true;
-          el.play().then(() => setPlaying(true)).catch(() => {});
-        } else {
+        if (!e.isIntersecting) {
           el.pause();
           setPlaying(false);
-          // Leaving viewport: revert to muted autoplay behavior; also release "sound ownership".
           if (!muted) {
             el.muted = true;
             setMuted(true);
@@ -6688,7 +6654,7 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    // If it's playing muted (autoplay), first click should enable sound.
+    // Если уже играет без звука — по клику включаем звук.
     if (!v.paused && muted) {
       exclusiveSound.request(ownerId);
       v.muted = false;

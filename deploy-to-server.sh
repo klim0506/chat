@@ -2,8 +2,8 @@
 # Deploy script for chat server - run as root on 109.172.100.103
 set -e
 
-echo "=== Step 2: Clone repo ==="
-cd /root && git clone https://github.com/klim0506/chat.git chat-repo
+echo "=== Step 2: Clone repo (branch release/v1-prod) ==="
+cd /root && rm -rf chat-repo && git clone -b release/v1-prod --depth 1 https://github.com/klim0506/chat.git chat-repo
 
 echo "=== Step 3: Copy files ==="
 cp -r /root/chat-repo/backend/* /root/chat-app/backend/

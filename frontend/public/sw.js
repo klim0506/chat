@@ -30,6 +30,26 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// ─── Push / notification click (для пуш-уведомлений о новых сообщениях) ─
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = event.notification.data?.url || "/chats";
+  const fullUrl = new URL(path, self.location.origin).href;
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        const appClient = clientList.find((c) => c.url.startsWith(self.registration.scope));
+        if (appClient) {
+          appClient.navigate(fullUrl);
+          appClient.focus();
+        } else if (self.clients.openWindow) {
+          self.clients.openWindow(fullUrl);
+        }
+      })
+  );
+});
+
 // ─── Fetch strategy ────────────────────────────────────────────────────
 self.addEventListener("fetch", (event) => {
   const { request } = event;
