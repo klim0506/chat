@@ -69,9 +69,8 @@ export function showMessageNotification(
           icon,
           badge: icon,
           tag: chatId ? `msg-${chatId}` : "message",
-          renotify: true,
           data: { url },
-        });
+        } as NotificationOptions);
         return;
       }
     } catch {

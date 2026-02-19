@@ -252,16 +252,17 @@ export default function MessengerPage() {
       return;
     }
 
-    if (data.type === "new_message") {
+    if (data.type === "new_message" && data.chat_id) {
+      const chatId = data.chat_id;
       const preview = data.message ? formatMessagePreview(data.message, lang) : undefined;
       const currentChats = useChatListStore.getState().chats;
-      const found = currentChats.some((c) => c.id === data.chat_id);
+      const found = currentChats.some((c) => c.id === chatId);
 
       if (found) {
         // Update existing chat in store; auto-unarchive when new message arrives (Telegram-style)
-        const isActive = data.chat_id === activeChatId;
-        const chat = currentChats.find((c) => c.id === data.chat_id);
-        storeUpdateChat(data.chat_id, {
+        const isActive = chatId === activeChatId;
+        const chat = currentChats.find((c) => c.id === chatId);
+        storeUpdateChat(chatId, {
           unread_count: isActive
             ? (chat?.unread_count || 0)
             : (chat?.unread_count || 0) + 1,
@@ -269,9 +270,9 @@ export default function MessengerPage() {
           ...(chat?.is_archived ? { is_archived: false } : {}),
         });
       } else {
-        chatsApi.get(data.chat_id).then((res) => {
+        chatsApi.get(chatId).then((res) => {
           storeUpsertChat(res.data, {
-            unread_count: activeChatId === data.chat_id ? res.data.unread_count : (res.data.unread_count || 0) + 1,
+            unread_count: activeChatId === chatId ? res.data.unread_count : (res.data.unread_count || 0) + 1,
             last_message_preview: preview ?? res.data.last_message_preview,
           });
         }).catch(() => {
@@ -279,7 +280,7 @@ export default function MessengerPage() {
         });
       }
       if (!data.is_muted) {
-        const isActive = data.chat_id === activeChatId;
+        const isActive = chatId === activeChatId;
         const tabVisible = !document.hidden;
         // Skip sound & notification if ChatPage's chat WS already handles it
         if (isActive && tabVisible) { /* ChatPage plays sound via chat WS */ } else {
@@ -290,7 +291,7 @@ export default function MessengerPage() {
           const isMention = identifiers.some((id) => new RegExp(`@${escapeRegex(id)}\\b`, "i").test(content));
           playSound(isMention ? "mention" : "receive");
           showMessageNotification(data.chat_title || t("dashboard.newMessage"), data.message || {}, {
-            chatId: data.chat_id,
+            chatId,
           });
         }
       }

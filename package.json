@@ -20,6 +20,7 @@
     "run:all": "concurrently -k -n backend,frontend,worker,beat -c yellow,blue,green,magenta \"npm run run:backend\" \"npm run run:frontend\" \"npm run run:worker\" \"npm run run:beat\"",
     "desktop:dev": "cd desktop && npm run dev",
     "desktop:build": "cd desktop && npm run build:win",
+    "downloads:copy": "node scripts/copy-desktop-download.js",
     "android:build": "cd android && build-apk.bat"
   },
   "dependencies": {

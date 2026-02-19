@@ -115,7 +115,7 @@ export default function DashboardPage() {
           c.id === data.chat_id ? { ...c, unread_count: (c.unread_count || 0) + 1 } : c
         )
       );
-      useUnreadStore.getState().incrementUnread(data.chat_id);
+      if (data.chat_id) useUnreadStore.getState().incrementUnread(data.chat_id);
       if (!data.is_muted) {
         const content = (data.message?.content as string) || "";
         const me = useAuthStore.getState().user;

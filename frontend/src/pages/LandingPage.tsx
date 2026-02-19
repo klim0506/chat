@@ -226,7 +226,7 @@ export default function LandingPage() {
             <p className="text-slate-500 text-sm mb-10">
               {t("landing.hero.subdesc")}
             </p>
-            <div className="flex flex-wrap gap-3 justify-center">
+            <div className="flex flex-wrap gap-3 justify-center mb-12">
               {!isAuthenticated ? (
                 <Link
                   to="/auth"
@@ -248,23 +248,20 @@ export default function LandingPage() {
                   </svg>
                 </Link>
               )}
-              <a
-                href="https://github.com/klim0506/private-chats-desktop/releases/latest"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 border border-slate-300 text-slate-700 px-6 py-3 rounded-lg font-medium hover:bg-slate-50 transition-colors"
+              <Link
+                to="/downloads/desktop"
+                className="inline-flex items-center gap-2 border-2 border-blue-600 text-blue-600 px-6 py-3 rounded-lg font-medium hover:bg-blue-50 transition-colors"
               >
                 {t("landing.downloads.desktop")}
-              </a>
-              <a
-                href="https://play.google.com/store/apps/details?id=com.privatechats.app"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 border border-slate-300 text-slate-700 px-6 py-3 rounded-lg font-medium hover:bg-slate-50 transition-colors"
+              </Link>
+              <Link
+                to="/downloads/android"
+                className="inline-flex items-center gap-2 border-2 border-green-600 text-green-700 px-6 py-3 rounded-lg font-medium hover:bg-green-50 transition-colors"
               >
                 {t("landing.downloads.android")}
-              </a>
+              </Link>
             </div>
+            <p className="text-center text-slate-500 text-sm">{t("landing.downloads.subtitle")}</p>
           </div>
         </section>
 
@@ -350,12 +347,12 @@ export default function LandingPage() {
         <div className="container mx-auto px-4 max-w-4xl flex flex-col sm:flex-row justify-between items-center gap-3">
           <span className="text-slate-500 text-sm">{t("landing.footer.copy")}</span>
           <nav className="flex items-center gap-6 text-sm">
-            <a href="https://github.com/klim0506/private-chats-desktop/releases/latest" target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-700 transition-colors">
+            <Link to="/downloads/desktop" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.downloads.desktop")}
-            </a>
-            <a href="https://play.google.com/store/apps/details?id=com.privatechats.app" target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-700 transition-colors">
+            </Link>
+            <Link to="/downloads/android" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.downloads.android")}
-            </a>
+            </Link>
             <Link to="/wiki" className="text-slate-500 hover:text-slate-700 transition-colors">
               {t("landing.help")}
             </Link>

@@ -622,7 +622,6 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
 function InlineAutoplayVideo({
   src,
   className = "",
-  controls = true,
 }: {
   src: string;
   className?: string;
