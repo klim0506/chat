@@ -1,8 +1,8 @@
 /**
- * Инициалы для аватара: 2 символа, если название/имя из 2+ символов.
- * Несколько слов → первые буквы первых двух слов (Иван Петров → ИП).
- * Одно слово 2+ символов → первые 2 символа (Клим → Кл).
- * Одно слово 1 символ → 1 символ.
+ * Avatar initials: 2 characters when the name has 2+ characters.
+ * Multiple words → first letters of the first two words (e.g. John Doe → JD).
+ * Single word with 2+ characters → first 2 characters.
+ * Single word with 1 character → 1 character.
  */
 export function getAvatarInitials(name: string | null | undefined): string {
   const s = (name || "").trim();

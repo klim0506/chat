@@ -426,10 +426,10 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
 
         {!loading && user && (
           <div className="flex flex-col lg:flex-row gap-8">
-            {/* ===== Верх / левая колонка: Профиль + Настройки ===== */}
+            {/* ===== Top / left column: Profile + Settings ===== */}
             <div className="flex-1 min-w-0 order-1 space-y-6">
 
-            {/* ======== Блок 1: Профиль ======== */}
+            {/* ======== Block 1: Profile ======== */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <div className="p-5 border-b border-slate-100">
                 <h2 className="text-lg font-semibold text-slate-800">{t("settings.profile")}</h2>
@@ -529,14 +529,14 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
               </div>
             </div>
 
-            {/* ======== Блок 2: Настройки ======== */}
+            {/* ======== Block 2: Settings ======== */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <div className="p-5 border-b border-slate-100">
                 <h2 className="text-lg font-semibold text-slate-800">{t("settings.settingsTitle")}</h2>
               </div>
 
               <div className="p-5 space-y-4">
-                {/* Масштаб текста в сообщениях + превью «Привет!» */}
+                {/* Message text scale + preview */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.messageTextScale")}
@@ -557,7 +557,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   </div>
                 </div>
 
-                {/* Уведомления в браузере */}
+                {/* Browser notifications */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.notifications")}
@@ -642,7 +642,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   )}
                 </div>
 
-                {/* Звуки уведомлений */}
+                {/* Notification sounds */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.sounds")}
@@ -650,7 +650,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   <SoundsSection />
                 </div>
 
-                {/* Активные сессии */}
+                {/* Active sessions */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.activeSessions")}
@@ -658,7 +658,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   <SessionsSection />
                 </div>
 
-                {/* E2EE устройства */}
+                {/* E2EE devices */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.e2eeDevices")}
@@ -666,7 +666,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                   <E2eeDevicesSection />
                 </div>
 
-                {/* Приватность: показ времени последнего захода и номера телефона */}
+                {/* Privacy: last seen visibility and phone number display */}
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.privacy")}
@@ -825,9 +825,9 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
 
             </div>
 
-            {/* ===== Правая колонка: Подписка и реферальная история ===== */}
+            {/* ===== Right column: Subscription and referral history ===== */}
             <div className="w-full lg:w-80 shrink-0 space-y-6 order-2">
-              {/* Подписка */}
+              {/* Subscription */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
                   <h2 className="text-lg font-semibold text-slate-800">{t("settings.subscription")}</h2>
@@ -883,7 +883,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                 </div>
               </div>
 
-              {/* Реферальная программа — над звёздами */}
+              {/* Referral program — above stars */}
               {user.referral_code && (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                   <div className="p-5 border-b border-slate-100">
@@ -909,7 +909,7 @@ export default function SettingsPage({ embed = false }: { embed?: boolean }) {
                 </div>
               )}
 
-              {/* Звёзды и история операций */}
+              {/* Stars and transaction history */}
               <div className="bg-gradient-to-r from-amber-50 to-yellow-50 rounded-xl border border-amber-200 overflow-hidden">
                 <div className="p-5 border-b border-amber-100 flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-amber-900 flex items-center gap-2">

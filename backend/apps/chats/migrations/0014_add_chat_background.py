@@ -1,4 +1,4 @@
-# Фоновое изображение чата (настраивается в описании группы)
+# Chat background image (configurable in group description)
 
 from django.db import migrations, models
 

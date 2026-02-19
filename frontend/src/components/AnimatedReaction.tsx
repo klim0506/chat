@@ -22,7 +22,7 @@ export interface AnimatedReactionProps {
   /** Loop animation. Use true for picker. */
   loop?: boolean;
   className?: string;
-  /** Всегда показывать эмодзи (без Lottie) — надёжно в любом браузере. Использовать в пикере. */
+  /** Always show emoji (no Lottie) — reliable in any browser. Use in picker. */
   preferEmoji?: boolean;
 }
 

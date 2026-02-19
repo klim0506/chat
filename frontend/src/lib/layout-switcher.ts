@@ -1,12 +1,12 @@
 /**
- * Утилита для переключения раскладки клавиатуры EN ↔ RU.
+ * Utility for switching keyboard layout EN ↔ RU.
  *
- * Если пользователь набрал русские слова на английской раскладке
- * (например, "ghbdtn" вместо "привет"), эта функция конвертирует текст
- * в правильную раскладку и наоборот.
+ * If the user typed Russian words using the English layout
+ * (e.g. "ghbdtn" instead of "привет"), this function converts the text
+ * to the correct layout and vice versa.
  */
 
-/** Карта соответствия символов: клавиша QWERTY → символ в ЙЦУКЕН */
+/** Character mapping: QWERTY key → ЙЦУКЕН character */
 const EN_TO_RU: Record<string, string> = {
   q: "й", w: "ц", e: "у", r: "к", t: "е", y: "н", u: "г", i: "ш", o: "щ", p: "з",
   "[": "х", "]": "ъ", a: "ф", s: "ы", d: "в", f: "а", g: "п", h: "р", j: "о", k: "л",
@@ -20,25 +20,25 @@ const EN_TO_RU: Record<string, string> = {
   "@": '"', "#": "№", "$": ";", "^": ":", "&": "?",
 };
 
-/** Обратная карта: ЙЦУКЕН → QWERTY */
+/** Reverse mapping: ЙЦУКЕН → QWERTY */
 const RU_TO_EN: Record<string, string> = {};
 for (const [en, ru] of Object.entries(EN_TO_RU)) {
   RU_TO_EN[ru] = en;
 }
 
-/** Определяет, является ли символ кириллическим */
+/** Checks whether a character is Cyrillic */
 function isCyrillic(ch: string): boolean {
   const code = ch.charCodeAt(0);
   return (code >= 0x0400 && code <= 0x04FF) || ch === "ё" || ch === "Ё";
 }
 
-/** Определяет, является ли символ латинским */
+/** Checks whether a character is Latin */
 function isLatin(ch: string): boolean {
   const code = ch.charCodeAt(0);
   return (code >= 0x0041 && code <= 0x005A) || (code >= 0x0061 && code <= 0x007A);
 }
 
-/** Считает количество кириллических и латинских символов в строке */
+/** Counts Cyrillic and Latin characters in a string to detect the layout */
 function detectLayout(text: string): "ru" | "en" | "mixed" {
   let cyr = 0;
   let lat = 0;
@@ -52,14 +52,14 @@ function detectLayout(text: string): "ru" | "en" | "mixed" {
   return "mixed";
 }
 
-/** Конвертирует текст EN → RU (QWERTY → ЙЦУКЕН) */
+/** Converts text EN → RU (QWERTY → ЙЦУКЕН) */
 export function enToRu(text: string): string {
   return Array.from(text)
     .map((ch) => EN_TO_RU[ch] ?? ch)
     .join("");
 }
 
-/** Конвертирует текст RU → EN (ЙЦУКЕН → QWERTY) */
+/** Converts text RU → EN (ЙЦУКЕН → QWERTY) */
 export function ruToEn(text: string): string {
   return Array.from(text)
     .map((ch) => RU_TO_EN[ch] ?? ch)
@@ -67,10 +67,10 @@ export function ruToEn(text: string): string {
 }
 
 /**
- * Автоматически определяет раскладку и переключает:
- * - Если текст латиницей — конвертирует в кириллицу (EN→RU)
- * - Если текст кириллицей — конвертирует в латиницу (RU→EN)
- * - Если смешанный — пытается EN→RU
+ * Automatically detects the layout and switches:
+ * - Latin text → converts to Cyrillic (EN→RU)
+ * - Cyrillic text → converts to Latin (RU→EN)
+ * - Mixed → tries EN→RU
  */
 export function switchLayout(text: string): string {
   const layout = detectLayout(text);

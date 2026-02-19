@@ -30,7 +30,7 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// ─── Push / notification click (для пуш-уведомлений о новых сообщениях) ─
+// ─── Push / notification click (for push notifications about new messages) ─
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const path = event.notification.data?.url || "/chats";

@@ -20,17 +20,15 @@ apt install -y python3 python3-venv python3-pip nodejs npm nginx redis-server un
 
 ## 1. Подготовка архива (на своём ПК)
 
-В **корне проекта** (где лежат папки `backend`, `frontend` и файл `ТЕЛЕГА.ico`).
+В **корне проекта** (где лежат папки `backend`, `frontend`).
 
 ### Windows (PowerShell или Git Bash)
 
-Обязательно включите **ТЕЛЕГА.ico** — без него сборка фронта упадёт.
-
 ```bash
-tar --exclude=node_modules --exclude=backend/.venv --exclude=backend/__pycache__ --exclude="*/__pycache__" -czvf project.tar.gz backend frontend beautiful-vertical-landscape.jpg "ТЕЛЕГА.ico"
+tar --exclude=node_modules --exclude=backend/.venv --exclude=backend/__pycache__ --exclude="*/__pycache__" -czvf project.tar.gz backend frontend
 ```
 
-Если `tar` с кириллицей глючит, упакуйте вручную в ZIP: папки `backend`, `frontend`, файлы `beautiful-vertical-landscape.jpg` и `ТЕЛЕГА.ico`. Иконку потом можно загрузить отдельным архивом (см. ниже).
+Все статические ассеты (логотип, фон чата, иконки) находятся в `frontend/public/assets/`.
 
 ### Загрузка на сервер
 
@@ -43,7 +41,7 @@ scp project.tar.gz root@IP_СЕРВЕРА:/root/
 ```bash
 scp project.zip root@IP_СЕРВЕРА:/root/
 # Иконка отдельно (если не вошла в архив):
-# Создайте telega.zip с одним файлом ТЕЛЕГА.ico и: scp telega.zip root@IP:/root/chat-app/
+# При необходимости загрузите дополнительные ассеты в frontend/public/assets/
 ```
 
 ---
@@ -58,10 +56,10 @@ tar -xzf project.tar.gz -C chat-app
 # Если был ZIP:
 # unzip -o project.zip -d chat-app
 ls -la chat-app/
-# Должны быть: backend, frontend, beautiful-vertical-landscape.jpg, ТЕЛЕГА.ico
+# Должны быть: backend, frontend
 ```
 
-Если **ТЕЛЕГА.ico** не было в архиве — положите его в `/root/chat-app/` (отдельный ZIP распаковать в эту папку). Без него `npm run build` упадёт с ошибкой про `ТЕЛЕГА.ico?url`.
+Ассеты (логотип, фон чата) находятся в `frontend/public/assets/`. При первом клонировании там placeholder-файлы; замените их на реальные изображения при необходимости.
 
 ---
 
@@ -323,7 +321,7 @@ printf "  Redis: "; redis-cli ping
 | `CORS_ALLOWED_ORIGINS ... should not have path` | В `.env` убрать слэш в конце: `http://109.172.100.103`, не `http://109.172.100.103/` |
 | `EISDIR` при `vite build` (index.html) | В `index.html` убран `<link rel="canonical" href="/" />` — он приводил к попытке прочитать каталог. Используйте сборку из репозитория с этой правкой. |
 | `Cannot find module 'path'` / `__dirname` в vite.config | В `tsconfig.node.json` добавлено `"types": ["node"]`, в devDependencies — `@types/node`. Выполнить `npm install`. |
-| `Could not resolve ... ТЕЛЕГА.ico?url` | Файл `ТЕЛЕГА.ico` должен лежать в `/root/chat-app/` (рядом с `frontend`). Добавить в архив или загрузить отдельно и распаковать в chat-app. |
+| `Could not resolve ... default-chat-bg.jpg` | Скопируйте изображение фона в `frontend/public/assets/default-chat-bg.jpg` |
 | Открывается старый сайт, а не чат | Остановить Apache (или другой веб-сервер на 80): `systemctl stop apache2`. Либо в nginx отключить старый site в `sites-enabled`. |
 | `Unit chat-backend.service not found` | Создать unit-файлы вручную (см. раздел 7) и выполнить `systemctl daemon-reload`. |
 | Redis: `Connection refused` | Установить и запустить: `apt install redis-server && systemctl start redis-server`. |

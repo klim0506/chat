@@ -13,6 +13,6 @@ SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 
-# Тестовый клиент Django работает по HTTP; отключаем редирект только в test-run.
+# Django's test client uses HTTP; disable redirect only during test runs.
 if "test" in sys.argv:
     SECURE_SSL_REDIRECT = False

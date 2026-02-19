@@ -7,9 +7,9 @@
 Чтобы всё сделать автоматически одной командой:
 
 1. **Установите и запустите Docker Desktop** (если ещё не установлен): [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-2. В корне проекта выполните: **`start_postgres.bat`**
+2. В корне проекта выполните: **`scripts\win\start_postgres.bat`**
 
-Скрипт поднимет контейнер PostgreSQL, переключит `backend\.env` на использование БД и применит миграции. После этого запускайте приложение как обычно: `start.bat`.
+Скрипт поднимет контейнер PostgreSQL, переключит `backend\.env` на использование БД и применит миграции. После этого запускайте приложение: `scripts\win\start.bat`.
 
 Если хотите использовать **локально установленный PostgreSQL** (без Docker): установите PostgreSQL, создайте базу `chatdb` и пользователя `postgres`, в `backend\.env` укажите `USE_SQLITE=False` и `DATABASE_URL=postgres://postgres:ВАШ_ПАРОЛЬ@localhost:5432/chatdb` (порт 5432 — стандартный для локальной установки).
 

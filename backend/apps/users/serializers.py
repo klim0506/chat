@@ -23,7 +23,7 @@ def validate_username_format(value: str) -> str:
 
 class SendCodeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
-    method = serializers.ChoiceField(choices=["sms", "telegram"], required=False)  # при "sms" — только SMS, иначе сначала Telegram
+    method = serializers.ChoiceField(choices=["sms", "telegram"], required=False)  # "sms" — SMS only, otherwise try Telegram first
 
 
 class VerifyCodeSerializer(serializers.Serializer):

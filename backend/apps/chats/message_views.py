@@ -12,7 +12,7 @@ from apps.users.serializers import UserSerializer
 
 
 def _broadcast_message_updated(chat_id, message_data):
-    """Уведомить участников чата об обновлении сообщения (редакт или реакция)."""
+    """Notify chat members about a message update (edit or reaction)."""
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -25,7 +25,7 @@ def _broadcast_message_updated(chat_id, message_data):
 
 
 def _broadcast_new_message(chat_id, message_data):
-    """Уведомить участников чата о новом сообщении (forward и др.)."""
+    """Notify chat members about a new message (forward, etc.)."""
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -45,7 +45,7 @@ def _check_chat_member(request, chat_id):
 
 
 def _get_other_members_read(chat, request):
-    """Список других участников чата с last_read_at для расчёта read_status и read_by."""
+    """List of other chat members with last_read_at for computing read_status and read_by."""
     other_members_read = []
     for m in (
         ChatMember.objects.filter(chat=chat, status=ChatMember.Status.ACTIVE)
@@ -61,12 +61,12 @@ def _get_other_members_read(chat, request):
 
 class MessageListCreateView(APIView):
     """
-    GET: список сообщений с курсорной пагинацией.
-    Параметры:
-      - limit (int, default=50, max=100): количество сообщений
-      - before (ISO datetime): загрузить сообщения СТАРШЕ этой даты (скролл вверх)
-      - since  (ISO datetime): загрузить сообщения НОВЕЕ этой даты (delta-sync)
-    Ответ включает заголовок X-Has-More: true/false для индикации наличия более старых сообщений.
+    GET: message list with cursor-based pagination.
+    Parameters:
+      - limit (int, default=50, max=100): number of messages
+      - before (ISO datetime): load messages OLDER than this date (scroll up)
+      - since  (ISO datetime): load messages NEWER than this date (delta-sync)
+    Response includes X-Has-More: true/false header indicating whether older messages exist.
     """
 
     def get(self, request, chat_id):
@@ -97,20 +97,20 @@ class MessageListCreateView(APIView):
             since_dt = parse_datetime(since)
             if since_dt:
                 qs = qs.filter(created_at__gt=since_dt)
-            # Delta-sync всегда отдаёт от старых к новым, без пагинации
+            # Delta-sync always returns oldest to newest, no pagination
             messages = list(qs.order_by("created_at")[:limit])
             has_more = False
         elif before:
             before_dt = parse_datetime(before)
             if before_dt:
                 qs = qs.filter(created_at__lt=before_dt)
-            # Курсорная пагинация: берём N+1 самых новых из тех, что СТАРШЕ before,
-            # чтобы определить has_more, затем отдаём в хронологическом порядке
+            # Cursor pagination: take N+1 newest of those OLDER than before,
+            # to determine has_more, then return in chronological order
             messages_desc = list(qs.order_by("-created_at")[:limit + 1])
             has_more = len(messages_desc) > limit
             messages = list(reversed(messages_desc[:limit]))
         else:
-            # Первая загрузка: самые свежие N сообщений
+            # Initial load: most recent N messages
             messages_desc = list(qs.order_by("-created_at")[:limit + 1])
             has_more = len(messages_desc) > limit
             messages = list(reversed(messages_desc[:limit]))
@@ -131,7 +131,7 @@ class MessageListCreateView(APIView):
 
 
 class MessageDetailView(APIView):
-    """GET одного сообщения, PATCH — редактирование (только текст, только своё)."""
+    """GET a single message, PATCH — edit (text only, own messages only)."""
 
     def get(self, request, chat_id, message_id):
         chat, err = _check_chat_member(request, chat_id)
@@ -162,7 +162,7 @@ class MessageDetailView(APIView):
         return Response(data)
 
     def delete(self, request, chat_id, message_id):
-        """Мягкое удаление: только автор сообщения."""
+        """Soft delete: message author only."""
         chat, err = _check_chat_member(request, chat_id)
         if err is not None:
             return err
@@ -181,7 +181,7 @@ class MessageDetailView(APIView):
 
 
 class MessageReactionView(APIView):
-    """POST: переключить реакцию (body: { "emoji": "👍" }). До 3 реакций на пользователя на сообщение. Пустой emoji — снять все свои реакции."""
+    """POST: toggle a reaction (body: { "emoji": "👍" }). Up to 3 reactions per user per message. Empty emoji — remove all own reactions."""
 
     def post(self, request, chat_id, message_id):
         chat, err = _check_chat_member(request, chat_id)
@@ -218,8 +218,8 @@ class MessageReactionView(APIView):
 
 
 class MessagePinView(APIView):
-    """POST: закрепить сообщение для себя (scope=me) или для всех (scope=all). DELETE: открепить.
-    Multi-pin для всех: ChatPinnedMessage, лимит зависит от expansion_tier."""
+    """POST: pin a message for self (scope=me) or for all (scope=all). DELETE: unpin.
+    Multi-pin for all: ChatPinnedMessage, limit depends on expansion_tier."""
 
     def post(self, request, chat_id, message_id):
         chat, err = _check_chat_member(request, chat_id)
@@ -271,8 +271,87 @@ class MessagePinView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class MessageSearchView(APIView):
+    """GET: search messages in a chat. ?q=text&limit=20&offset=0
+    For secret (E2EE) chats, returns empty — search is client-side only."""
+
+    def get(self, request, chat_id):
+        chat, err = _check_chat_member(request, chat_id)
+        if err is not None:
+            return err
+        if chat.is_secret:
+            return Response([])
+        q = (request.query_params.get("q") or "").strip()
+        if not q or len(q) < 2:
+            return Response([])
+        try:
+            limit = min(int(request.query_params.get("limit", 20)), 50)
+        except (TypeError, ValueError):
+            limit = 20
+        try:
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        qs = (
+            Message.objects.filter(
+                chat=chat, is_deleted=False, is_encrypted=False,
+                content__icontains=q,
+            )
+            .select_related("sender", "file", "sender_device")
+            .order_by("-created_at")
+        )
+        total = qs.count()
+        messages = list(qs[offset:offset + limit])
+        other_members_read = _get_other_members_read(chat, request)
+        ctx = {"request": request, "other_members_read": other_members_read}
+        data = MessageSerializer(messages, many=True, context=ctx).data
+        return Response({"results": data, "total": total})
+
+
+class GlobalMessageSearchView(APIView):
+    """GET: search messages across all user's chats. ?q=text&limit=30
+    Only searches non-encrypted messages in chats the user belongs to."""
+
+    def get(self, request):
+        q = (request.query_params.get("q") or "").strip()
+        if not q or len(q) < 2:
+            return Response({"results": []})
+        try:
+            limit = min(int(request.query_params.get("limit", 30)), 50)
+        except (TypeError, ValueError):
+            limit = 30
+        my_chat_ids = ChatMember.objects.filter(
+            user=request.user, status=ChatMember.Status.ACTIVE,
+        ).values_list("chat_id", flat=True)
+        qs = (
+            Message.objects.filter(
+                chat_id__in=my_chat_ids,
+                is_deleted=False,
+                is_encrypted=False,
+                content__icontains=q,
+            )
+            .exclude(chat__is_secret=True)
+            .select_related("sender", "chat", "file", "sender_device")
+            .order_by("-created_at")[:limit]
+        )
+        results = []
+        for msg in qs:
+            results.append({
+                "id": str(msg.id),
+                "chat_id": str(msg.chat_id),
+                "chat_title": msg.chat.title,
+                "chat_is_personal": msg.chat.is_personal,
+                "sender_id": str(msg.sender_id),
+                "sender_name": msg.sender.display_name or msg.sender.phone,
+                "content": msg.content[:200],
+                "msg_type": msg.msg_type,
+                "created_at": msg.created_at.isoformat(),
+            })
+        return Response({"results": results})
+
+
 class ForwardMessageView(APIView):
-    """POST: переслать сообщение из одного чата в другой.
+    """POST: forward a message from one chat to another.
     Body: { "message_id": "<uuid>", "source_chat_id": "<uuid>" }
     """
 

@@ -11,9 +11,9 @@ import { existsSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Pingy app icon: prefer public/pingy.png, fallback to logo.
+// Pingy app icon: prefer public/pingy.png, fallback to assets/logo.png.
 const pingyPath = path.resolve(__dirname, "../public/pingy.png");
-const logoPath = path.resolve(__dirname, "../public/logo2_not_height_png_ai.png");
+const logoPath = path.resolve(__dirname, "../public/assets/logo.png");
 const SOURCE = existsSync(pingyPath) ? pingyPath : logoPath;
 const OUT_DIR = path.resolve(__dirname, "../public/icons");
 

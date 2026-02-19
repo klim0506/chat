@@ -1,4 +1,4 @@
-# Data migration: создать чат «Избранное» для всех пользователей, у которых его ещё нет
+# Data migration: create a Favorites chat for all users who don't have one yet
 
 from django.db import migrations
 
@@ -7,7 +7,7 @@ def create_favorites_for_users(apps, schema_editor):
     Chat = apps.get_model("chats", "Chat")
     User = apps.get_model("users", "User")
     ChatMember = apps.get_model("chats", "ChatMember")
-    # Логика из services.create_favorites_chat, но через historical models
+    # Logic from services.create_favorites_chat, but via historical models
     from apps.chats.utils import generate_slug, make_verification_code
     for user in User.objects.filter(is_active=True):
         if Chat.objects.filter(owner_id=user.id, is_favorites=True).exists():

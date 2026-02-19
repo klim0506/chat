@@ -7,7 +7,6 @@ const frontendRoot = process.cwd();
 const cacheFile = path.join(frontendRoot, ".asset-opt-cache.json");
 
 const targets = [
-  { dir: projectRoot, recursive: false },
   { dir: path.join(frontendRoot, "public"), recursive: true },
   { dir: path.join(frontendRoot, "src", "assets"), recursive: true },
 ];
@@ -90,7 +89,7 @@ async function main() {
   let afterBytes = 0;
 
   for (const filePath of uniqueFiles) {
-    const rel = path.relative(projectRoot, filePath).replaceAll("\\", "/");
+    const rel = path.relative(frontendRoot, filePath).replaceAll("\\", "/");
     const prevStats = await fs.stat(filePath);
     const prevFingerprint = getFingerprint(prevStats);
     if (cache[rel] === prevFingerprint) continue;

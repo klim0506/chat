@@ -1,13 +1,13 @@
 """
-Кастомное поле EncryptedTextField — прозрачное серверное шифрование.
+Custom EncryptedTextField — transparent server-side encryption.
 
-В базе данных хранится Fernet-шифротекст (base64).
-При чтении через ORM данные расшифровываются автоматически.
-Если ключ шифрования не настроен — поле ведёт себя как обычный TextField.
+Fernet ciphertext (base64) is stored in the database.
+Data is automatically decrypted when read through the ORM.
+If the encryption key is not configured, the field behaves like a regular TextField.
 
-Ключ получается через KMS-модуль (kms.py):
-  - DEV:  напрямую из MESSAGE_ENCRYPTION_KEY
-  - PROD: расшифровывается через KMS-провайдер (AWS, Yandex, Vault)
+The key is obtained via the KMS module (kms.py):
+  - DEV:  directly from MESSAGE_ENCRYPTION_KEY
+  - PROD: decrypted via a KMS provider (AWS, Yandex, Vault)
 """
 
 from django.db import models
@@ -17,7 +17,7 @@ _fernet_loaded = False
 
 
 def _get_fernet():
-    """Лениво создаём Fernet-инстанс при первом вызове."""
+    """Lazily create a Fernet instance on first call."""
     global _fernet, _fernet_loaded
     if _fernet_loaded:
         return _fernet
@@ -31,7 +31,7 @@ def _get_fernet():
 
 
 def encrypt_value(value: str) -> str:
-    """Шифрует строку. Если ключа нет — возвращает как есть."""
+    """Encrypt a string. If no key is configured, return as-is."""
     if not value:
         return value
     f = _get_fernet()
@@ -41,7 +41,7 @@ def encrypt_value(value: str) -> str:
 
 
 def decrypt_value(value: str) -> str:
-    """Расшифровывает строку. Если не удалось — возвращает как есть (для старых данных)."""
+    """Decrypt a string. If decryption fails, return as-is (for legacy unencrypted data)."""
     if not value:
         return value
     f = _get_fernet()
@@ -50,36 +50,36 @@ def decrypt_value(value: str) -> str:
     try:
         return f.decrypt(value.encode("utf-8")).decode("utf-8")
     except Exception:
-        # Не Fernet-токен (старые незашифрованные данные) — вернуть как есть
+        # Not a Fernet token (legacy unencrypted data) — return as-is
         return value
 
 
 class EncryptedTextField(models.TextField):
     """
-    TextField, который хранит данные в зашифрованном виде (Fernet / AES-128-CBC).
+    TextField that stores data in encrypted form (Fernet / AES-128-CBC).
 
-    - get_prep_value(): вызывается при записи в БД → шифрует
-    - from_db_value(): вызывается при чтении из БД → расшифровывает
-    - Миграции: Django видит это как обычный TextField (deconstruct возвращает TextField)
+    - get_prep_value(): called on DB write → encrypts
+    - from_db_value(): called on DB read → decrypts
+    - Migrations: Django sees this as a regular TextField (deconstruct returns TextField)
     """
 
     def get_prep_value(self, value):
-        """Шифруем перед записью в БД."""
+        """Encrypt before writing to DB."""
         value = super().get_prep_value(value)
         if value is None:
             return value
         return encrypt_value(str(value))
 
     def from_db_value(self, value, expression, connection):
-        """Расшифровываем при чтении из БД."""
+        """Decrypt when reading from DB."""
         if value is None:
             return value
         return decrypt_value(value)
 
     def deconstruct(self):
         """
-        Для миграций: представляем поле как обычный TextField,
-        чтобы не генерировать лишние миграции при рефакторинге.
+        For migrations: represent the field as a regular TextField
+        to avoid generating unnecessary migrations during refactoring.
         """
         name, path, args, kwargs = super().deconstruct()
         return name, "django.db.models.TextField", args, kwargs

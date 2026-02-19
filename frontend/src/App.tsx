@@ -5,7 +5,7 @@ import { useUnreadBadge } from "./hooks/useUnreadBadge";
 import { isStandalone } from "./lib/pwa";
 import { AlphaBannerModal } from "./components/AlphaBannerModal";
 
-// Lazy-loaded pages — каждая страница загружается отдельным чанком
+// Lazy-loaded pages — each page is loaded as a separate chunk
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const MessengerPage = lazy(() => import("./pages/MessengerPage"));
@@ -20,6 +20,8 @@ const WikiChannelsPage = lazy(() => import("./pages/wiki/WikiChannelsPage"));
 const WikiBotsPage = lazy(() => import("./pages/wiki/WikiBotsPage"));
 const DesktopDownloadPage = lazy(() => import("./pages/DesktopDownloadPage"));
 const AndroidDownloadPage = lazy(() => import("./pages/AndroidDownloadPage"));
+const Telegram3StepsLandingPage = lazy(() => import("./pages/Telegram3StepsLandingPage"));
+const Lending2Page = lazy(() => import("./pages/Lending2Page"));
 
 function JoinChatRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -64,6 +66,8 @@ function App() {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/downloads/desktop" element={<DesktopDownloadPage />} />
         <Route path="/downloads/android" element={<AndroidDownloadPage />} />
+        <Route path="/telegram-3-shaga" element={<Telegram3StepsLandingPage />} />
+        <Route path="/landing2" element={<Lending2Page />} />
         <Route path="/wiki" element={<WikiLayout />}>
           <Route index element={<WikiIndexPage />} />
           <Route path="chats" element={<WikiChatsPage />} />

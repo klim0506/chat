@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import User, UserAvatar, UserSession
+from apps.common.image_utils import compress_uploaded_image, AVATAR_MAX_DIM
 from .serializers import (
     SendCodeSerializer,
     VerifyCodeSerializer,
@@ -111,7 +112,7 @@ class SendCodeView(APIView):
                 return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
             return Response({"detail": "Не удалось отправить код. Попробуйте позже."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        # Сначала Telegram Gateway (официальный бот верификации), при ошибке API — 503, иначе fallback на SMS
+        # Try Telegram Gateway first (official verification bot); on API error — 503, otherwise fallback to SMS
         tg_result, tg_error = send_telegram_verification(phone, code)
         if tg_error:
             return Response({"detail": tg_error}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -154,7 +155,7 @@ class VerifyCodeView(APIView):
                 return Response({"detail": "Неверный код."}, status=status.HTTP_400_BAD_REQUEST)
             delete_otp(phone)
 
-        # Реферальная ссылка
+        # Referral link
         ref_code = request.data.get("ref", "").strip()
         referrer = None
         if ref_code:
@@ -181,7 +182,7 @@ class VerifyCodeView(APIView):
         if not user.is_active:
             return Response({"detail": "Аккаунт деактивирован."}, status=status.HTTP_403_FORBIDDEN)
 
-        # При первой регистрации можно задать username из тела запроса
+        # On first registration, username can be set from request body
         if created:
             raw_username = ser.validated_data.get("username") or request.data.get("username") or ""
             if raw_username and raw_username.strip():
@@ -198,7 +199,7 @@ class VerifyCodeView(APIView):
                     msg = e.detail[0] if isinstance(e.detail, list) else e.detail
                     return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Создаём подписку + начисляем звёзды + чат «Избранное» при первой регистрации
+        # Create subscription + award stars + Favorites chat on first registration
         if created:
             from apps.payments.services import create_subscription_for_user, award_referral_stars
             from apps.chats.services import create_favorites_chat
@@ -209,8 +210,11 @@ class VerifyCodeView(APIView):
 
         # Create session record for this login
         session = _create_session(request, user)
+        client = (request.META.get("HTTP_X_CLIENT") or "").strip().lower()
+        if client not in ("android", "desktop"):
+            client = "web"
         access = make_access_token(user.id, session.id)
-        refresh = make_refresh_token(user.id, session.id)
+        refresh = make_refresh_token(user.id, session.id, client_type=client)
 
         # Notify existing sessions about the new login (WS if online, SMS if offline)
         if not created:
@@ -280,7 +284,7 @@ MAX_AVATARS = 30
 
 
 class MeAvatarView(APIView):
-    """Legacy: одна аватарка. Оставлен для обратной совместимости."""
+    """Legacy: single avatar. Kept for backward compatibility."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
@@ -288,8 +292,9 @@ class MeAvatarView(APIView):
         file_obj = request.FILES.get("avatar")
         if not file_obj:
             return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
-        if file_obj.size > 5 * 1024 * 1024:  # 5 МБ
+        if file_obj.size > 5 * 1024 * 1024:  # 5 MB
             return Response({"detail": "Файл больше 5 МБ."}, status=status.HTTP_400_BAD_REQUEST)
+        file_obj = compress_uploaded_image(file_obj, max_dim=AVATAR_MAX_DIM)
         request.user.avatar = file_obj
         request.user.save(update_fields=["avatar"])
         return Response(UserSerializer(request.user, context={"request": request}).data)
@@ -301,7 +306,7 @@ class MeAvatarView(APIView):
 
 
 class MeAvatarsView(APIView):
-    """Галерея аватарок (до 30). GET — список, POST — добавить."""
+    """Avatar gallery (up to 30). GET — list, POST — add."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
@@ -330,7 +335,7 @@ class MeAvatarsView(APIView):
     def post(self, request):
         count = UserAvatar.objects.filter(user=request.user).count()
         if request.user.avatar and count == 0:
-            count = 1  # учёт legacy
+            count = 1  # account for legacy avatar
         if count >= MAX_AVATARS:
             return Response({"detail": f"Максимум {MAX_AVATARS} аватарок."}, status=status.HTTP_400_BAD_REQUEST)
         file_obj = request.FILES.get("avatar")
@@ -343,6 +348,7 @@ class MeAvatarsView(APIView):
                 m=models.Max("order")
             )["m"] or -1
         )
+        file_obj = compress_uploaded_image(file_obj, max_dim=AVATAR_MAX_DIM)
         obj = UserAvatar.objects.create(user=request.user, image=file_obj, order=max_order + 1)
         from apps.files.protected_media import make_protected_media_url
         url = make_protected_media_url(obj.image.name, request) or ""
@@ -350,7 +356,7 @@ class MeAvatarsView(APIView):
 
 
 class MeAvatarDetailView(APIView):
-    """DELETE — удалить, PATCH — изменить order."""
+    """DELETE — remove, PATCH — change order."""
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pk):
@@ -378,7 +384,7 @@ class MeAvatarDetailView(APIView):
 
 
 class MeAvatarsReorderView(APIView):
-    """POST { "order": [id1, id2, ...] } — изменить порядок."""
+    """POST { "order": [id1, id2, ...] } — reorder avatars."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -396,7 +402,7 @@ class MeAvatarsReorderView(APIView):
 
 
 class UserSearchView(APIView):
-    """Поиск пользователей по username/display_name для добавления в чат / «Написать»."""
+    """Search users by username/display_name for adding to chat or starting a DM."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -405,7 +411,7 @@ class UserSearchView(APIView):
             return Response({"results": []})
         if len(q) > 30:
             return Response({"results": []})
-        # Ищем по username (содержит) и display_name
+        # Search by username (contains) and display_name
         queryset = (
             User.objects.filter(
                 Q(username__icontains=q) | Q(display_name__icontains=q)

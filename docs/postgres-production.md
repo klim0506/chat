@@ -21,7 +21,7 @@
   ```
 - Backend и Celery подключаются к БД по внутреннему имени `db:5432` (см. `DATABASE_URL` в prod-композе).
 
-Подробнее по шагам — в комментариях в начале `docker-compose.prod.yml` и в `init-letsencrypt.sh`.
+Подробнее по шагам — в комментариях в начале `docker-compose.prod.yml` и в `scripts/init-letsencrypt.sh`.
 
 ---
 

@@ -8,7 +8,7 @@ from config.geo_views import CountryCodeView
 
 
 def redirect_join_to_frontend(request, _rest):
-    """Редирект пригласительной ссылки на фронтенд (при открытии /chat/join/... на бэкенде)."""
+    """Redirect invite link to frontend (when /chat/join/... is opened on the backend)."""
     base = getattr(settings, "FRONTEND_URL", "").rstrip("/")
     if not base:
         base = request.build_absolute_uri("/").rstrip("/")

@@ -1,19 +1,19 @@
 """
-Key Management Service (KMS) — получение ключа шифрования сообщений.
+Key Management Service (KMS) — message encryption key retrieval.
 
-Режимы работы (настройка через переменные окружения):
+Operating modes (configured via environment variables):
 
-1. DEV / тест: MESSAGE_ENCRYPTION_KEY задан напрямую в .env
-   → ключ используется как есть, KMS не нужен.
+1. DEV / test: MESSAGE_ENCRYPTION_KEY is set directly in .env
+   → the key is used as-is, no KMS needed.
 
 2. PROD: KMS_PROVIDER + MESSAGE_ENCRYPTION_KEY_ENCRYPTED
-   → зашифрованный ключ (DEK) расшифровывается через KMS при старте приложения.
-   → открытый ключ живёт только в памяти, никогда не попадает на диск.
+   → the encrypted key (DEK) is decrypted via KMS at application startup.
+   → the plaintext key lives only in memory, never written to disk.
 
-Поддерживаемые KMS-провайдеры:
-  - aws       — AWS KMS (требует boto3)
-  - yandex    — Yandex Cloud KMS (требует requests + IAM-токен)
-  - vault     — HashiCorp Vault Transit (требует requests)
+Supported KMS providers:
+  - aws       — AWS KMS (requires boto3)
+  - yandex    — Yandex Cloud KMS (requires requests + IAM token)
+  - vault     — HashiCorp Vault Transit (requires requests)
 """
 
 import base64
@@ -29,18 +29,18 @@ _cached_loaded = False
 
 def get_encryption_key() -> str:
     """
-    Возвращает Fernet-ключ шифрования сообщений.
+    Return the Fernet message encryption key.
 
-    Порядок:
-    1. Если MESSAGE_ENCRYPTION_KEY задан — используем напрямую (dev-режим).
-    2. Если KMS_PROVIDER задан — расшифровываем MESSAGE_ENCRYPTION_KEY_ENCRYPTED через KMS.
-    3. Иначе — пустая строка (шифрование отключено).
+    Priority:
+    1. If MESSAGE_ENCRYPTION_KEY is set — use it directly (dev mode).
+    2. If KMS_PROVIDER is set — decrypt MESSAGE_ENCRYPTION_KEY_ENCRYPTED via KMS.
+    3. Otherwise — empty string (encryption disabled).
     """
     global _cached_key, _cached_loaded
     if _cached_loaded:
         return _cached_key or ""
 
-    # 1. Прямой ключ (dev / тест)
+    # 1. Direct key (dev / test)
     direct_key = getattr(settings, "MESSAGE_ENCRYPTION_KEY", "")
     if direct_key:
         _cached_key = direct_key
@@ -48,7 +48,7 @@ def get_encryption_key() -> str:
         logger.info("Encryption key loaded from MESSAGE_ENCRYPTION_KEY (direct).")
         return _cached_key
 
-    # 2. KMS-провайдер (prod)
+    # 2. KMS provider (prod)
     provider = getattr(settings, "KMS_PROVIDER", "")
     encrypted_key = getattr(settings, "MESSAGE_ENCRYPTION_KEY_ENCRYPTED", "")
 
@@ -62,7 +62,7 @@ def get_encryption_key() -> str:
             logger.exception("Failed to decrypt encryption key via KMS provider '%s'.", provider)
             raise
 
-    # 3. Шифрование отключено
+    # 3. Encryption disabled
     _cached_loaded = True
     _cached_key = ""
     logger.warning("No MESSAGE_ENCRYPTION_KEY or KMS_PROVIDER configured — encryption disabled.")
@@ -70,7 +70,7 @@ def get_encryption_key() -> str:
 
 
 def _decrypt_via_kms(provider: str, encrypted_key_b64: str) -> str:
-    """Направляет зашифрованный DEK нужному KMS-провайдеру для расшифровки."""
+    """Route the encrypted DEK to the appropriate KMS provider for decryption."""
     providers = {
         "aws": _decrypt_aws_kms,
         "yandex": _decrypt_yandex_kms,
@@ -90,12 +90,12 @@ def _decrypt_via_kms(provider: str, encrypted_key_b64: str) -> str:
 
 def _decrypt_aws_kms(encrypted_key_b64: str) -> str:
     """
-    Расшифровка через AWS KMS.
+    Decrypt via AWS KMS.
 
-    Переменные окружения:
-      KMS_AWS_KEY_ID   — ARN или alias ключа KMS
-      AWS_REGION       — регион (по умолчанию us-east-1)
-      + стандартные AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY или IAM role)
+    Environment variables:
+      KMS_AWS_KEY_ID   — ARN or alias of the KMS key
+      AWS_REGION       — region (default us-east-1)
+      + standard AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY or IAM role)
     """
     try:
         import boto3  # type: ignore
@@ -125,11 +125,11 @@ def _decrypt_aws_kms(encrypted_key_b64: str) -> str:
 
 def _decrypt_yandex_kms(encrypted_key_b64: str) -> str:
     """
-    Расшифровка через Yandex Cloud KMS.
+    Decrypt via Yandex Cloud KMS.
 
-    Переменные окружения:
-      KMS_YANDEX_KEY_ID    — ID ключа в Yandex KMS
-      KMS_YANDEX_IAM_TOKEN — IAM-токен (или сервисный аккаунт на ВМ)
+    Environment variables:
+      KMS_YANDEX_KEY_ID    — key ID in Yandex KMS
+      KMS_YANDEX_IAM_TOKEN — IAM token (or service account on VM)
     """
     try:
         import requests  # type: ignore
@@ -163,13 +163,13 @@ def _decrypt_yandex_kms(encrypted_key_b64: str) -> str:
 
 def _decrypt_vault_transit(encrypted_key_b64: str) -> str:
     """
-    Расшифровка через HashiCorp Vault Transit secrets engine.
+    Decrypt via HashiCorp Vault Transit secrets engine.
 
-    Переменные окружения:
-      KMS_VAULT_ADDR     — URL Vault (например https://vault.example.com)
-      KMS_VAULT_TOKEN    — токен авторизации
-      KMS_VAULT_KEY_NAME — имя ключа Transit
-      KMS_VAULT_MOUNT    — mount path (по умолчанию 'transit')
+    Environment variables:
+      KMS_VAULT_ADDR     — Vault URL (e.g. https://vault.example.com)
+      KMS_VAULT_TOKEN    — authorization token
+      KMS_VAULT_KEY_NAME — Transit key name
+      KMS_VAULT_MOUNT    — mount path (default 'transit')
     """
     try:
         import requests  # type: ignore
@@ -190,7 +190,7 @@ def _decrypt_vault_transit(encrypted_key_b64: str) -> str:
             "when KMS_PROVIDER='vault'."
         )
 
-    # Vault Transit принимает ciphertext в формате vault:v1:base64...
+    # Vault Transit expects ciphertext in the format vault:v1:base64...
     ciphertext = f"vault:v1:{encrypted_key_b64}"
     url = f"{vault_addr.rstrip('/')}/v1/{mount}/decrypt/{key_name}"
     resp = requests.post(

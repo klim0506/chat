@@ -101,7 +101,7 @@ export default function DashboardPage() {
           try {
             new Notification(data.chat_title || chat.data.title, {
               body: t("notification.addedToGroup"),
-              icon: "/logo2_not_height_png_ai_transparent.png",
+              icon: "/assets/logo.png",
             });
           } catch { /* */ }
         }
@@ -127,7 +127,7 @@ export default function DashboardPage() {
           try {
             new Notification(data.chat_title || t("dashboard.newMessage"), {
               body: data.message?.content || t("common.fileMsg"),
-              icon: "/logo2_not_height_png_ai_transparent.png",
+              icon: "/assets/logo.png",
             });
           } catch { /* */ }
         }
@@ -163,7 +163,7 @@ export default function DashboardPage() {
     navigate("/auth");
   };
 
-  /** Предпросмотр чата по правому клику (не отмечает как прочитанное). */
+  /** Chat preview on right-click (does not mark as read). */
   const handleChatContextMenu = useCallback((e: React.MouseEvent, chat: Chat) => {
     e.preventDefault();
     e.stopPropagation();
@@ -257,7 +257,7 @@ export default function DashboardPage() {
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <Link to="/chats" aria-label={t("dashboard.title")} className="inline-flex items-center">
-            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
+            <img src="/assets/logo.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">{t("dashboard.createChat")}</button>
@@ -350,8 +350,13 @@ export default function DashboardPage() {
                               </svg>
                             )}
                           </div>
-                          <span className="text-slate-500 text-sm">
-                            {chat.is_personal ? t("dashboard.personalChat") : `${chat.members_count} / ${chat.max_members} · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}`}
+                          <span className="text-slate-500 text-sm flex items-center gap-1">
+                            {chat.is_secret && (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500 shrink-0" aria-hidden>
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                              </svg>
+                            )}
+                            {chat.is_secret ? t("secretChat.title") : chat.is_personal ? t("dashboard.personalChat") : `${chat.members_count} / ${chat.max_members} · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}`}
                           </span>
                         </div>
 
@@ -366,7 +371,7 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* Модалка: создать чат */}
+      {/* Modal: create chat */}
       <CreateChatModal
         isOpen={showCreateChatModal}
         onClose={() => setShowCreateChatModal(false)}
@@ -376,7 +381,7 @@ export default function DashboardPage() {
         }}
       />
 
-      {/* Предпросмотр чата (правый клик по чату; не отмечает как прочитанное) */}
+      {/* Chat preview (right-click on chat; does not mark as read) */}
       {preview && (
         <div
           ref={previewPopoverRef}

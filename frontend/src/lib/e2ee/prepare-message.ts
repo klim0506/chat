@@ -25,7 +25,7 @@ export async function prepareEncryptedMessage(
   plaintext: string,
   replyToId?: string
 ): Promise<EncryptedPayload | null> {
-  if (!chat?.is_personal || !chat.other_member?.id) return null;
+  if (!chat?.is_secret || !chat.other_member?.id) return null;
 
   const myDeviceId = await keyStorage.getCurrentDeviceId();
   if (myDeviceId == null) return null;

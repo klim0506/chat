@@ -40,7 +40,7 @@ class ChatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Chat
         fields = (
-            "id", "title", "description", "slug", "chat_type", "is_personal", "is_favorites", "max_members", "owner",
+            "id", "title", "description", "slug", "chat_type", "is_personal", "is_secret", "is_favorites", "max_members", "owner",
             "members_count", "invite_link", "is_active", "created_at", "last_message_at",
             "unread_count", "is_muted", "muted_until",
             "pin_order", "is_archived",
@@ -68,20 +68,20 @@ class ChatSerializer(serializers.ModelSerializer):
         return obj.effective_max_members
 
     def get_members_count(self, obj):
-        # Используем аннотацию из queryset, если доступна (избегаем N+1)
+        # Use annotation from queryset if available (avoid N+1)
         annotated = getattr(obj, "_members_count", None)
         if annotated is not None:
             return annotated
         return obj.members.filter(status=ChatMember.Status.ACTIVE).count()
 
     def get_chat_type(self, obj):
-        """У личного чата нет типа; только группы возвращают open/closed."""
+        """Personal chats have no type; only groups return open/closed."""
         if getattr(obj, "is_personal", False):
             return None
         return obj.chat_type
 
     def get_invite_link(self, obj):
-        """У личного чата и у «Избранное» нет ссылки-приглашения."""
+        """Personal chats and Favorites have no invite link."""
         if getattr(obj, "is_personal", False) or getattr(obj, "is_favorites", False):
             return None
         from django.conf import settings
@@ -148,11 +148,11 @@ class ChatSerializer(serializers.ModelSerializer):
         return make_protected_media_url(obj.background.name, request, base_url=base or None)
 
     def get_other_member(self, obj):
-        """Для личного чата (2 активных участника) — тот, с кем ведётся переписка."""
+        """For a personal chat (2 active members) — the other participant."""
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
-        # Используем уже prefetch'нутые members (через members__user), чтобы избежать доп. запроса
+        # Use already prefetched members (via members__user) to avoid extra query
         try:
             all_members = obj.members.all()
         except Exception:
@@ -177,7 +177,7 @@ class ChatSerializer(serializers.ModelSerializer):
         ]
 
     def get_pinned_message(self, obj):
-        """Первое (самое свежее) закреплённое для всех сообщение — backward compat."""
+        """First (most recent) pinned-for-all message — backward compat."""
         pins = self._get_all_pinned(obj)
         if pins:
             return pins[0]
@@ -204,14 +204,14 @@ class ChatSerializer(serializers.ModelSerializer):
         ]
 
     def get_pinned_messages(self, obj):
-        """Все закреплённые для всех сообщения (упорядочены по pin_order desc)."""
+        """All pinned-for-all messages (ordered by pin_order desc)."""
         return self._get_all_pinned(obj)
 
     def get_max_pins(self, obj):
         return obj.max_pins
 
     def get_my_pinned_messages(self, obj):
-        """Список сообщений, закреплённых текущим пользователем для себя."""
+        """List of messages pinned by the current user for themselves."""
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return []
@@ -229,8 +229,8 @@ class ChatSerializer(serializers.ModelSerializer):
         ]
 
     def get_last_message_preview(self, obj):
-        """Превью последнего сообщения для списка чатов (текст до ~60 символов или метка типа)."""
-        # Используем prefetch из queryset, если доступен (избегаем N+1)
+        """Preview of the last message for the chat list (text up to ~60 chars or type label)."""
+        # Use prefetch from queryset if available (avoid N+1)
         prefetched = getattr(obj, "_prefetched_last_message", None)
         if prefetched is not None:
             msg = prefetched[0] if prefetched else None
@@ -259,7 +259,7 @@ class ChatSerializer(serializers.ModelSerializer):
         return text[:60] + ("…" if len(text) > 60 else "")
 
     def get_last_message_at(self, obj):
-        """Время последнего не удалённого сообщения (для сортировки списка чатов)."""
+        """Timestamp of the last non-deleted message (for chat list sorting)."""
         at = getattr(obj, "_last_message_at", None)
         return at.isoformat() if at else None
 
@@ -375,7 +375,7 @@ class MessageSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "chat", "sender", "created_at", "edited_at", "is_deleted", "files")
 
     def get_read_status(self, obj):
-        """Для своих сообщений: 'delivered' (1 галочка) или 'read' (2 галочки). Две галочки — если хотя бы один другой участник прочитал (last_read_at >= created_at)."""
+        """For own messages: 'delivered' (1 checkmark) or 'read' (2 checkmarks). Two checkmarks if at least one other member has read it (last_read_at >= created_at)."""
         request = self.context.get("request")
         if not request or not request.user.is_authenticated or obj.sender_id != request.user.id:
             return None
@@ -390,7 +390,7 @@ class MessageSerializer(serializers.ModelSerializer):
             return "delivered"
 
     def get_read_by(self, obj):
-        """Для своих сообщений: список пользователей, которые прочитали это сообщение (last_read_at >= created_at)."""
+        """For own messages: list of users who have read this message (last_read_at >= created_at)."""
         request = self.context.get("request")
         if not request or not request.user.is_authenticated or obj.sender_id != request.user.id:
             return []
@@ -401,7 +401,7 @@ class MessageSerializer(serializers.ModelSerializer):
         ]
 
     def get_reactions(self, obj):
-        """Сводка по эмодзи: { "👍": 2, "❤️": 1 }."""
+        """Emoji summary: { "👍": 2, "❤️": 1 }."""
         qs = obj.reactions.values_list("emoji").order_by("emoji")
         counts = {}
         for (emoji,) in qs:
@@ -453,7 +453,7 @@ class MessageSerializer(serializers.ModelSerializer):
             if request and request.user and request.user.is_authenticated:
                 attachments = attachments.filter(uploader=request.user)
             msg.files.set(attachments)
-            # Для совместимости: если есть единственный файл и file не задан, ставим первый
+            # For compatibility: if there's a single file and file FK is not set, use the first one
             if not msg.file and attachments.exists():
                 msg.file = attachments.first()
                 msg.save(update_fields=["file"])
@@ -467,12 +467,12 @@ class MessageSerializer(serializers.ModelSerializer):
         from apps.files.serializers import FileAttachmentSerializer
         if instance.file:
             data["file"] = FileAttachmentSerializer(instance.file, context=self.context).data
-        # Всегда возвращаем массив files
+        # Always return a files array
         all_files = instance.files.all()
         if all_files.exists():
             data["files"] = FileAttachmentSerializer(all_files, many=True, context=self.context).data
         else:
-            # Для обратной совместимости: если есть одиночный file, дублируем в files
+            # For backward compatibility: if there's a single file, duplicate it into files
             data["files"] = [data["file"]] if instance.file else []
         return data
 

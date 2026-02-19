@@ -26,19 +26,20 @@ import { decryptFromDevice } from "../lib/e2ee/session-manager";
 import * as e2eeKeyStorage from "../lib/e2ee/key-storage";
 import { useCachedMediaUrl } from "../hooks/useCachedMediaUrl";
 import { toSameOriginMediaUrl } from "../lib/media-url";
+import { isStandalone } from "../lib/pwa";
 import { AnimatedReaction } from "../components/AnimatedReaction";
 import { LottieSticker, getStickerAnimationUrl } from "../components/LottieSticker";
 import { StickerGifPanel } from "../components/StickerGifPanel";
 import { REACTIONS } from "../lib/reaction-animations";
 import { switchLayout } from "../lib/layout-switcher";
 import { useTranslation, formatLastSeenI18n, formatDateLabelI18n, formatMembersCount, getLocale, getWeekdays, t as tI18n } from "../lib/i18n";
-// Фон по умолчанию для всех чатов (файл из public или алиас в vite.config)
+// Default background for all chats (file from public or alias in vite.config)
 import defaultChatBackground from "@default-chat-bg";
 
-/** Эмодзи для реакций (из reaction-animations, совпадает с бэкендом) */
+/** Reaction emojis (from reaction-animations, matches backend) */
 const REACTION_EMOJIS = REACTIONS.map((r) => r.emoji);
 
-/** Максимальный размер файла при загрузке — 2 ГБ */
+/** Maximum file upload size — 2 GB */
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
 const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
@@ -192,7 +193,7 @@ type SpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
    Helpers
    ================================================================ */
 
-/** Проверка, что две даты (ISO) относятся к одному дню в локальной временной зоне */
+/** Check whether two ISO dates fall on the same calendar day in the local timezone */
 function isSameDay(isoA: string | undefined, isoB: string | undefined): boolean {
   if (!isoA || !isoB) return false;
   const a = new Date(isoA);
@@ -200,7 +201,7 @@ function isSameDay(isoA: string | undefined, isoB: string | undefined): boolean 
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-/** Форматирование даты для разделителей: «Сегодня», «Вчера» или «15 февраля [2025]» */
+/** Format date for dividers: "Today", "Yesterday", or "February 15 [2025]" */
 function formatDateLabel(iso: string | undefined, lang: "en" | "ru"): string {
   return formatDateLabelI18n(iso, lang);
 }
@@ -222,33 +223,33 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Сжатие изображения для экономии памяти (скрепка / нижняя зона). Пока отключено — храним в полном размере. */
+/** Compress image to save memory (attachment / bottom zone). Currently disabled — stored at full size. */
 async function compressImage(file: File): Promise<File> {
   // return compressImageForUpload(file, { maxDim: 2560, quality: 0.92 });
   return file;
 }
 
-/** Убирает Markdown-разметку для вставки в Word и т.п.: жирный, курсив, ссылки [текст](url)→текст, код `...`, заголовки #. */
+/** Strip Markdown formatting for pasting into Word etc.: bold, italic, links [text](url)→text, code `...`, headings #. */
 function stripMarkdown(text: string): string {
   let s = text;
-  // Ссылки [текст](url) → текст
+  // Links [text](url) → text
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  // Инлайн-код `...`
+  // Inline code `...`
   s = s.replace(/`([^`]*)`/g, "$1");
-  // Жирный **...** или __...__
+  // Bold **...** or __...__
   s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
   s = s.replace(/__([^_]+)__/g, "$1");
-  // Курсив *...* или _..._ (не в середине слова)
+  // Italic *...* or _..._ (not mid-word)
   s = s.replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, "$1");
   s = s.replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1");
-  // Зачёркнутое ~~...~~
+  // Strikethrough ~~...~~
   s = s.replace(/~~([^~]+)~~/g, "$1");
-  // Заголовки в начале строки: # ## ### ...
+  // Headings at line start: # ## ### ...
   s = s.replace(/^#{1,6}\s+/gm, "");
   return s.trim();
 }
 
-/** Форматирование «был в сети» */
+/** Format "last seen" display */
 function formatLastSeen(value: string | null | undefined, lang: "en" | "ru"): string {
   return formatLastSeenI18n(value, lang);
 }
@@ -269,19 +270,19 @@ function getSenderName(msg: Message): string {
   );
 }
 
-/** Регулярка для упоминаний: @Имя или @Имя Фамилия (до пробела/конца/след. @) */
+/** Regex for mentions: @Name or @First Last (up to whitespace/end/next @) */
 const MENTION_REGEX = /(@(?:[^\s@]+(?:\s+[^\s@]+)*?))(?=\s|$|@)/g;
 
-/** Конвертация Markdown (подмножество: ** * ~~ [](url) [](copy)) в HTML для WYSIWYG-поля ввода */
+/** Convert Markdown subset (** * ~~ [](url) [](copy)) to HTML for WYSIWYG input field */
 function markdownToHtml(md: string): string {
   if (!md.trim()) return "";
   let html = md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-  // [text](copy) или [text](copy:...) — копируемый при клике
+  // [text](copy) or [text](copy:...) — copyable on click
   html = html.replace(/\[([^\]]*)\]\((copy(?::[^)]*)?)\)/g, '<span data-copy="true">$1</span>');
-  // [text](url) — ссылка
+  // [text](url) — link
   html = html.replace(/\[([^\]]*)\]\(([^)]+)\)/g, (_, t, u) => `<a href="${u.replace(/"/g, "&quot;")}">${t}</a>`);
   // **bold**
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -293,7 +294,7 @@ function markdownToHtml(md: string): string {
   return html;
 }
 
-/** Конвертация HTML из contenteditable обратно в Markdown для отправки */
+/** Convert HTML from contenteditable back to Markdown for sending */
 function htmlToMarkdown(html: string): string {
   if (!html) return "";
   const div = document.createElement("div");
@@ -319,7 +320,7 @@ function htmlToMarkdown(html: string): string {
   return walk(div).replace(/\n/g, "\n").trim();
 }
 
-/** Текущая позиция курсора (в символах) в contenteditable */
+/** Current cursor position (in characters) in a contenteditable element */
 function getEditableCursorOffset(editable: HTMLElement): number {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return 0;
@@ -328,7 +329,7 @@ function getEditableCursorOffset(editable: HTMLElement): number {
   return range.toString().length;
 }
 
-/** Поставить курсор в contenteditable на заданную позицию (в символах) */
+/** Set cursor in a contenteditable element to the given character offset */
 function setEditableCursorOffset(editable: HTMLElement, offset: number): void {
   const sel = window.getSelection();
   if (!sel) return;
@@ -378,7 +379,7 @@ function lowerBound(values: number[], target: number): number {
   return left;
 }
 
-/** Получить Range по символьным смещениям в contenteditable */
+/** Get a Range by character offsets in a contenteditable element */
 function getEditableRangeByOffsets(editable: HTMLElement, start: number, end: number): Range | null {
   const range = document.createRange();
   let passed = 0;
@@ -418,7 +419,7 @@ function getEditableRangeByOffsets(editable: HTMLElement, start: number, end: nu
   return range;
 }
 
-/** Разбивает текст на сегменты: обычный текст и упоминания @... */
+/** Split text into segments: plain text and @-mentions */
 function splitContentWithMentions(content: string): { type: "text" | "mention"; value: string }[] {
   const segments: { type: "text" | "mention"; value: string }[] = [];
   let lastIndex = 0;
@@ -438,9 +439,9 @@ function splitContentWithMentions(content: string): { type: "text" | "mention"; 
 }
 
 /**
- * Создаёт обработчики touch-событий для long-press на мобильных устройствах.
- * callback вызывается после удержания ≥ delay мс без перемещения пальца.
- * firedRef.current будет true, если long-press сработал (позволяет подавить onClick).
+ * Create touch event handlers for long-press on mobile devices.
+ * callback fires after holding ≥ delay ms without moving the finger.
+ * firedRef.current will be true if the long-press fired (allows suppressing onClick).
  */
 function makeLongPressHandlers(
   timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
@@ -482,7 +483,7 @@ function makeLongPressHandlers(
   };
 }
 
-/** Рендер текста сообщения с поддержкой Markdown и упоминаний @... */
+/** Render message text with Markdown support and @-mentions */
 function MarkdownMessageContent({
   content,
   isMine,
@@ -572,7 +573,7 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
   let files = msg.files ?? [];
   if (!Array.isArray(files)) files = [];
   if (files.length === 0 && msg.file) files = [msg.file];
-  // Оставляем только объекты с id (API мог вернуть сырые id или неполные данные)
+  // Keep only objects with id (API may return raw ids or incomplete data)
   const safeFiles = files.filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
   const file = msg.file != null && typeof msg.file === "object" && "id" in msg.file ? msg.file : (safeFiles[0] ?? null);
   const myReactions = msg.my_reactions ?? (msg.my_reaction ? [msg.my_reaction] : []);
@@ -592,7 +593,7 @@ function normalizeMessage(msg: Message & { read_status?: "delivered" | "read" | 
    ChatPage
    ================================================================ */
 
-/** Превью сообщения для списка чатов (совпадает с логикой бэкенда). */
+/** Message preview for the chat list (matches backend logic). */
 function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string } | null }, lang?: "en" | "ru"): string {
   if (!msg) return "";
   const mime = (msg.file && msg.file.mime_type) || "";
@@ -618,7 +619,7 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
   return text.length > 60 ? text.slice(0, 60) + "…" : text;
 }
 
-/** Видео в сообщении: без автопроигрывания. Показ первого кадра; воспроизведение по клику (открывается лайтбокс или управление в компоненте). */
+/** Inline video in a message: no autoplay. Shows the first frame; playback on click (opens lightbox or in-component controls). */
 function InlineAutoplayVideo({
   src,
   className = "",
@@ -679,7 +680,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [showInfo, setShowInfo] = useState(false);
-  /** ID пользователя, чья карточка открыта в правой панели (при клике на аватар). null = инфо о чате */
+  /** ID of the user whose card is open in the right panel (on avatar click). null = chat info */
   const [infoUserId, setInfoUserId] = useState<string | null>(null);
   const [usernameShake, setUsernameShake] = useState(false);
   const [mediaLinksFilesTab, setMediaLinksFilesTab] = useState<"media" | "links" | "files" | "voice" | "participants">("media");
@@ -726,7 +727,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  /** Режим голоса: запись файла или AI-транскрипция в поле ввода. Переключается правым кликом по кнопке микрофона. */
+  /** Voice mode: record file or AI transcription into the input field. Toggled by right-clicking the microphone button. */
   const [voiceInputMode, setVoiceInputMode] = useState<"record" | "ai">(() => {
     try {
       const v = localStorage.getItem("chat_voice_input_mode");
@@ -735,14 +736,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       return "record";
     }
   });
-  /** Идёт ли AI-распознавание речи (транскрипция в поле ввода). */
+  /** Whether AI speech recognition is active (transcription into the input field). */
   const [aiListening, setAiListening] = useState(false);
-  /** Контекстное меню правого клика по кнопке микрофона (переключение режима). */
-  /** Текущие амплитуды для визуализации во время записи (32 полоски) */
+  /** Right-click context menu on the microphone button (mode toggle). */
+  /** Current amplitudes for waveform visualization during recording (32 bars) */
   const [liveWaveform, setLiveWaveform] = useState<number[]>([]);
-  /** Уровень громкости при записи (0..255) для индикатора */
+  /** Volume level during recording (0..255) for the indicator */
   const [voiceLevel, setVoiceLevel] = useState(0);
-  /** Онлайн-статусы пользователей: userId → { is_online, last_seen_display } */
+  /** Online statuses of users: userId → { is_online, last_seen_display } */
   const [onlineStatus, setOnlineStatus] = useState<Record<string, { is_online: boolean; last_seen_display?: string | null }>>({});
   const [isMuted, setIsMuted] = useState(false);
   const isMutedRef = useRef(false);
@@ -755,26 +756,26 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showStickerGifPanel, setShowStickerGifPanel] = useState(false);
   const stickerGifPickerRef = useRef<HTMLDivElement>(null);
-  /** Редактирование сообщения в поле ввода (для сообщений только из эмодзи) */
+  /** Editing a message in the input field (for emoji-only messages) */
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [formatMenuPos, setFormatMenuPos] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
-  /** Сообщение, на которое отвечаем (reply bar над input) */
+  /** Message being replied to (reply bar above input) */
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
-  /** Сообщение для пересылки (открывает ForwardModal) */
+  /** Message to forward (opens ForwardModal) */
   const [forwardModalMessage, setForwardModalMessage] = useState<Message | null>(null);
   /** Telegram-style pinned messages: index currently shown */
   const [pinnedIndex, setPinnedIndex] = useState(0);
-  /** Просмотр одного изображения в модалке поверх чата */
-  /** Файлы для предпросмотра перед отправкой (модалка). asFileOnly: отправлять всё как file (drop в верхнюю зону) */
+  /** View a single image in a modal overlay on top of the chat */
+  /** Files for preview before sending (modal). asFileOnly: send everything as a file (drop into the upper zone) */
   const [pendingFilesForPreview, setPendingFilesForPreview] = useState<File[] | null>(null);
   const [pendingFilesAsFileOnly, setPendingFilesAsFileOnly] = useState(false);
-  /** Пicker тегов @: открыт ли, позиция @ в input, выбранный индекс */
+  /** @-mention picker: open state, @ position in input, selected index */
   const [mentionPicker, setMentionPicker] = useState<{ open: boolean; start: number; selectedIndex: number }>({ open: false, start: 0, selectedIndex: 0 });
-  /** Непрочитанные при заходе в чат: id сообщений (низ которых ещё не попал в зону видимости) */
+  /** Unread on chat entry: message IDs whose bottom edge has not yet entered the visible area */
   const [initialUnreadIds, setInitialUnreadIds] = useState<string[]>([]);
-  /** Id сообщений, у которых низ уже был в зоне видимости */
+  /** IDs of messages whose bottom edge has already been in the visible area */
   const [seenBottomIds, setSeenBottomIds] = useState<Set<string>>(new Set());
-  /** Линия «Непрочитанные» скрыта после того, как все initialUnreadIds прочитаны и вызван markRead */
+  /** "Unread" line hidden after all initialUnreadIds are read and markRead is called */
   const [unreadLineDismissed, setUnreadLineDismissed] = useState(false);
   const sentinelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
@@ -794,7 +795,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const lpInputRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lpInputFiredRef = useRef(false);
 
-  /** Установить и markdown-состояние, и отображение в contenteditable (при программной смене контента) */
+  /** Set both the markdown state and the contenteditable display (for programmatic content changes) */
   const setInputAndEditable = useCallback((markdown: string) => {
     setInput(markdown);
     const el = inputEditableRef.current;
@@ -814,7 +815,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     undoIndexRef.current = 0;
   }, []);
 
-  /** Применить формат через execCommand в contenteditable (сохранённая выделение в savedFormatRangeRef) */
+  /** Apply formatting via execCommand in contenteditable (saved selection in savedFormatRangeRef) */
   const applyFormatInEditable = useCallback((cmd: string, value?: string) => {
     const el = inputEditableRef.current;
     const range = savedFormatRangeRef.current;
@@ -867,7 +868,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setTimeout(() => el.focus(), 0);
   };
 
-  /** Форматирование по горячим клавишам в contenteditable (Ctrl+B, Ctrl+I и т.д.). */
+  /** Apply formatting via keyboard shortcuts in contenteditable (Ctrl+B, Ctrl+I, etc.). */
   const applyFormatShortcut = useCallback((cmd: string, value?: string) => {
     const el = inputEditableRef.current;
     if (!el) return;
@@ -878,12 +879,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setTimeout(() => el.focus(), 0);
   }, [pushUndoState]);
 
-  /** Переключение раскладки EN↔RU: для выделенного текста или всего поля ввода. */
+  /** Toggle keyboard layout EN↔RU: for selected text or the entire input field. */
   const handleSwitchLayout = useCallback(() => {
     const el = inputEditableRef.current;
     if (!el) return;
     const sel = window.getSelection();
-    // Если есть выделение внутри поля — конвертируем только выделенный текст
+    // If there's a selection inside the field — convert only the selected text
     if (sel && sel.rangeCount > 0 && !sel.isCollapsed && el.contains(sel.anchorNode)) {
       const range = sel.getRangeAt(0);
       const selectedText = range.toString();
@@ -892,7 +893,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         const converted = switchLayout(selectedText);
         range.deleteContents();
         range.insertNode(document.createTextNode(converted));
-        // Восстановим выделение на конвертированный текст
+        // Restore selection on converted text
         sel.removeAllRanges();
         const newRange = document.createRange();
         newRange.selectNodeContents(range.startContainer);
@@ -901,7 +902,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
         return;
       }
     }
-    // Иначе — конвертируем всё содержимое
+    // Otherwise — convert entire content
     const md = htmlToMarkdown(el.innerHTML);
     if (!md.trim()) return;
     pushUndoState(md);
@@ -937,6 +938,17 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [showInfoMenu, setShowInfoMenu] = useState(false);
+  const [showSecretChatWarning, setShowSecretChatWarning] = useState(false);
+  const [secretChatCreating, setSecretChatCreating] = useState(false);
+  // Message search
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const infoMenuRef = useRef<HTMLDivElement>(null);
   const muteFlyoutRef = useRef<HTMLDivElement>(null);
   const muteFlyoutAnchorRef = useRef<HTMLDivElement>(null);
@@ -944,7 +956,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
   const [showMuteFlyout, setShowMuteFlyout] = useState(false);
   const [muteFlyoutPos, setMuteFlyoutPos] = useState<{ left: number; top: number } | null>(null);
   const [showAvatarFullscreen, setShowAvatarFullscreen] = useState<string | null>(null);
-  /** ID пользователя, чья карточка открыта в правой панели (при клике на аватар). null = показывать инфо о чате */
+  /** ID of the user whose card is open in the right panel (on avatar click). null = show chat info */
   /* Video recording state */
   const [videoRecording, setVideoRecording] = useState(false);
   const [videoRecordingTime, setVideoRecordingTime] = useState(0);
@@ -1137,7 +1149,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       resetUndoStack();
     };
 
-    if (chat?.is_personal && chat.other_member) {
+    if (chat?.is_secret && chat.other_member) {
       try {
         const encPayload = await prepareEncryptedMessage(myUserId, chat, trimmed, replyId);
         if (encPayload) {
@@ -1343,7 +1355,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       applyFormatShortcut("strikeThrough");
       return;
     }
-    // Ctrl+T — переключить раскладку EN↔RU
+    // Ctrl+T — toggle keyboard layout EN↔RU
     if (ctrl && e.key === "t") {
       e.preventDefault();
       handleSwitchLayout();
@@ -1358,7 +1370,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
   }, []);
 
-  /* ---------- Автоподстройка высоты поля ввода: 1 строка → до 8 строк, далее внутренний скролл ---------- */
+  /* ---------- Auto-resize input height: 1 line → up to 8 lines, then inner scroll ---------- */
   const INPUT_LINE_HEIGHT_PX = 24;
   const INPUT_MAX_LINES = 8;
   const INPUT_MAX_HEIGHT_PX = INPUT_LINE_HEIGHT_PX * INPUT_MAX_LINES + 16; // + padding
@@ -1528,6 +1540,44 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
   const canInviteToGroup = chat && !chat.is_personal && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"));
 
+  // --- Message search ---
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim() || searchQuery.trim().length < 2 || !chatId) {
+      setSearchResults([]); setSearchTotal(0); setSearchIdx(0);
+      return;
+    }
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        if (chat?.is_secret) {
+          const allMsgs = useMessagesStore.getState().byChat[chatId] ?? [];
+          const q = searchQuery.trim().toLowerCase();
+          const matched = allMsgs.filter((m) => !m.is_deleted && m.content?.toLowerCase().includes(q));
+          matched.reverse();
+          setSearchResults(matched); setSearchTotal(matched.length); setSearchIdx(0);
+        } else {
+          const { data } = await chatsApi.searchMessages(chatId, searchQuery.trim(), { limit: 50 });
+          setSearchResults(data.results); setSearchTotal(data.total); setSearchIdx(0);
+        }
+      } catch { setSearchResults([]); setSearchTotal(0); } finally { setSearchLoading(false); }
+    }, 350);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery, searchOpen, chatId, chat?.is_secret]);
+
+  useEffect(() => {
+    if (!searchOpen || searchResults.length === 0) return;
+    const msg = searchResults[searchIdx];
+    if (!msg) return;
+    const el = document.querySelector(`[data-msg-wrapper="${msg.id}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-blue-400", "rounded-lg");
+      const timer = setTimeout(() => el.classList.remove("ring-2", "ring-blue-400", "rounded-lg"), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchIdx, searchResults, searchOpen]);
+
   useEffect(() => {
     if (!inviteSearchQuery.trim()) {
       setInviteSearchResults([]);
@@ -1544,7 +1594,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     return () => clearTimeout(t);
   }, [inviteSearchQuery]);
 
-  /* ---------- Зафиксировать список непрочитанных при первом наличии чата и сообщений ---------- */
+  /* ---------- Capture the unread list on first availability of chat and messages ---------- */
   useEffect(() => {
     if (!chat || messages.length === 0) return;
     const n = chat.unread_count ?? 0;
@@ -1553,7 +1603,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
   }, [chat, messages, chat?.unread_count, initialUnreadIds.length]);
 
-  /* ---------- Intersection Observer: низ сообщения в зоне видимости = прочитано ---------- */
+  /* ---------- Intersection Observer: message bottom in viewport = read ---------- */
   useEffect(() => {
     const root = messagesScrollRef.current;
     if (!root) return;
@@ -1579,7 +1629,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     };
   }, [messages]);
 
-  /* ---------- Все непрочитанные прочитаны (низ в зоне видимости) → markRead и скрыть линию ---------- */
+  /* ---------- All unread messages seen (bottom in viewport) → markRead and hide the line ---------- */
   useEffect(() => {
     if (initialUnreadIds.length === 0 || unreadLineDismissed) return;
     const allSeen = initialUnreadIds.every((id) => seenBottomIds.has(id));
@@ -1931,7 +1981,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setUploadError(name ? t("chat.fileTooLargeNamed").replace("%s", name) : t("chat.fileTooLarge"));
     setTimeout(() => setUploadError(""), 5000);
   };
-  /** Отправка одного файла (аудио, видео и т.п.) */
+  /** Send a single file (audio, video, etc.) */
   const sendFileMessage = async (file: File, msgTypeOverride?: string) => {
     if (!chatId) return;
     if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -1943,7 +1993,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     try {
       const uploadRes = await filesApi.upload(file, chatId);
       const fileId = uploadRes.data.id;
-      // Бэкенд принимает только: text, file, audio, video, video_circle, emoji (нет "image")
+      // Backend only accepts: text, file, audio, video, video_circle, emoji (no "image")
       const msgType = msgTypeOverride ?? (
         file.type.startsWith("image/") ? "file"
         : file.type.startsWith("audio/") ? "audio"
@@ -1969,7 +2019,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }
   };
 
-  /** Отправка нескольких изображений как одно сообщение (плитка) */
+  /** Send multiple images as a single message (tile layout) */
   const sendMultiImageMessage = async (imageFiles: File[]) => {
     if (!chatId || imageFiles.length === 0) return;
     const tooBig = imageFiles.find((f) => f.size > MAX_FILE_SIZE_BYTES);
@@ -1980,7 +2030,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setUploading(true);
     setUploadError("");
     try {
-      // Загружаем все файлы параллельно
+      // Upload all files in parallel
       const uploadResults = await Promise.all(
         imageFiles.map((f) => filesApi.upload(f, chatId))
       );
@@ -2055,7 +2105,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     sendTyping();
   };
 
-  /** Отправка файлов после подтверждения в модалке предпросмотра */
+  /** Send files after confirmation in the preview modal */
   const handleFilesPreviewConfirm = async (files: File[], asFileOnly: boolean) => {
     setPendingFilesForPreview(null);
     if (files.length === 0) return;
@@ -2140,7 +2190,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     setPendingFilesAsFileOnly(zone === "top");
   };
 
-  /** Paste: обработать вставку изображений из буфера, остальное — по умолчанию */
+  /** Paste: handle pasting images from clipboard, everything else — default behavior */
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items?.length) return;
@@ -2218,7 +2268,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     }, 120);
   }, []);
 
-  /* ---------- Expand chat (50 звёзд → 100 чел., 100 звёзд → 1000 чел.) ---------- */
+  /* ---------- Expand chat (50 stars → 100 members, 100 stars → 1000 members) ---------- */
   const handleExpandChat = async (targetMaxMembers: 100 | 1000) => {
     if (!chatId || !chat) return;
     setExpandLoading(true);
@@ -2401,7 +2451,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
       .finally(() => setDeleteLoading(false));
   };
 
-  /* ---------- Voice recording: визуализация + сбор амплитуд ---------- */
+  /* ---------- Voice recording: visualization + amplitude sampling ---------- */
   const WAVEFORM_BARS = 64;
   const LIVE_BARS = 32;
   const SAMPLE_INTERVAL_MS = 80;
@@ -2580,7 +2630,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
-  /* ---------- AI voice input: распознавание речи в текст (Web Speech API) ---------- */
+  /* ---------- AI voice input: speech-to-text recognition (Web Speech API) ---------- */
   const getSpeechRecognition = (): SpeechRecognitionCtor | null => {
     if (typeof window === "undefined") return null;
     const w = window as Window & {
@@ -2821,7 +2871,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
     <div className="flex flex-col flex-1 min-h-0 w-full bg-slate-50 overflow-hidden">
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
-      {/* Модалка просмотра одного изображения — затемнение + картинка по центру */}
+      {/* Single image viewer modal — dimmed overlay + centered image */}
       {/* Forward modal */}
       {forwardModalMessage && chatId && (
         <ForwardModal
@@ -2933,8 +2983,8 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50 rounded-lg px-2 py-1 -mx-2 transition-colors min-w-0">
               <h1 className="font-semibold text-slate-800 flex items-center gap-1.5">
                 {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
-                {chat.is_personal && (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500" aria-label={t("chat.e2ee")}>
+                {chat.is_secret && (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600" aria-label={t("chat.e2ee")}>
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                 )}
@@ -2950,7 +3000,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     <span className="text-slate-400 italic">{typing} печатает…</span>
                   ) : (
                     <>
-                      <span>{t("chat.personal")}</span>
+                      <span>{chat.is_secret ? t("secretChat.title") : t("chat.personal")}</span>
                       {onlineStatus[chat.other_member.id]?.is_online ? (
                         <span className="text-green-500 ml-1">· {t("chat.online")}</span>
                       ) : onlineStatus[chat.other_member.id]?.last_seen_display ? (
@@ -2970,10 +3020,74 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               </p>
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => { setSearchOpen((v) => { if (v) { setSearchQuery(""); setSearchResults([]); } return !v; }); setTimeout(() => searchInputRef.current?.focus(), 100); }}
+            className={`p-2 rounded-lg transition-colors ${searchOpen ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}
+            title={t("search.placeholder")}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
           <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-lg transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`} title={t("chat.chatInfo")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
       </header>
+
+        {/* ── Search bar ── */}
+        {searchOpen && (
+          <div className="shrink-0 bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-2">
+            <div className="flex-1 relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); }
+                  if (e.key === "Enter" && searchResults.length > 0) {
+                    setSearchIdx((prev) => (prev + 1) % searchResults.length);
+                  }
+                }}
+                placeholder={chat?.is_secret ? t("search.secretLocal") : t("search.placeholder")}
+                className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-slate-50"
+                autoFocus
+              />
+            </div>
+            {searchQuery.trim().length >= 2 && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-xs text-slate-500 tabular-nums min-w-[3ch] text-center">
+                  {searchLoading ? "…" : searchResults.length > 0 ? `${searchIdx + 1}/${searchTotal}` : "0"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSearchIdx((prev) => (prev - 1 + searchResults.length) % searchResults.length)}
+                  disabled={searchResults.length === 0}
+                  className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                  title="Previous"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchIdx((prev) => (prev + 1) % searchResults.length)}
+                  disabled={searchResults.length === 0}
+                  className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                  title="Next"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); }}
+              className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+        )}
 
         {/* ── Unified pinned messages bar (always visible, not scrollable) ── */}
         {(() => {
@@ -3049,7 +3163,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           );
         })()}
 
-        {/* Messages — фон и размывающая подложка в одном неподвижном слое, контент скроллится поверх */}
+        {/* Messages — background and blur overlay in a single fixed layer, content scrolls on top */}
         <div className="relative flex-1 min-h-0 flex flex-col min-w-0">
           <div
             className="absolute inset-0 pointer-events-none z-0"
@@ -3067,7 +3181,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             onContextMenu={(e) => e.preventDefault()}
             onScroll={handleMessagesScroll}
           >
-          {/* Плавающая дата при скролле (sticky date header) */}
+          {/* Floating date on scroll (sticky date header) */}
           {messages.length > 0 && (() => {
             const showSticky = messagesScrollTop > 56;
             const firstVisible = virtualState.enabled ? messages[virtualState.start] : messages[0];
@@ -3081,18 +3195,18 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             ) : null;
           })()}
           <div className="flex flex-col space-y-0 min-h-0">
-          {/* E2EE banner для личного чата */}
-          {chat?.is_personal && chat?.other_member && (
+          {/* E2EE banner for secret chat */}
+          {chat?.is_secret && (
             <div className="shrink-0 flex justify-center py-1">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 border border-green-200 text-xs text-green-700">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs text-emerald-700">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                 </svg>
-                <span>Сообщения защищены сквозным шифрованием</span>
+                <span>{t("chat.e2ee")}</span>
               </div>
             </div>
           )}
-          {/* Заявки на вступление — как обычное сообщение в ленте, кнопки в стиле Telegram */}
+          {/* Join requests — displayed as a regular message in the feed, Telegram-style buttons */}
           {!chat?.is_personal && pendingMembers.length > 0 && chat?.owner?.id === myUserId && (
             <div className="shrink-0 flex justify-center my-3">
               <div className="inline-block max-w-[85%] rounded-2xl bg-slate-100/90 border border-slate-200 px-4 py-3 shadow-sm">
@@ -3186,6 +3300,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     return (
                       <div
                         key={msg.id}
+                        data-msg-wrapper={msg.id}
                         ref={(el) => {
                           if (!el) return;
                           const nextHeight = el.offsetHeight;
@@ -3195,7 +3310,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                             setVirtualMeasureTick((v) => v + 1);
                           }
                         }}
-                        className={isFirstInGroup ? "mt-1" : "mt-0"}
+                        className={`${isFirstInGroup ? "mt-1" : "mt-0"} transition-all duration-300`}
                       >
                         {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         {showUnreadLine && i === firstUnreadIndex && (
@@ -3323,7 +3438,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           </div>
         )}
 
-        {/* Input bar — правый клик: запланировать сообщение */}
+        {/* Input bar — right-click: schedule message */}
         {recording ? (
           <div className="border-t bg-white p-2 flex gap-2 items-center">
             <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 shrink-0" title={t("chat.cancelRecording")}>
@@ -3501,7 +3616,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 transition-colors" title={t("chat.videoCircle")} disabled={uploading}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
             </button>
-            {/* Голос: запись файла или AI-транскрипция. Правый клик — переключить режим. */}
+            {/* Voice: record file or AI transcription. Right-click — toggle mode. */}
             <button
               type="button"
               onClick={() => { if (!lpVoiceFiredRef.current) toggleVoiceInput(); }}
@@ -3539,7 +3654,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           </div>
         )}
 
-        {/* Context menu: запланировать сообщение (через portal, чтобы не обрезался overflow) */}
+        {/* Context menu: schedule message (via portal to avoid overflow clipping) */}
         {scheduleMenuPos && createPortal(
           <div
             className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-xl py-1 min-w-[210px]"
@@ -3558,7 +3673,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           document.body,
         )}
 
-        {/* Context menu: Markdown-форматирование (правый клик по полю ввода) — не выходит за границы чата */}
+        {/* Context menu: Markdown formatting (right-click on input field) — stays within chat bounds */}
         {formatMenuPos && (() => {
           const MENU_W = 260;
           const MENU_H = 340;
@@ -3604,7 +3719,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           );
         })()}
 
-        {/* Modal: новое отложенное сообщение */}
+        {/* Modal: new scheduled message */}
         {showScheduleModal && chatId && (
           <ScheduleMessageModal
             chatId={chatId}
@@ -3614,7 +3729,80 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           />
         )}
 
-        {/* Modal: редактирование фото чата */}
+        {/* Modal: secret chat warning */}
+        {showSecretChatWarning && chat?.is_personal && chat.other_member && (
+          <div
+            className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50"
+            onClick={() => { if (!secretChatCreating) setShowSecretChatWarning(false); }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-xl max-w-md w-full animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 pt-5 pb-3 flex items-center gap-3">
+                <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600">
+                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+                  </svg>
+                </span>
+                <h2 className="text-lg font-semibold text-slate-800">{t("secretChat.warningTitle")}</h2>
+              </div>
+              <div className="px-6 pb-5">
+                <ul className="space-y-2.5 text-sm text-slate-700">
+                  <li className="flex gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 shrink-0 mt-0.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>{t("secretChat.warning1")}</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 shrink-0 mt-0.5"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    <span>{t("secretChat.warning2")}</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 shrink-0 mt-0.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m11 8-4 4"/></svg>
+                    <span>{t("secretChat.warning3")}</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400 shrink-0 mt-0.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    <span>{t("secretChat.warning4")}</span>
+                  </li>
+                </ul>
+                <div className="flex gap-2 justify-end mt-5">
+                  <button
+                    type="button"
+                    onClick={() => setShowSecretChatWarning(false)}
+                    disabled={secretChatCreating}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={secretChatCreating}
+                    onClick={async () => {
+                      if (!chat.other_member) return;
+                      setSecretChatCreating(true);
+                      try {
+                        const { data: secretChat } = await chatsApi.getOrCreateDm(chat.other_member.id, { is_secret: true });
+                        setShowSecretChatWarning(false);
+                        useChatListStore.getState().upsertChat(secretChat);
+                        if (onNavigateToChat) onNavigateToChat(secretChat.id);
+                      } catch {
+                        setShowSecretChatWarning(false);
+                      } finally {
+                        setSecretChatCreating(false);
+                      }
+                    }}
+                    className="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium transition-colors"
+                  >
+                    {secretChatCreating ? t("createChat.creating") : t("secretChat.confirm")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: chat photo editing */}
         {editingAvatar && chat && !chat.is_personal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={() => setEditingAvatar(false)}>
             <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -3648,7 +3836,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50 text-sm font-medium col-span-2">
                     {avatarUploading ? <span>Загрузка...</span> : (<><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Заменить</>)}
                   </button>
-                  {/* TODO: Генерация аватарки чата с помощью ИИ — интеграция с API, выбор стиля/промпта, загрузка результата как аватар */}
+                  {/* TODO: Generate chat avatar with AI — API integration, style/prompt selection, upload result as avatar */}
                   <button
                     type="button"
                     onClick={() => alert(t("chat.featureInDev"))}
@@ -3663,7 +3851,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           </div>
         )}
 
-        {/* Этап подтверждения фото: кружок, масштаб, сдвиг — после выбора файла */}
+        {/* Photo confirmation step: circle crop, scale, shift — after file selection */}
         {pendingAvatarFile && chat && (
           <AvatarCropConfirmModal
             file={pendingAvatarFile}
@@ -3671,7 +3859,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             onCancel={() => setPendingAvatarFile(null)}
           />
         )}
-        {/* Редактор аватарки: обрезка, рисование, текст */}
+        {/* Avatar editor: crop, draw, text */}
         {showAvatarEditor && chat && (
           <AvatarEditorModal
             imageUrl={toSameOriginMediaUrl(chat.avatar_url ?? undefined) || null}
@@ -3679,7 +3867,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             onCancel={() => setShowAvatarEditor(false)}
           />
         )}
-        {/* Просмотр аватарки в полном размере */}
+        {/* Fullscreen avatar view */}
         {showAvatarFullscreen && (
           <div
             className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4"
@@ -3750,6 +3938,12 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                     const btnClsRed = "w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50 flex items-center gap-3";
                     return (
                       <div className="absolute left-0 top-full mt-1 py-1 min-w-[220px] bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                        {isPersonal && !chat.is_secret && isStandalone() && (
+                          <button type="button" onClick={() => { setShowInfoMenu(false); setShowSecretChatWarning(true); }} className={btnCls}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-emerald-600"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            {t("secretChat.createTitle")}
+                          </button>
+                        )}
                         {isPersonal ? (
                           <button type="button" onClick={() => { handleLeaveChat(); setShowInfoMenu(false); }} disabled={leaveLoading} className={btnCls}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
@@ -4120,7 +4314,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               {!chat.is_personal && !chat.is_favorites && (
                 <p className="text-xs text-slate-500">{formatMembersCount(chat.members_count, lang)}</p>
               )}
-              {/* Group tier badge + возраст группы — только для групп */}
+              {/* Group tier badge + group age — groups only */}
               {!chat.is_personal && !chat.is_favorites && (() => {
                 const eff = chat.effective_max_members ?? chat.max_members ?? 100;
                 const tier = eff >= 10000 ? "mega" : eff >= 1000 ? "kilo" : "default";
@@ -4221,14 +4415,14 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
               </div>
             )}
 
-            {/* Скрытый input для «Изменить фон» из меню (три точки) */}
+            {/* Hidden input for "Change background" from the three-dot menu */}
             {chat.owner?.id === myUserId && (
               <div className="hidden" aria-hidden="true">
                 <input ref={backgroundInputRef} type="file" accept="image/*" onChange={handleBackgroundUpload} disabled={backgroundUploading} />
               </div>
             )}
 
-            {/* Тип и пригласительная ссылка — только для групп */}
+            {/* Type and invite link — groups only */}
             {!chat.is_personal && !chat.is_favorites && (
             <div className="space-y-2 px-5">
               {chat.chat_type != null && (
@@ -4246,7 +4440,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
             </div>
             )}
 
-          {/* Расширение за звёзды — только для групп; в личном чате и Избранном не показываем */}
+          {/* Upgrade for stars — groups only; hidden in personal chats and Favorites */}
           {!chat.is_personal && !chat.is_favorites && chat.owner?.id === myUserId && (() => {
             const effective = chat.effective_max_members ?? chat.max_members ?? 10;
             const isExpandedTo100 = chat.is_expanded && effective === 100;
@@ -4284,7 +4478,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                   </div>
                 )}
                 {expandError && <p className="text-xs text-red-500">{expandError}</p>}
-                {/* Подсказка: при нехватке звёзд — поделиться реферальной ссылкой */}
+                {/* Hint: when not enough stars — share referral link */}
                 {(expandError?.includes("Недостаточно") || expandError?.includes("Not enough") || showUpgradeTo1000) && (
                   <ReferralHintInChat />
                 )}
@@ -4293,9 +4487,9 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
           })()}
 
           <div className="p-3">
-            {/* Медиа, Ссылки, Файлы; в группах — вкладка Участники */}
+            {/* Media, Links, Files; in groups — Members tab */}
             {(() => {
-              // Группа из 2 человек остаётся групповым чатом (название, аватар, блоки, подпись «N участников»). Личный только при chat.is_personal.
+              // A group of 2 people stays a group chat (title, avatar, blocks, "N members" label). Personal only when chat.is_personal.
               const isGroup = !chat.is_personal;
               const isImage = (msg: Message) => {
                 if (msg.msg_type === "image") return true;
@@ -4490,7 +4684,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
                           return (
                           <button key={msg.id} type="button" onClick={() => scrollToMessageId(msg.id)} className="aspect-square rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-blue-400">
                             {isImg && url ? (
-                              <ProgressiveImage src={toSameOriginMediaUrl(url) || url} alt="" className="w-full h-full" objectFit="cover" />
+                              <ProgressiveImage src={toSameOriginMediaUrl(url) || url} alt="" className="w-full h-full" objectFit="cover" fullWidth={200} />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-slate-400">
                                 {isVideo(msg) ? (
@@ -4580,7 +4774,7 @@ export default function ChatPage({ chatId: propChatId, onBack, onChatUpdated, on
 }
 
 /* ================================================================
-   UpgradeTo100Compact — компактный блок: до 100 участников + реферальная ссылка + кнопка Личный кабинет
+   UpgradeTo100Compact — compact block: up to 100 members + referral link + Dashboard button
    ================================================================ */
 function UpgradeTo100Compact() {
   const { t } = useTranslation();
@@ -4667,7 +4861,7 @@ function UpgradeTo100Compact() {
 }
 
 /* ================================================================
-   ReferralHintInChat — подсказка «поделиться реферальной ссылкой» при нехватке звёзд
+   ReferralHintInChat — hint to share referral link when not enough stars
    ================================================================ */
 function ReferralHintInChat() {
   const { t } = useTranslation();
@@ -4747,7 +4941,7 @@ function ReferralHintInChat() {
    ================================================================ */
 
 
-/** Сообщение состоит только из эмодзи (и пробелов) — показываем без рамки, крупнее. Только цифры не считаем эмодзи. */
+/** Message consists only of emoji (and spaces) — render without bubble, larger. Digits alone don't count as emoji. */
 function isOnlyEmoji(str: string): boolean {
   const t = str.trim();
   if (t.length === 0 || t.length > 30) return false;
@@ -4758,7 +4952,7 @@ function isOnlyEmoji(str: string): boolean {
 const MESSAGE_TEXT_BASE_PX = 13;
 const MESSAGE_EMOJI_BASE_PX = 28;
 
-/** Имя файла: если помещается в полэкрана — целиком без переноса; иначе начало + "....." + последние 5 символов + расширение */
+/** File name: if it fits half the screen — show in full without wrapping; otherwise start + "....." + last 5 chars + extension */
 function FileNameDisplay({ fileName, className = "" }: { fileName: string; className?: string }) {
   const measureRef = useRef<HTMLSpanElement>(null);
   const [display, setDisplay] = useState<{ text: string; full: boolean }>({ text: fileName, full: true });
@@ -4797,7 +4991,7 @@ function FileNameDisplay({ fileName, className = "" }: { fileName: string; class
   );
 }
 
-/** Разделитель даты между сообщениями (Сегодня, Вчера, 15 февраля) */
+/** Date divider between messages (Today, Yesterday, February 15) */
 function DateDivider({ date, lang }: { date: string; lang: "en" | "ru" }) {
   const label = formatDateLabel(date, lang);
   return (
@@ -4949,32 +5143,35 @@ type MessageBubbleProps = {
   isMine: boolean;
   chatId: string;
   textScale: number;
-  /** Показывать аватар (false — placeholder для группировки сообщений) */
+  /** Show avatar (false — placeholder for message grouping) */
   showAvatar?: boolean;
-  /** Последнее сообщение в группе (хвостик в сторону аватарки) */
+  /** Last message in a group (tail pointing toward the avatar) */
   isLastInGroup?: boolean;
   onMessageUpdated: (msg: Message) => void;
   onMessageDeleted?: (messageId: string) => void;
-  /** Для сообщений только из эмодзи — редактировать в поле ввода, а не инлайном */
+  /** For emoji-only messages — edit in the input field instead of inline */
   onStartEditInInput?: (messageId: string, content: string) => void;
-  /** Клик по одиночному изображению — открыть в модалке вместо новой вкладки */
-  /** Может ли текущий пользователь закрепить сообщение для всех (админ/владелец) */
+  /** Click on a single image — open in modal instead of a new tab */
+  /** Whether the current user can pin a message for everyone (admin/owner) */
   canPinForAll?: boolean;
-  /** ID сообщений, закреплённых для всех в чате */
+  /** IDs of messages pinned for everyone in the chat */
   pinnedForAllIds?: string[];
-  /** Максимально допустимое кол-во закреплённых для всех */
+  /** Maximum allowed number of messages pinned for everyone */
   maxPins?: number;
-  /** Клик по аватарке отправителя (открыть информацию о пользователе) */
+  /** Click on sender avatar (open user info) */
   onAvatarClick?: (userId?: string) => void;
-  /** ID сообщений, закреплённых текущим пользователем для себя */
+  /** IDs of messages pinned by the current user for themselves */
   myPinnedIds?: string[];
-  /** Вызов после закрепления/открепления (обновить чат) */
+  /** Callback after pin/unpin (refresh chat) */
   onPinChange?: () => void;
-  /** Ответить на сообщение */
+  /** Reply to a message */
   onReply?: (message: Message) => void;
-  /** Переслать сообщение */
+  /** Forward a message */
   onForward?: (message: Message) => void;
 };
+
+/** Delay before hiding reaction picker when mouse leaves message/picker (lets user move to picker) */
+const REACTION_PICKER_HIDE_DELAY_MS = 550;
 
 const MessageBubble = memo(function MessageBubble({
   message,
@@ -4998,6 +5195,7 @@ const MessageBubble = memo(function MessageBubble({
   const { t, lang } = useTranslation();
   const [hoverDelayPassed, setHoverDelayPassed] = useState(false);
   const hoverDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickerHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickerHover, setPickerHover] = useState(false);
   const pickerVisible = !isMine && (hoverDelayPassed || pickerHover);
   const [editing, setEditing] = useState(false);
@@ -5025,6 +5223,7 @@ const MessageBubble = memo(function MessageBubble({
 
   useEffect(() => () => {
     if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
+    if (pickerHideTimerRef.current) clearTimeout(pickerHideTimerRef.current);
   }, []);
 
   useEffect(() => () => {
@@ -5106,14 +5305,14 @@ const MessageBubble = memo(function MessageBubble({
   const isVideoByExt = /^(mp4|webm|mov|avi|mkv|ogv)$/.test(ext);
   const fileIsImage = isImageByMime || (message.file && !fileMime && isImageByExt);
   const fileIsVideo = isVideoByMime || (message.file && !fileMime && isVideoByExt);
-  // Показывать как ссылку только для не-медиа; картинки и видео — всегда с превью
+  // Show as link only for non-media; images and videos always have preview
   const isImage = message.file && fileIsImage;
   // fileUrl is used directly for all media types
   const isAudio = message.msg_type === "audio" || (message.file && (message.file as { mime_type?: string }).mime_type?.startsWith("audio/"));
   const isVideo = message.file && !isAudio && (message.msg_type === "video" || fileIsVideo);
   const isVideoCircle = message.msg_type === "video_circle" && !isAudio && message.file;
 
-  // Несколько изображений — плитка; учитываем mime и расширение
+  // Multiple images — tile layout; check both mime and extension
   const allFiles = (message.files ?? []).filter((f) => f != null && typeof f === "object" && "id" in f) as Message["files"];
   const imageFiles = allFiles.filter((f) => (f.mime_type || "").startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|svg|heic)$/i.test(f.original_name || ""));
   const isImageGroup = isFile && imageFiles.length >= 1 && imageFiles.length === allFiles.length;
@@ -5190,7 +5389,7 @@ const MessageBubble = memo(function MessageBubble({
     return () => window.removeEventListener("mousedown", handleClick);
   }, [contextMenu]);
 
-  /** Тачпад: смахивание 2 пальцами вправо — ответ на сообщение */
+  /** Trackpad: two-finger swipe right — reply to message */
   useEffect(() => {
     const el = messageWrapperRef.current;
     if (!el || !onReply) return;
@@ -5240,10 +5439,10 @@ const MessageBubble = memo(function MessageBubble({
     </span>
   ) : null;
 
-  /** Есть ли в сообщении упоминания @... (для иконки @ как в Telegram) */
+  /** Whether the message contains @-mentions (for the @ icon like in Telegram) */
   const hasMentionInContent = (message.msg_type === "text" || message.msg_type === "emoji") && splitContentWithMentions(message.content || "").some((s) => s.type === "mention");
 
-  /** Время (+ ред.) + галочки + @ при упоминаниях — последовательно в одну линию */
+  /** Time (+ edited) + checkmarks + @ for mentions — sequentially in one line */
   const timeEl = (
     <span className={`inline-flex flex-nowrap items-center gap-x-1 text-[10px] min-w-0 shrink-0 whitespace-nowrap ${isMine ? "text-slate-500" : "text-slate-400"}`}>
       {hasMentionInContent && <span className="font-medium text-slate-500" title={t("chat.mentionLabel")}>@</span>}
@@ -5253,17 +5452,29 @@ const MessageBubble = memo(function MessageBubble({
     </span>
   );
 
+  const schedulePickerHide = useCallback(() => {
+    if (pickerHideTimerRef.current) clearTimeout(pickerHideTimerRef.current);
+    pickerHideTimerRef.current = setTimeout(() => {
+      pickerHideTimerRef.current = null;
+      setHoverDelayPassed(false);
+      setPickerHover(false);
+    }, REACTION_PICKER_HIDE_DELAY_MS);
+  }, []);
+
   const handleMouseEnter = () => {
+    if (pickerHideTimerRef.current) {
+      clearTimeout(pickerHideTimerRef.current);
+      pickerHideTimerRef.current = null;
+    }
     if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
     hoverDelayTimerRef.current = setTimeout(() => setHoverDelayPassed(true), 400);
   };
   const handleMouseLeave = () => {
-    setPickerHover(false);
     if (hoverDelayTimerRef.current) {
       clearTimeout(hoverDelayTimerRef.current);
       hoverDelayTimerRef.current = null;
     }
-    setHoverDelayPassed(false);
+    schedulePickerHide();
   };
 
   return (
@@ -5342,7 +5553,7 @@ const MessageBubble = memo(function MessageBubble({
         e.stopPropagation();
       }}
     >
-      {/* Обёртка: [reply icon при свайпе] [аватар + пузырь + реакции] */}
+      {/* Wrapper: [reply icon on swipe] [avatar + bubble + reactions] */}
       <div
         ref={swipeWrapperRef}
         className={`relative flex flex-row flex-nowrap items-end gap-2 swipe-message w-full ${swipeBounce ? "swipe-bounce" : ""}`}
@@ -5427,7 +5638,7 @@ const MessageBubble = memo(function MessageBubble({
               )}
             </div>
           )}
-          {/* Reply quote block — для своих сообщений прижата к правому краю */}
+          {/* Reply quote block — aligned to the right for own messages */}
           {message.reply_to && !message.reply_to.is_deleted && (
             <div className="mb-0.5 -mt-0.5">
               <button
@@ -5623,7 +5834,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
         </div>
         )}
-        {/* Reaction picker — слева от bubbleColumn (для isMine), справа (для !isMine) */}
+        {/* Reaction picker — left of bubbleColumn (for isMine), right (for !isMine) */}
         {isMine && hoverDelayPassed && !editing && (
           <div
             className="absolute bottom-1 left-full ml-0.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
@@ -5647,8 +5858,14 @@ const MessageBubble = memo(function MessageBubble({
         {!isMine && pickerVisible && (
           <div
             className="absolute bottom-1 left-full ml-0.5 z-20 flex items-center gap-1"
-            onMouseEnter={() => setPickerHover(true)}
-            onMouseLeave={() => setPickerHover(false)}
+            onMouseEnter={() => {
+              if (pickerHideTimerRef.current) {
+                clearTimeout(pickerHideTimerRef.current);
+                pickerHideTimerRef.current = null;
+              }
+              setPickerHover(true);
+            }}
+            onMouseLeave={schedulePickerHide}
           >
             <div className="scrollbar-hide flex flex-col gap-0.5 bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg py-1 px-1 overflow-y-auto max-h-[5.75rem]">
               {REACTION_EMOJIS.map((emoji) => (
@@ -5682,7 +5899,7 @@ const MessageBubble = memo(function MessageBubble({
             className="context-menu-bottom-sheet fixed z-[100] min-w-[200px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh] overflow-y-auto"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            {/* 1. Ответить */}
+            {/* 1. Reply */}
           {onReply && (
             <button
               type="button"
@@ -5704,7 +5921,7 @@ const MessageBubble = memo(function MessageBubble({
               {t("chat.forward")}
             </button>
           )}
-          {/* 3. Копировать */}
+          {/* 3. Copy */}
           <button
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
@@ -5719,7 +5936,7 @@ const MessageBubble = memo(function MessageBubble({
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
             {contextMenuCopied ? t("common.copied") : t("common.copy")}
           </button>
-          {/* 4. Копировать для Word */}
+          {/* 4. Copy for Word */}
           <button
             type="button"
             className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
@@ -5735,7 +5952,7 @@ const MessageBubble = memo(function MessageBubble({
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
             {t("chat.copyForWord")}
           </button>
-          {/* 5. Редактировать */}
+          {/* 5. Edit */}
           {canEdit && (
             <button
               type="button"
@@ -5753,7 +5970,7 @@ const MessageBubble = memo(function MessageBubble({
 {t("chat.editMessage")}
               </button>
           )}
-          {/* 6. Удалить */}
+          {/* 6. Delete */}
           {isMine && onMessageDeleted && (
             <button
               type="button"
@@ -5862,7 +6079,7 @@ const MessageBubble = memo(function MessageBubble({
 });
 
 /* ================================================================
-   VideoCirclePlayer — круглое видео (кружочек)
+   VideoCirclePlayer — circle video (video note)
    ================================================================ */
 
 function formatAudioTime(seconds: number): string {
@@ -5899,7 +6116,7 @@ const exclusiveSound = (() => {
 })();
 
 /* ================================================================
-   SimpleAudioPlayer — аудио без волны: кнопка play, прогресс-бар, длительность
+   SimpleAudioPlayer — audio without waveform: play button, progress bar, duration
    ================================================================ */
 
 function SimpleAudioPlayer({ fileUrl, isMine, ownerId }: { fileUrl: string; isMine: boolean; ownerId: string }) {
@@ -6027,7 +6244,7 @@ function SimpleAudioPlayer({ fileUrl, isMine, ownerId }: { fileUrl: string; isMi
 }
 
 /* ================================================================
-   AudioWaveform — полоски амплитуд, прогресс (0..1), клик по волне = перемотка
+   AudioWaveform — amplitude bars, progress (0..1), click on wave = seek
    ================================================================ */
 
 function AudioWaveform({
@@ -6078,7 +6295,7 @@ function AudioWaveform({
 }
 
 /* ================================================================
-   AudioMessagePlayer — волна + отдельная кнопка play, без белого блока
+   AudioMessagePlayer — waveform + separate play button, no white block
    ================================================================ */
 
 function AudioMessagePlayer({ fileUrl, waveform, isMine, ownerId }: { fileUrl: string; waveform: number[]; isMine: boolean; ownerId: string }) {
@@ -6176,7 +6393,7 @@ function AudioMessagePlayer({ fileUrl, waveform, isMine, ownerId }: { fileUrl: s
 }
 
 /* ================================================================
-   ImageTileGrid — плиточное отображение нескольких изображений
+   ImageTileGrid — tile layout for multiple images
    ================================================================ */
 
 /**
@@ -6244,7 +6461,7 @@ function ImageTileGrid({ images }: { images: { id: string; url?: string | null; 
           alt={img.original_name || ""}
           className="w-full h-full hover:scale-105 transition-transform duration-200"
           objectFit="cover"
-          useOriginalQuality
+          fullWidth={600}
           preserveAnimation={(img.mime_type || "").includes("gif") || /\.gif$/i.test(img.original_name || "")}
         />
         {isLast && (
@@ -6456,7 +6673,7 @@ function ImageLightbox({
           useOriginalQuality
         />
 
-        {/* Навигация */}
+        {/* Navigation */}
         {idx > 0 && (
           <button
             onClick={() => setIdx(idx - 1)}
@@ -6474,12 +6691,12 @@ function ImageLightbox({
           </button>
         )}
 
-        {/* Счётчик */}
+        {/* Counter */}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm px-3 py-1 rounded-full">
           {idx + 1} / {images.length}
         </div>
       </div>
-      {/* Закрыть — в углу экрана, не поверх контента */}
+      {/* Close — in screen corner, not over content */}
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         className="fixed top-4 right-4 z-[101] bg-white/90 hover:bg-white text-slate-800 rounded-full w-9 h-9 flex items-center justify-center shadow-lg transition-colors"
@@ -6487,7 +6704,7 @@ function ImageLightbox({
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
-      {/* Скачать — в правом нижнем углу */}
+      {/* Download — in bottom-right corner */}
       <a
         href={canDownload ? url : undefined}
         download={canDownload ? downloadName : undefined}
@@ -6580,13 +6797,22 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const progress = duration > 0 ? currentTime / duration : 0;
+  const isDraggingRef = useRef(false);
+  const dragStartedRef = useRef(false);
+  const pointerIdRef = useRef<number | null>(null);
+  const downXYRef = useRef({ x: 0, y: 0 });
+  const pendingPlayRef = useRef(false);
+  const wasDragRef = useRef(false);
+  const DRAG_THRESHOLD_PX = 6;
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
     const unregister = exclusiveSound.register(ownerId, () => {
+      try { el.pause(); } catch {}
       el.muted = true;
       setMuted(true);
+      setPlaying(false);
     });
     return () => {
       unregister();
@@ -6611,7 +6837,11 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
-    const onEnded = () => { setPlaying(false); setCurrentTime(0); };
+    const onEnded = () => {
+      setPlaying(false);
+      setCurrentTime(0);
+      exclusiveSound.release(ownerId);
+    };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
@@ -6624,9 +6854,9 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
       el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("ended", onEnded);
     };
-  }, [src, syncDuration]);
+  }, [src, syncDuration, ownerId]);
 
-  /* При уходе из зоны видимости — ставим на паузу и сбрасываем звук */
+  /* When leaving the visible area — pause and reset audio */
   useEffect(() => {
     const el = videoRef.current;
     const container = containerRef.current;
@@ -6654,7 +6884,6 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    // Если уже играет без звука — по клику включаем звук.
     if (!v.paused && muted) {
       exclusiveSound.request(ownerId);
       v.muted = false;
@@ -6670,7 +6899,6 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
       v.play()
         .then(() => setPlaying(true))
         .catch(() => {
-          // Fallback: if unmuted play is blocked, at least show the circle playing muted.
           v.muted = true;
           setMuted(true);
           exclusiveSound.release(ownerId);
@@ -6685,37 +6913,147 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
     setMuted(true);
   };
 
-  const handleBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const getPercentFromEvent = useCallback((clientX: number, clientY: number): number => {
+    const container = containerRef.current;
+    if (!container) return 0;
+    const rect = container.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const angleRad = Math.atan2(dx, -dy);
+    const percent = ((angleRad + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI);
+    return Math.max(0, Math.min(1, percent));
+  }, []);
+
+  const seekToPercent = useCallback((percent: number) => {
     const v = videoRef.current;
     if (!v || !Number.isFinite(duration) || duration <= 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, x / rect.width));
-    v.currentTime = percent * duration;
-    setCurrentTime(v.currentTime);
-    e.stopPropagation();
+    const time = Math.max(0, Math.min(duration, percent * duration));
+    v.currentTime = time;
+    setCurrentTime(time);
+  }, [duration]);
+
+  const clearDragState = useCallback(() => {
+    const el = containerRef.current;
+    if (el && pointerIdRef.current != null) {
+      try { el.releasePointerCapture(pointerIdRef.current); } catch { /* ignore */ }
+    }
+    pointerIdRef.current = null;
+    dragStartedRef.current = false;
+    isDraggingRef.current = false;
+  }, []);
+
+  const handleCirclePointerDown = (e: React.PointerEvent) => {
+    if (!containerRef.current) return;
+    isDraggingRef.current = false;
+    dragStartedRef.current = true;
+    wasDragRef.current = false;
+    pointerIdRef.current = e.pointerId;
+    downXYRef.current = { x: e.clientX, y: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   };
+
+  const handleCirclePointerMove = (e: React.PointerEvent) => {
+    if (!dragStartedRef.current) return;
+    if (!isDraggingRef.current) {
+      const dx = e.clientX - downXYRef.current.x;
+      const dy = e.clientY - downXYRef.current.y;
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      isDraggingRef.current = true;
+    }
+    const percent = getPercentFromEvent(e.clientX, e.clientY);
+    seekToPercent(percent);
+  };
+
+  const handleCirclePointerUp = () => {
+    const wasDrag = isDraggingRef.current;
+    clearDragState();
+    if (wasDrag) {
+      wasDragRef.current = true;
+    } else {
+      pendingPlayRef.current = true;
+    }
+  };
+
+  const handleCircleClick = (e: React.MouseEvent) => {
+    if (wasDragRef.current) {
+      wasDragRef.current = false;
+      e.preventDefault();
+      return;
+    }
+    if (pendingPlayRef.current) {
+      pendingPlayRef.current = false;
+      togglePlay();
+    }
+  };
+
+  const handleCirclePointerLeave = () => {
+    clearDragState();
+  };
+
+  const handleCirclePointerCancel = (e: React.PointerEvent) => {
+    clearDragState();
+  };
+
+  const R = 46;
+  const strokeWidth = 4;
+  const circumference = 2 * Math.PI * R;
 
   return (
     <div className="flex flex-col items-center gap-2">
       <div
         ref={containerRef}
-        className="relative w-48 h-48 rounded-full overflow-hidden cursor-pointer group bg-black"
-        onClick={togglePlay}
+        role="button"
+        tabIndex={0}
+        className="relative w-48 h-48 rounded-full overflow-hidden cursor-pointer group bg-black select-none"
+        onPointerDown={handleCirclePointerDown}
+        onPointerMove={handleCirclePointerMove}
+        onPointerUp={handleCirclePointerUp}
+        onPointerLeave={handleCirclePointerLeave}
+        onPointerCancel={handleCirclePointerCancel}
+        onClick={handleCircleClick}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePlay(); } }}
       >
         <video
           ref={videoRef}
           src={src}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover pointer-events-none"
           preload="metadata"
           playsInline
           loop
           muted={muted}
           onEnded={() => { setPlaying(false); setCurrentTime(0); }}
         />
-        {/* Play overlay */}
+        {/* Circular progress ring (Telegram-style) — around the circle, seekable */}
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          viewBox="0 0 100 100"
+          style={{ transform: "rotate(-90deg)" }}
+          aria-hidden
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r={R}
+            fill="none"
+            stroke="rgba(255,255,255,0.35)"
+            strokeWidth={strokeWidth}
+          />
+          <circle
+            cx="50"
+            cy="50"
+            r={R}
+            fill="none"
+            stroke="rgba(96,165,250,0.9)"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={`${circumference * progress} ${circumference}`}
+            className="transition-all duration-75"
+          />
+        </svg>
         {!playing && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors rounded-full">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors rounded-full pointer-events-none">
             <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="white" stroke="none">
               <polygon points="8 5 19 12 8 19 8 5" />
             </svg>
@@ -6730,31 +7068,16 @@ function VideoCirclePlayer({ src, ownerId }: { src: string; ownerId: string }) {
             </svg>
           </div>
         )}
-        {/* Gradient ring */}
-        <div className="absolute inset-0 rounded-full ring-2 ring-blue-400/50 pointer-events-none" />
       </div>
-      <div className="w-full max-w-[12rem] flex flex-col gap-0.5">
-        <div
-          role="progressbar"
-          aria-valuenow={progress * 100}
-          className="h-1.5 w-full rounded-full overflow-hidden cursor-pointer bg-slate-200"
-          onClick={handleBarClick}
-        >
-          <div
-            className="h-full rounded-full bg-blue-600 transition-all"
-            style={{ width: `${progress * 100}%` }}
-          />
-        </div>
-        <div className="text-xs text-slate-500 text-center">
-          {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
-        </div>
+      <div className="text-xs text-slate-500 text-center">
+        {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
       </div>
     </div>
   );
 }
 
 /* ================================================================
-   ScheduleMessageModal — форма отложенного/рекуррентного сообщения
+   ScheduleMessageModal — scheduled/recurring message form
    ================================================================ */
 
 function ScheduleMessageModal({
@@ -6786,7 +7109,7 @@ function ScheduleMessageModal({
     setScheduledAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
   }, []);
 
-  // При повторении подставлять время из выбранной даты
+  // For recurrence, use the time from the selected date
   useEffect(() => {
     if (recurrence !== "none" && scheduledAt) {
       const match = scheduledAt.match(/T(\d{2}:\d{2})/);

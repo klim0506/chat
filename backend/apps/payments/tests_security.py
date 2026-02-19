@@ -15,7 +15,7 @@ from apps.payments.constants import SUBSCRIPTION_PRICE_KOPECKS
 
 
 class ReturnUrlSecurityTest(TestCase):
-    """Проверка, что return_url разрешён только для FRONTEND_URL."""
+    """Verify that return_url is only allowed for FRONTEND_URL."""
 
     @override_settings(FRONTEND_URL="https://app.example.com")
     def test_allowed_same_netloc(self):
@@ -37,7 +37,7 @@ class ReturnUrlSecurityTest(TestCase):
 
 
 class WebhookSecurityTest(TestCase):
-    """Проверка защиты webhook: идемпотентность, сумма/валюта."""
+    """Webhook security checks: idempotency, amount/currency."""
 
     def setUp(self):
         self.client = APIClient()
@@ -56,7 +56,7 @@ class WebhookSecurityTest(TestCase):
 
     @patch("apps.payments.views.get_payment")
     def test_webhook_ignores_wrong_currency(self, get_payment):
-        """Платёж в другой валюте не активирует подписку."""
+        """Payment in a different currency does not activate subscription."""
         get_payment.return_value = MagicMock(
             status="succeeded",
             metadata={"subscription_id": str(self.sub.id)},
@@ -80,7 +80,7 @@ class WebhookSecurityTest(TestCase):
 
     @patch("apps.payments.views.get_payment")
     def test_webhook_ignores_wrong_amount(self, get_payment):
-        """Платёж с другой суммой не активирует подписку."""
+        """Payment with a different amount does not activate subscription."""
         get_payment.return_value = MagicMock(
             status="succeeded",
             metadata={"subscription_id": str(self.sub.id)},
@@ -104,7 +104,7 @@ class WebhookSecurityTest(TestCase):
 
     @patch("apps.payments.views.get_payment")
     def test_webhook_idempotent_already_succeeded(self, get_payment):
-        """Повторный webhook для уже обработанного платежа не меняет данные."""
+        """Duplicate webhook for an already processed payment does not change data."""
         get_payment.return_value = MagicMock(
             status="succeeded",
             metadata={"subscription_id": str(self.sub.id)},
@@ -129,4 +129,4 @@ class WebhookSecurityTest(TestCase):
         self.sub.refresh_from_db()
         paylog.refresh_from_db()
         self.assertEqual(paylog.status, PaymentLog.Status.SUCCEEDED)
-        # Период не должен был измениться повторно (идемпотентность сохраняет логику)
+        # Period should not have changed again (idempotency preserves the logic)

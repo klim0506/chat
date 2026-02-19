@@ -1,13 +1,13 @@
-# Generated migration: звёзды — прокачка 10→100 (50 звёзд), 100→1000 (100 звёзд)
+# Generated migration: stars — expansion 10→100 (50 stars), 100→1000 (100 stars)
 
 from django.db import migrations, models
 
 
 def backfill_expansion_tier(apps, schema_editor):
     Chat = apps.get_model("chats", "Chat")
-    # Уже расширенные чаты (expanded_until задан) — уровень 1000
+    # Already expanded chats (expanded_until is set) — tier 1000
     Chat.objects.filter(expanded_until__isnull=False).update(expansion_tier=1000)
-    # Базовые чаты с лимитом 100 → 10
+    # Base chats with limit 100 → 10
     Chat.objects.filter(expanded_until__isnull=True, max_members=100).update(max_members=10)
 
 

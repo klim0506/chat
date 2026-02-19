@@ -1,0 +1,134 @@
+server {
+	server_name pingychat.com www.pingychat.com;
+	charset off;
+	index index.php index.html;
+	disable_symlinks if_not_owner from=$root_path;
+	include /etc/nginx/vhosts-includes/*.conf;
+	include /etc/nginx/vhosts-resources/pingychat.com/*.conf;
+	include /etc/nginx/users-resources/root_new/*.conf;
+	access_log /var/www/httpd-logs/pingychat.com.access.log;
+	error_log /var/www/httpd-logs/pingychat.com.error.log notice;
+	set $root_path /var/www/root_new/data/www/pingychat.com;
+	root $root_path;
+	gzip on;
+	gzip_comp_level 5;
+	gzip_disable "msie6";
+	gzip_types text/plain text/css application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript application/javascript image/svg+xml;
+
+	# HTTP -> HTTPS redirect (no :443 in URL)
+	return 301 https://$host$request_uri;
+	listen 109.172.100.103:80;
+}
+server {
+	server_name pingychat.com www.pingychat.com;
+	ssl_certificate "/var/www/httpd-cert/root_new/www.pingychat.com_custom_1.crtca";
+	ssl_certificate_key "/var/www/httpd-cert/root_new/www.pingychat.com_custom_1.key";
+	ssl_ciphers EECDH:+AES256:-3DES:RSA+AES:!NULL:!RC4;
+	ssl_prefer_server_ciphers on;
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+	ssl_dhparam /etc/ssl/certs/dhparam4096.pem;
+	charset off;
+	index index.php index.html;
+	disable_symlinks if_not_owner from=$root_path;
+	include /etc/nginx/vhosts-includes/*.conf;
+	include /etc/nginx/vhosts-resources/pingychat.com/*.conf;
+	include /etc/nginx/users-resources/root_new/*.conf;
+	access_log /var/www/httpd-logs/pingychat.com.access.log;
+	error_log /var/www/httpd-logs/pingychat.com.error.log notice;
+	set $root_path /var/www/root_new/data/www/pingychat.com;
+	root $root_path;
+	gzip on;
+	gzip_comp_level 5;
+	gzip_disable "msie6";
+	gzip_types text/plain text/css application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript application/javascript image/svg+xml;
+
+	# Service worker must not be cached
+	location = /sw.js {
+		expires off;
+		add_header Cache-Control "no-store, no-cache, must-revalidate";
+	}
+
+	# Manifest can be refreshed periodically
+	location = /manifest.json {
+		expires 1h;
+		add_header Cache-Control "public, must-revalidate";
+	}
+
+	# Cache static assets aggressively
+	location ~* \.(?:js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif|mp4|webm)$ {
+		expires 1y;
+		add_header Cache-Control "public, immutable";
+		access_log off;
+		try_files $uri =404;
+	}
+
+	# API (HTTP)
+	location /api/ {
+		proxy_pass http://127.0.0.1:8000;
+		proxy_set_header Host              $host;
+		proxy_set_header X-Real-IP         $remote_addr;
+		proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_read_timeout    300s;
+		proxy_send_timeout    300s;
+		proxy_connect_timeout 60s;
+	}
+
+	# Django admin
+	location /admin/ {
+		proxy_pass http://127.0.0.1:8000;
+		proxy_set_header Host              $host;
+		proxy_set_header X-Real-IP         $remote_addr;
+		proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+
+	# Django static & media
+	location /static/ {
+		proxy_pass http://127.0.0.1:8000;
+		proxy_set_header Host $host;
+		expires 1y;
+		add_header Cache-Control "public, immutable";
+	}
+
+	# Protected media (avatars, backgrounds) — only via /api/media/serve/ with token
+	location ~ ^/media/(avatars|user_avatars|chat_avatars|chat_backgrounds)/ {
+		return 403;
+	}
+
+	location /media/ {
+		proxy_pass http://127.0.0.1:8000;
+		proxy_set_header Host $host;
+		expires 7d;
+		add_header Cache-Control "public";
+	}
+
+	# App downloads — SPA pages, files served as-is
+	location ~ ^/downloads/(desktop|android)/?$ {
+		try_files /index.html =404;
+	}
+	location ~* ^/downloads/.*\.(zip|apk)$ {
+		add_header Content-Disposition "attachment";
+		try_files $uri =404;
+	}
+
+	# WebSocket
+	location /ws/ {
+		proxy_pass http://127.0.0.1:8000;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade           $http_upgrade;
+		proxy_set_header Connection        "upgrade";
+		proxy_set_header Host              $host;
+		proxy_set_header X-Real-IP         $remote_addr;
+		proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_read_timeout  86400s;
+		proxy_send_timeout  86400s;
+	}
+
+	# SPA fallback
+	location / {
+		try_files $uri $uri/ /index.html;
+	}
+	listen 109.172.100.103:443 ssl;
+}

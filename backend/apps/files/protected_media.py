@@ -1,7 +1,7 @@
 """
-Защищённая раздача медиа (аватарки, фоны чатов).
-URL с подписью HMAC — нельзя подобрать по перебору.
-Проверка доступа: только авторизованные пользователи с правом видеть контент.
+Protected media serving (avatars, chat backgrounds).
+HMAC-signed URLs — cannot be guessed by brute force.
+Access check: only authenticated users with permission to view the content.
 """
 import hashlib
 import hmac
@@ -10,11 +10,11 @@ from urllib.parse import quote
 
 from django.conf import settings
 
-MEDIA_TOKEN_TTL = 60 * 60  # 1 час
+MEDIA_TOKEN_TTL = 60 * 60  # 1 hour
 
 
 def _normalize_path(path: str) -> str:
-    """Приводит путь к виду без ведущего / и без media/."""
+    """Normalizes path by stripping leading / and media/ prefix."""
     p = (path or "").strip().replace("\\", "/")
     while p.startswith("/"):
         p = p[1:]
@@ -26,7 +26,7 @@ def _normalize_path(path: str) -> str:
 
 
 def make_protected_media_token(path: str, expires_at: int | None = None) -> str:
-    """Генерирует HMAC-токен для пути. Без знания path и SECRET_KEY подбор невозможен."""
+    """Generates an HMAC token for the path. Without knowing path and SECRET_KEY, guessing is impossible."""
     path = _normalize_path(path)
     if not path:
         return ""
@@ -42,7 +42,7 @@ def make_protected_media_token(path: str, expires_at: int | None = None) -> str:
 
 
 def verify_protected_media_token(path: str, token: str) -> bool:
-    """Проверяет подпись и срок действия токена."""
+    """Verifies the token signature and expiration."""
     path = _normalize_path(path)
     if not path or not token:
         return False
@@ -64,9 +64,9 @@ def verify_protected_media_token(path: str, token: str) -> bool:
 
 def make_protected_media_url(path: str, request=None, base_url: str | None = None) -> str | None:
     """
-    Возвращает полный URL для защищённого медиа с токеном.
-    path: путь из ImageField (например, avatars/xxx.jpg или /media/avatars/xxx.jpg).
-    base_url: при отсутствии request — базовый URL (например из settings.FRONTEND_URL).
+    Returns a full URL for protected media with a token.
+    path: path from ImageField (e.g. avatars/xxx.jpg or /media/avatars/xxx.jpg).
+    base_url: when request is absent — base URL (e.g. from settings.FRONTEND_URL).
     """
     path = _normalize_path(path)
     if not path:

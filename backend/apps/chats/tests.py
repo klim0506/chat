@@ -1,7 +1,7 @@
 """
-Тесты для мульти-изображений в сообщениях (плитка).
-Покрывает: модель, сериализатор, REST API (создание + получение),
-а также обратную совместимость (одиночный file).
+Tests for multi-image messages (tile layout).
+Covers: model, serializer, REST API (create + retrieve),
+and backward compatibility (single file).
 """
 import uuid
 
@@ -16,7 +16,7 @@ from apps.chats.serializers import MessageSerializer
 
 
 def _make_token(user):
-    """Сгенерировать JWT access-токен для тестового пользователя."""
+    """Generate a JWT access token for a test user."""
     from apps.users.jwt_utils import make_access_token
     return make_access_token(user.pk)
 
@@ -53,18 +53,18 @@ def _create_file(user, name="photo.jpg", mime="image/jpeg"):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Модельные тесты
+#  Model tests
 # ═══════════════════════════════════════════════════════════════
 
 class MessageModelTest(TestCase):
-    """Проверка M2M поля files на модели Message."""
+    """Test M2M files field on the Message model."""
 
     def setUp(self):
         self.user = _create_user()
         self.chat = _create_chat(self.user)
 
     def test_message_files_m2m_empty_by_default(self):
-        """Новое сообщение не имеет прикреплённых файлов."""
+        """A new message has no attached files."""
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
             msg_type=Message.MsgType.TEXT, content="hello",
@@ -73,7 +73,7 @@ class MessageModelTest(TestCase):
         self.assertIsNone(msg.file)
 
     def test_message_attach_multiple_files(self):
-        """Можно прикрепить несколько файлов через M2M."""
+        """Multiple files can be attached via M2M."""
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
             msg_type=Message.MsgType.FILE, content="photos",
@@ -88,7 +88,7 @@ class MessageModelTest(TestCase):
         self.assertEqual(ids, {f1.id, f2.id, f3.id})
 
     def test_message_single_file_backward_compat(self):
-        """Одиночный file FK по-прежнему работает."""
+        """Single file FK still works."""
         f = _create_file(self.user, "single.jpg")
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
@@ -96,10 +96,10 @@ class MessageModelTest(TestCase):
             file=f,
         )
         self.assertEqual(msg.file_id, f.id)
-        self.assertEqual(msg.files.count(), 0)  # M2M не задан
+        self.assertEqual(msg.files.count(), 0)  # M2M not set
 
     def test_file_deletion_does_not_delete_message(self):
-        """Удаление файла не удаляет сообщение (SET_NULL)."""
+        """Deleting a file does not delete the message (SET_NULL)."""
         f = _create_file(self.user, "del.jpg")
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
@@ -112,11 +112,11 @@ class MessageModelTest(TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Сериализатор
+#  Serializer
 # ═══════════════════════════════════════════════════════════════
 
 class MessageSerializerTest(TestCase):
-    """Тесты MessageSerializer: создание с file_ids и вывод files."""
+    """MessageSerializer tests: creation with file_ids and files output."""
 
     def setUp(self):
         self.user = _create_user()
@@ -130,7 +130,7 @@ class MessageSerializerTest(TestCase):
         return {"request": request}
 
     def test_create_message_with_file_ids(self):
-        """Serializer.create() прикрепляет файлы через file_ids."""
+        """Serializer.create() attaches files via file_ids."""
         f1 = _create_file(self.user, "img1.jpg")
         f2 = _create_file(self.user, "img2.jpg")
         data = {
@@ -143,12 +143,12 @@ class MessageSerializerTest(TestCase):
         msg = ser.save(chat=self.chat, sender=self.user)
 
         self.assertEqual(msg.files.count(), 2)
-        # file FK заполняется автоматически первым файлом
+        # file FK is auto-populated with the first file
         self.assertIsNotNone(msg.file)
         self.assertIn(msg.file_id, [f1.id, f2.id])
 
     def test_to_representation_multi_files(self):
-        """В ответе files — массив вложенных объектов."""
+        """Response files field is an array of nested objects."""
         f1 = _create_file(self.user, "a.jpg")
         f2 = _create_file(self.user, "b.jpg")
         msg = Message.objects.create(
@@ -165,7 +165,7 @@ class MessageSerializerTest(TestCase):
         self.assertEqual(file_ids_in_response, {str(f1.id), str(f2.id)})
 
     def test_to_representation_single_file_compat(self):
-        """Если files M2M пусто, но file FK задан — files=[file]."""
+        """If files M2M is empty but file FK is set — files=[file]."""
         f = _create_file(self.user, "solo.jpg")
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
@@ -178,7 +178,7 @@ class MessageSerializerTest(TestCase):
         self.assertEqual(data["files"][0]["id"], str(f.id))
 
     def test_to_representation_text_message_empty_files(self):
-        """Текстовое сообщение — files пустой массив."""
+        """Text message — files is an empty array."""
         msg = Message.objects.create(
             chat=self.chat, sender=self.user,
             msg_type=Message.MsgType.TEXT, content="hello",
@@ -187,7 +187,7 @@ class MessageSerializerTest(TestCase):
         self.assertEqual(data["files"], [])
 
     def test_create_message_without_file_ids(self):
-        """Создание текстового сообщения без file_ids."""
+        """Creating a text message without file_ids."""
         data = {"msg_type": "text", "content": "just text"}
         ser = MessageSerializer(data=data, context=self._ctx())
         self.assertTrue(ser.is_valid(), ser.errors)
@@ -196,7 +196,7 @@ class MessageSerializerTest(TestCase):
         self.assertIsNone(msg.file)
 
     def test_create_message_ignores_other_users_file_ids(self):
-        """Чужие file_ids не привязываются к сообщению (только свои)."""
+        """Other users' file_ids are not attached to the message (own files only)."""
         other_user = _create_user(phone="+79991112233", display_name="Other")
         my_file = _create_file(self.user, "mine.jpg")
         other_file = _create_file(other_user, "other.jpg")
@@ -213,11 +213,11 @@ class MessageSerializerTest(TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  REST API тесты
+#  REST API tests
 # ═══════════════════════════════════════════════════════════════
 
 class MultiImageAPITest(TestCase):
-    """Интеграционные тесты: загрузка файлов + создание мульти-сообщения + получение."""
+    """Integration tests: file upload + multi-image message creation + retrieval."""
 
     def setUp(self):
         self.user = _create_user()
@@ -227,8 +227,8 @@ class MultiImageAPITest(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
 
     def _upload_image(self, name="photo.jpg"):
-        """Загрузить фейковый JPEG через API."""
-        # Минимальный валидный JPEG (SOI + EOI)
+        """Upload a fake JPEG via the API."""
+        # Minimal valid JPEG (SOI + EOI)
         jpeg_bytes = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
         f = SimpleUploadedFile(name, jpeg_bytes, content_type="image/jpeg")
         res = self.client.post(
@@ -240,7 +240,7 @@ class MultiImageAPITest(TestCase):
         return res.data["id"]
 
     def test_create_message_with_multiple_images(self):
-        """POST message с file_ids — создаёт сообщение с несколькими изображениями."""
+        """POST message with file_ids — creates a message with multiple images."""
         fid1 = self._upload_image("a.jpg")
         fid2 = self._upload_image("b.jpg")
         fid3 = self._upload_image("c.jpg")
@@ -259,15 +259,15 @@ class MultiImageAPITest(TestCase):
         self.assertIn("files", res.data)
         self.assertEqual(len(res.data["files"]), 3)
 
-        # Проверяем, что file FK тоже заполнен
+        # Verify that file FK is also populated
         self.assertIsNotNone(res.data["file"])
 
     def test_get_messages_returns_files_array(self):
-        """GET messages — каждое сообщение содержит files массив."""
+        """GET messages — each message contains a files array."""
         fid1 = self._upload_image("x.jpg")
         fid2 = self._upload_image("y.jpg")
 
-        # Создаём сообщение с двумя файлами
+        # Create a message with two files
         self.client.post(
             f"/api/chats/{self.chat.id}/messages/",
             {
@@ -279,7 +279,7 @@ class MultiImageAPITest(TestCase):
             format="json",
         )
 
-        # Создаём текстовое сообщение
+        # Create a text message
         self.client.post(
             f"/api/chats/{self.chat.id}/messages/",
             {"msg_type": "text", "content": "hello"},
@@ -291,7 +291,7 @@ class MultiImageAPITest(TestCase):
         msgs = res.data
         self.assertEqual(len(msgs), 2)
 
-        # Первое — мульти-изображение
+        # First — multi-image
         img_msg = msgs[0]
         self.assertEqual(len(img_msg["files"]), 2)
         for f in img_msg["files"]:
@@ -300,12 +300,12 @@ class MultiImageAPITest(TestCase):
             self.assertIn("original_name", f)
             self.assertIn("mime_type", f)
 
-        # Второе — текст
+        # Second — text
         txt_msg = msgs[1]
         self.assertEqual(txt_msg["files"], [])
 
     def test_create_single_file_message_backward_compat(self):
-        """Одиночный файл (старый формат) — по-прежнему работает."""
+        """Single file (old format) — still works."""
         fid = self._upload_image("single.jpg")
         res = self.client.post(
             f"/api/chats/{self.chat.id}/messages/",
@@ -313,12 +313,12 @@ class MultiImageAPITest(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 201)
-        # files содержит 1 элемент (из file FK)
+        # files contains 1 element (from file FK)
         self.assertEqual(len(res.data["files"]), 1)
         self.assertEqual(res.data["files"][0]["id"], fid)
 
     def test_empty_file_ids_is_ok(self):
-        """Пустой file_ids — не ломает запрос."""
+        """Empty file_ids — does not break the request."""
         res = self.client.post(
             f"/api/chats/{self.chat.id}/messages/",
             {"msg_type": "text", "content": "no files", "file_ids": []},
@@ -328,7 +328,7 @@ class MultiImageAPITest(TestCase):
         self.assertEqual(res.data["files"], [])
 
     def test_unauthorized_user_cannot_send(self):
-        """Неавторизованный пользователь — 401."""
+        """Unauthorized user — 401."""
         client = APIClient()
         res = client.post(
             f"/api/chats/{self.chat.id}/messages/",
@@ -338,7 +338,7 @@ class MultiImageAPITest(TestCase):
         self.assertEqual(res.status_code, 401)
 
     def test_non_member_cannot_send(self):
-        """Пользователь не-участник чата — 403."""
+        """Non-member user — 403."""
         other = _create_user(phone="79991112233", display_name="Другой")
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {_make_token(other)}")
@@ -351,11 +351,11 @@ class MultiImageAPITest(TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Файловый API
+#  File API
 # ═══════════════════════════════════════════════════════════════
 
 class FileUploadAPITest(TestCase):
-    """Тесты API загрузки файлов."""
+    """File upload API tests."""
 
     def setUp(self):
         self.user = _create_user()
@@ -365,7 +365,7 @@ class FileUploadAPITest(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
 
     def test_upload_file_success(self):
-        """Файл загружается и возвращает id, url, original_name."""
+        """File is uploaded and returns id, url, original_name."""
         content = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 50 + b'\xff\xd9'
         f = SimpleUploadedFile("test.jpg", content, content_type="image/jpeg")
         res = self.client.post(
@@ -380,12 +380,12 @@ class FileUploadAPITest(TestCase):
         self.assertEqual(res.data["mime_type"], "image/jpeg")
 
     def test_upload_without_file_returns_400(self):
-        """Запрос без файла — 400."""
+        """Request without a file — 400."""
         res = self.client.post("/api/files/upload/", {}, format="multipart")
         self.assertEqual(res.status_code, 400)
 
     def test_file_serve_with_valid_token(self):
-        """Доступ к файлу по валидному HMAC-токену."""
+        """Access a file with a valid HMAC token."""
         content = b'\xff\xd8\xff\xe0' + b'\x00' * 50 + b'\xff\xd9'
         f = SimpleUploadedFile("serve.jpg", content, content_type="image/jpeg")
         upload_res = self.client.post(
@@ -394,12 +394,12 @@ class FileUploadAPITest(TestCase):
             format="multipart",
         )
         file_url = upload_res.data["url"]
-        # URL вида /api/files/<uuid>/?t=<token>
+        # URL of the form /api/files/<uuid>/?t=<token>
         serve_res = self.client.get(file_url)
         self.assertEqual(serve_res.status_code, 200)
 
     def test_file_serve_without_token_returns_403(self):
-        """Доступ к файлу без токена — 403."""
+        """Access a file without a token — 403."""
         att = _create_file(self.user, "secret.jpg")
         res = self.client.get(f"/api/files/{att.id}/")
         self.assertEqual(res.status_code, 403)

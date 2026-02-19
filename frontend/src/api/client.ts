@@ -3,15 +3,21 @@ import { useAuthStore } from "../store/auth";
 
 const baseURL = import.meta.env.VITE_API_URL || "";
 
+/** Client type for session lifetime: web = 7 days, android/desktop = 3 years. Set at build time. */
+const clientType = (import.meta.env.VITE_CLIENT_TYPE as string) || "web";
+
 export const api = axios.create({
   baseURL: baseURL ? `${baseURL}/api` : "/api",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "X-Client": clientType,
+  },
 });
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  // Для FormData не задаём Content-Type — браузер подставит multipart/form-data с boundary
+  // Don't set Content-Type for FormData — browser will set multipart/form-data with boundary
   if (config.data instanceof FormData && config.headers) {
     delete config.headers["Content-Type"];
   }
@@ -50,28 +56,28 @@ export interface UserAvatar {
 export interface User {
   id: string;
   phone: string;
-  /** Уникальный юзернейм (латиница, цифры, подчёркивание); для поиска и @упоминаний */
+  /** Unique username (latin, digits, underscore); for search and @mentions */
   username?: string | null;
   telegram_username?: string;
   display_name: string;
   avatar: string | null;
-  /** Полный URL аватарки (для отображения) — первая из галереи */
+  /** Full avatar URL (for display) — first from gallery */
   avatar_url?: string | null;
-  /** Галерея аватарок (до 30) */
+  /** Avatar gallery (up to 30) */
   avatars?: UserAvatar[];
   referral_code?: string;
   stars?: number;
-  /** Пользователь сейчас онлайн */
+  /** User is currently online */
   is_online?: boolean;
-  /** Время последнего захода: ISO-строка, "recently" или null */
+  /** Last seen time: ISO string, "recently", or null */
   last_seen_display?: string | null;
-  /** Показывать ли другим время последнего захода */
+  /** Whether to show last seen time to others */
   show_last_seen?: boolean;
-  /** Показывать ли другим номер телефона */
+  /** Whether to show phone number to others */
   show_phone?: boolean;
-  /** Кто может писать в ЛС: everyone | nobody */
+  /** Who can send DMs: everyone | nobody */
   dm_privacy?: "everyone" | "nobody";
-  /** Кто может добавлять в группы: everyone | nobody */
+  /** Who can add to groups: everyone | nobody */
   add_to_group_privacy?: "everyone" | "nobody";
 }
 
@@ -139,21 +145,23 @@ export interface Chat {
   title: string;
   description: string;
   slug: string;
-  /** Только у групп; у личного чата типа нет */
+  /** Only for groups; DMs have no type */
   chat_type: "open" | "closed" | null;
-  /** Личный чат — на двоих, без ссылки и без типа. Группа из 2 человек — не личный. */
+  /** DM — two people, no link and no type. A group of 2 is not a DM. */
   is_personal: boolean;
-  /** Чат «Избранное» — только владелец, никого нельзя добавить */
+  /** Secret chat with E2EE. Messages encrypted on client; server stores only ciphertext. */
+  is_secret: boolean;
+  /** Favorites chat — owner only, no one can be added */
   is_favorites?: boolean;
   max_members: number;
   effective_max_members: number;
   owner: User;
   members_count: number;
-  /** У личного чата ссылки нет */
+  /** DMs have no invite link */
   invite_link: string | null;
   is_active: boolean;
   created_at: string;
-  /** Время последнего сообщения (для сортировки списка чатов) */
+  /** Last message timestamp (for chat list sorting) */
   last_message_at?: string | null;
   unread_count: number;
   /** True when user manually marked chat as unread (show dot, not count) */
@@ -165,19 +173,19 @@ export interface Chat {
   is_expanded: boolean;
   expanded_until: string | null;
   avatar_url: string | null;
-  /** URL фонового изображения чата (настраивается в описании группы) */
+  /** Chat background image URL (configured in group settings) */
   background_url: string | null;
-  /** Для личного чата — данные собеседника */
+  /** For DMs — the other member's data */
   other_member?: User | null;
-  /** Закреплённое для всех сообщение (первое из pinned_messages — backward compat) */
+  /** Pinned-for-all message (first from pinned_messages — backward compat) */
   pinned_message?: Message | null;
-  /** Все закреплённые для всех сообщения (упорядочены по pin_order desc) */
+  /** All pinned-for-all messages (ordered by pin_order desc) */
   pinned_messages?: Message[];
-  /** Максимально допустимое кол-во закреплённых для всех (зависит от прокачки) */
+  /** Max allowed pinned-for-all messages (depends on expansion level) */
   max_pins?: number;
-  /** Закреплённые текущим пользователем сообщения (для себя) */
+  /** Messages pinned by current user (for self) */
   my_pinned_messages?: Message[];
-  /** Превью последнего сообщения для списка чатов */
+  /** Last message preview for chat list */
   last_message_preview?: string | null;
 }
 
@@ -210,31 +218,31 @@ export interface Message {
   msg_type: string;
   content: string;
   file: FileAttachment | null;
-  /** Несколько файлов (изображений) в одном сообщении */
+  /** Multiple files (images) in a single message */
   files: FileAttachment[];
   created_at: string;
   edited_at: string | null;
   is_deleted: boolean;
   reactions: Record<string, number>;
-  /** До 3 реакций текущего пользователя на это сообщение */
+  /** Up to 3 reactions by the current user on this message */
   my_reactions: string[];
-  /** Только для своих сообщений: доставлено (1 галочка) или прочитано (2 галочки). */
+  /** Own messages only: delivered (1 check) or read (2 checks). */
   read_status?: "delivered" | "read" | null;
-  /** Только для своих сообщений: кто прочитал это сообщение (last_read_at >= created_at). */
+  /** Own messages only: who read this message (last_read_at >= created_at). */
   read_by?: User[];
-  /** Амплитуды для визуализации аудио (0–255, до 128 значений) */
+  /** Audio waveform amplitudes (0–255, up to 128 values) */
   waveform?: number[] | null;
-  /** Сообщение, на которое отвечаем (одноуровневое цитирование) */
+  /** Message being replied to (single-level quoting) */
   reply_to?: ReplyMessage | null;
-  /** Оригинальный отправитель пересланного сообщения */
+  /** Original sender of the forwarded message */
   forwarded_from?: User | null;
-  /** Название чата, из которого переслано */
+  /** Chat title the message was forwarded from */
   forwarded_from_chat_title?: string | null;
-  /** E2EE: сообщение зашифровано */
+  /** E2EE: message is encrypted */
   is_encrypted?: boolean;
-  /** E2EE: шифрованные ключи по device_id */
+  /** E2EE: encrypted keys by device_id */
   encrypted_keys?: Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>;
-  /** E2EE: устройство отправителя */
+  /** E2EE: sender's device */
   sender_device_id?: number | null;
 }
 
@@ -302,8 +310,25 @@ export const chatsApi = {
     api.post<{ is_muted: boolean; muted_until: string | null }>(`/chats/${chatId}/mute/`, { duration }),
   toggleArchive: (chatId: string) => api.post<{ is_archived: boolean }>(`/chats/${chatId}/toggle-archive/`),
   setPins: (chatIds: string[]) => api.post<{ pinned_chat_ids: string[] }>("/chats/pins/", { chat_ids: chatIds }),
-  getOrCreateDm: (userId: string) => api.post<Chat>("/chats/dm/", { user_id: userId }),
+  getOrCreateDm: (userId: string, opts?: { is_secret?: boolean }) =>
+    api.post<Chat>("/chats/dm/", { user_id: userId, ...(opts?.is_secret ? { is_secret: true } : {}) }),
+  searchMessages: (chatId: string, q: string, params?: { limit?: number; offset?: number }) =>
+    api.get<{ results: Message[]; total: number }>(`/chats/${chatId}/messages/search/`, { params: { q, ...params } }),
+  globalSearch: (q: string, params?: { limit?: number }) =>
+    api.get<{ results: GlobalSearchResult[] }>("/chats/search/", { params: { q, ...params } }),
 };
+
+export interface GlobalSearchResult {
+  id: string;
+  chat_id: string;
+  chat_title: string;
+  chat_is_personal: boolean;
+  sender_id: string;
+  sender_name: string;
+  content: string;
+  msg_type: string;
+  created_at: string;
+}
 
 export type ScheduledRecurrence = "none" | "daily" | "weekly";
 
@@ -314,7 +339,7 @@ export interface ScheduledMessage {
   scheduled_at: string;
   recurrence: ScheduledRecurrence;
   recurrence_time: string | null; // "HH:MM"
-  recurrence_weekday: number | null; // 0=пн, 6=вс
+  recurrence_weekday: number | null; // 0=Mon, 6=Sun
   created_at: string;
 }
 
@@ -333,7 +358,7 @@ export const messagesApi = {
   },
   create: (chatId: string, data: { msg_type?: string; content?: string; file_id?: string; file_ids?: string[]; waveform?: number[]; reply_to_id?: string; is_encrypted?: boolean; sender_device_id?: number; encrypted_keys?: Record<string, unknown> }) => {
     const payload: Record<string, unknown> = { ...data };
-    // file_ids — для нескольких файлов в одном сообщении
+    // file_ids — for multiple files in a single message
     if (data.file_ids && data.file_ids.length > 0) {
       payload.file_ids = data.file_ids;
     }

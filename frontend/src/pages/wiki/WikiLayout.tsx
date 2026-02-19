@@ -21,7 +21,7 @@ export default function WikiLayout() {
       <header className="border-b border-slate-200 bg-white sticky top-0 z-10">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-4xl">
           <Link to="/" aria-label={t("landing.brand")} className="inline-flex items-center text-blue-600 hover:text-blue-700">
-            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
+            <img src="/assets/logo.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
             <Link to="/" className="text-slate-500 hover:text-slate-700 text-sm">

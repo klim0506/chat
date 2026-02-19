@@ -1,6 +1,25 @@
-# Платформа приватных чатов
+# Pingy — платформа приватных чатов
 
-React + Django + PostgreSQL + Redis + Celery.
+React + Django + PostgreSQL + Redis + Celery. E2EE, PWA, i18n (RU/EN).
+
+## Структура проекта
+
+```
+├── backend/          # Django API, WebSocket, Celery
+├── frontend/         # Vite + React SPA
+├── scripts/          # Утилиты и скрипты
+│   ├── win/          # BAT-файлы для Windows (start.bat, run_backend.bat и т.д.)
+│   ├── deploy-to-server.sh   # Деплой на прод-сервер
+│   ├── init-letsencrypt.sh   # Настройка SSL (Let's Encrypt)
+│   ├── run_servers.py        # Запуск backend/frontend (обход проблем путей)
+│   ├── run_tests.py         # Запуск тестов backend/frontend
+│   └── tsconfig.json        # TypeScript для скриптов
+├── docker/           # Docker-конфигурации
+│   └── nginx/        # Nginx: dev.conf, ssl.conf
+├── docs/             # Документация, TODO, WIKI, дизайн-ассеты
+├── docker-compose.yml
+└── docker-compose.prod.yml
+```
 
 ## Что в проекте
 - `frontend` — веб-клиент (Vite, порт `5173`) с анимированными Lottie-реакциями на сообщения
@@ -96,7 +115,15 @@ celery -A config.celery beat -l info
 npm run run:all
 ```
 
+**Windows:** запуск из корня: `scripts\win\start.bat` (backend, Celery, frontend). PostgreSQL: `scripts\win\start_postgres.bat`.
+
 Важно: перед `run:all` должны быть доступны БД и Redis.
+
+## Срок действия сессии по типу клиента
+- **Веб** (браузер): refresh-токен 7 дней — нужно заново входить раз в неделю.
+- **Android / десктоп**: при сборке задаётся `VITE_CLIENT_TYPE=android` или `VITE_CLIENT_TYPE=desktop`; refresh-токен выдаётся на 3 года (до явного выхода).
+
+Фронт отправляет заголовок `X-Client` (из `VITE_CLIENT_TYPE` или `web` по умолчанию). Бэкенд при логине (`verify-code`) выставляет срок жизни refresh-токена в зависимости от этого заголовка.
 
 ## Переменные окружения backend
 Скопируйте `backend/.env.example` в `backend/.env` и заполните:

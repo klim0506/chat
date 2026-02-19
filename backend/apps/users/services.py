@@ -92,12 +92,12 @@ def generate_code(length=6):
 
 
 def _normalize_phone(phone: str) -> str:
-    """Номер только цифры (без + и пробелов)."""
+    """Digits only (strip +, spaces, dashes, parens)."""
     return phone.strip().replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
 
 
 def send_sms_redsms(phone: str, text: str) -> bool:
-    """RedSMS HTTP API. Документация: https://docs.redsms.ru/http/getting-started/"""
+    """RedSMS HTTP API. Docs: https://docs.redsms.ru/http/getting-started/"""
     import os
     import requests
 
@@ -135,26 +135,26 @@ def send_sms(phone: str, text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Telegram Gateway API — официальный бот для верификации по номеру
+# Telegram Gateway API — official phone verification bot
 # https://core.telegram.org/gateway/api, https://gateway.telegram.org/account/api
 # ---------------------------------------------------------------------------
 
-# ttl для sendVerificationMessage: 30–3600 секунд (документация API)
+# TTL for sendVerificationMessage: 30–3600 seconds (API docs)
 TELEGRAM_GATEWAY_TTL = max(30, min(3600, REDIS_OTP_TTL))
 
-# Сообщения для типичных ошибок API (пользователю)
+# User-facing messages for common API errors
 TELEGRAM_GATEWAY_ERROR_MESSAGES = {
-    "ACCESS_TOKEN_INVALID": "Неверный или истёкший токен Telegram Gateway. Получите новый на https://gateway.telegram.org/account/api",
-    "PHONE_NUMBER_INVALID": "Номер телефона должен быть в формате E.164 (например +79001234567).",
-    "PHONE_NUMBER_NOT_REGISTERED": "Этот номер не привязан к Telegram. Установите Telegram и привяжите номер или используйте другой способ входа.",
+    "ACCESS_TOKEN_INVALID": "Invalid or expired Telegram Gateway token. Get a new one at https://gateway.telegram.org/account/api",
+    "PHONE_NUMBER_INVALID": "Phone number must be in E.164 format (e.g. +79001234567).",
+    "PHONE_NUMBER_NOT_REGISTERED": "This number is not linked to Telegram. Install Telegram and link your number, or use another sign-in method.",
 }
 
 
 def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str | None]:
     """
-    Отправка кода через Telegram Gateway API (официальный бот верификации).
-    Возвращает (result_dict, None) при успехе, (None, error_message) при ответе API с ok=false,
-    (None, None) при отсутствии токена или сетевой ошибке (можно пробовать SMS).
+    Send verification code via Telegram Gateway API (official verification bot).
+    Returns (result_dict, None) on success, (None, error_message) on API error (ok=false),
+    (None, None) when token is missing or network error (can fallback to SMS).
     """
     import requests
 
@@ -174,7 +174,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
     }
 
     last_error: str | None = None
-    api_error_code: str | None = None  # код из data["error"] для 503
+    api_error_code: str | None = None  # error code from data["error"] for 503
     for attempt in range(1, 3):
         try:
             resp = requests.post(
@@ -202,7 +202,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
                 )
                 return (data.get("result") or {}, None)
 
-            # Ответ API с ошибкой — возвращаем код, чтобы отдать 503 с понятным текстом
+            # API returned an error — capture the code to return 503 with a user-friendly message
             api_error_code = data.get("error") if isinstance(data.get("error"), str) else None
             last_error = f"status={resp.status_code} error={api_error_code} body={str(data)[:200]}"
             logger.warning("Telegram Gateway error (attempt %s/2): %s", attempt, last_error)
@@ -213,7 +213,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
 
     if last_error:
         logger.error("Telegram Gateway failed for %s: %s", dest, last_error)
-    # Если API вернул явную ошибку — отдаём её клиенту (503), иначе None (пробуем SMS)
+    # If API returned an explicit error — pass it to the client (503), otherwise None (try SMS)
     user_message = None
     if api_error_code:
         user_message = TELEGRAM_GATEWAY_ERROR_MESSAGES.get(
@@ -334,9 +334,9 @@ def notify_new_login(user, session) -> None:
     try:
         send_sms(
             user.phone,
-            f"Новый вход: {session.device_label}, "
+            f"New login: {session.device_label}, "
             f"{session.created_at:%H:%M}. "
-            f"Не вы? Зайдите в Настройки -> Сессии.",
+            f"Not you? Go to Settings -> Sessions.",
         )
     except Exception:
         logger.exception("Failed to send new-login SMS notification")

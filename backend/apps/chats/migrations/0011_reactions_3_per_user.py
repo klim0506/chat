@@ -1,4 +1,4 @@
-# Реакции: до 3 на пользователя на сообщение (unique по message, user, emoji)
+# Reactions: up to 3 per user per message (unique on message, user, emoji)
 
 from django.db import migrations
 

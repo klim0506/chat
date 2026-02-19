@@ -5,16 +5,16 @@ import uuid
 
 from .fields import EncryptedTextField
 
-# Лимиты участников: базовый 10, прокачка 50 звёзд → 100, 100 звёзд → 1000
+# Member limits: base 10, upgrade 50 stars → 100, 100 stars → 1000
 DEFAULT_MAX_MEMBERS = 10
 EXPANSION_TIER_100 = 100
 EXPANSION_TIER_1000 = 1000
 
-# Лимиты закреплённых сообщений по уровню прокачки
+# Pinned message limits by expansion tier
 PIN_LIMITS = {
-    None: 1,                # без прокачки — 1 закреплённое
-    EXPANSION_TIER_100: 5,  # tier 100 — до 5
-    EXPANSION_TIER_1000: 20,  # tier 1000 — до 20
+    None: 1,                # no expansion — 1 pinned
+    EXPANSION_TIER_100: 5,  # tier 100 — up to 5
+    EXPANSION_TIER_1000: 20,  # tier 1000 — up to 20
 }
 
 
@@ -30,11 +30,16 @@ class Chat(models.Model):
     background = models.ImageField(upload_to="chat_backgrounds/", null=True, blank=True, help_text="Фоновое изображение чата")
     slug = models.SlugField(max_length=20, unique=True, db_index=True)
     verification_code = models.CharField(max_length=64)
-    # У личного чата типа нет; только группы имеют тип (open/closed)
+    # Personal chats have no type; only groups have a type (open/closed)
     chat_type = models.CharField(max_length=10, choices=ChatType.choices, null=True, blank=True)
     is_personal = models.BooleanField(
         default=False,
         help_text="Личный чат (на двоих, без ссылки-приглашения и без типа). Группа из 2 человек — не личный чат.",
+    )
+    is_secret = models.BooleanField(
+        default=False,
+        help_text="Секретный чат с E2EE. Сообщения шифруются на клиенте; на сервере хранится только ciphertext. "
+                  "Не синхронизируется между устройствами, нет серверного поиска.",
     )
     is_favorites = models.BooleanField(
         default=False,
@@ -76,7 +81,7 @@ class Chat(models.Model):
 
     @property
     def max_pins(self) -> int:
-        """Максимальное количество закреплённых для всех сообщений (зависит от уровня прокачки)."""
+        """Maximum number of pinned-for-all messages (depends on expansion tier)."""
         if self.is_expanded:
             return PIN_LIMITS.get(self.expansion_tier, 1)
         return 1
@@ -155,14 +160,14 @@ class Message(models.Model):
         "files.FileAttachment", blank=True, related_name="multi_messages",
         help_text="Несколько файлов (изображений) в одном сообщении",
     )
-    # Reply (quote) — одноуровневое цитирование
+    # Reply (quote) — single-level quoting
     reply_to = models.ForeignKey(
         "self", on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="replies",
         help_text="Сообщение, на которое отвечаем (одноуровневое цитирование)",
     )
-    # Forward — кто и откуда переслал
+    # Forward — who forwarded and from where
     forwarded_from = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True,
@@ -178,10 +183,10 @@ class Message(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
-    # Амплитуды для визуализации аудио (массив 0–255, ~60–80 значений)
+    # Audio waveform amplitudes (array of 0–255, ~60–80 values)
     waveform = models.JSONField(null=True, blank=True)
 
-    # E2EE: при is_encrypted=True content содержит base64 ciphertext
+    # E2EE: when is_encrypted=True, content holds base64 ciphertext
     is_encrypted = models.BooleanField(default=False)
     sender_device = models.ForeignKey(
         "e2ee.Device",
@@ -191,7 +196,7 @@ class Message(models.Model):
         related_name="sent_messages",
         help_text="Устройство отправителя (для E2EE)",
     )
-    # Шифрованный message key для каждого устройства: {"<device_id>": {"type": 0|1, "body": "<base64>"}}
+    # Encrypted message key per device: {"<device_id>": {"type": 0|1, "body": "<base64>"}}
     # type 0 = PreKeyWhisperMessage, type 1 = WhisperMessage
     encrypted_keys = models.JSONField(default=dict, blank=True)
 
@@ -201,16 +206,16 @@ class Message(models.Model):
         verbose_name_plural = "Сообщения"
 
 
-# Стикеры для реакций (15 штук, прикольные и разнообразные)
+# Reaction stickers (15 fun and diverse emojis)
 REACTION_EMOJIS = [
     "🔥", "💫", "✨", "❤️", "🥰", "😂", "😎", "🎉", "🙌", "👏", "💪", "🤩", "🌟", "😮", "😢",
 ]
-# Сколько реакций может поставить один пользователь на одно сообщение
+# Maximum reactions a single user can add to one message
 MAX_REACTIONS_PER_USER = 3
 
 
 class UserPinnedMessage(models.Model):
-    """Закрепление сообщения пользователем для себя (видно только ему)."""
+    """Message pinned by a user for themselves (visible only to them)."""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pinned_messages")
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="user_pins")
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="pinned_by_users")
@@ -224,7 +229,7 @@ class UserPinnedMessage(models.Model):
 
 
 class ChatPinnedMessage(models.Model):
-    """Закрепление сообщения для всех участников чата (admin/owner). Несколько закреплённых."""
+    """Message pinned for all chat members (admin/owner). Multiple pins supported."""
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="pinned_messages_all")
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="pinned_in_chats_all")
     pinned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pinned_for_all")
@@ -239,7 +244,7 @@ class ChatPinnedMessage(models.Model):
 
 
 class MessageReaction(models.Model):
-    """Реакция пользователя на сообщение. Один пользователь — до MAX_REACTIONS_PER_USER реакций (один тип эмодзи один раз)."""
+    """User reaction to a message. One user — up to MAX_REACTIONS_PER_USER reactions (each emoji type only once)."""
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reactions")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="message_reactions")
     emoji = models.CharField(max_length=16)
@@ -251,7 +256,7 @@ class MessageReaction(models.Model):
 
 
 class ScheduledMessage(models.Model):
-    """Отложенное или рекуррентное сообщение в чат."""
+    """Scheduled or recurring message in a chat."""
     class Recurrence(models.TextChoices):
         NONE = "none", "Один раз"
         DAILY = "daily", "Каждый день"

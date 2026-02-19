@@ -13,16 +13,16 @@ SECRET_KEY = env("SECRET_KEY", default="")
 
 DEBUG = env("DEBUG")
 
-# ── Шифрование сообщений (encryption at rest) ──────────────────────────────
+# ── Message encryption (encryption at rest) ──────────────────────────────
 #
-# DEV-режим:  задайте MESSAGE_ENCRYPTION_KEY напрямую в .env
+# DEV mode:  set MESSAGE_ENCRYPTION_KEY directly in .env
 #   MESSAGE_ENCRYPTION_KEY=<fernet-key>
-#   Генерация: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 #
-# PROD-режим: ключ расшифровывается через KMS при старте (открытый ключ только в памяти)
+# PROD mode: key is decrypted via KMS at startup (plaintext key only in memory)
 #   KMS_PROVIDER=aws|yandex|vault
-#   MESSAGE_ENCRYPTION_KEY_ENCRYPTED=<base64 зашифрованного DEK>
-#   + настройки конкретного провайдера (KMS_AWS_*, KMS_YANDEX_*, KMS_VAULT_*)
+#   MESSAGE_ENCRYPTION_KEY_ENCRYPTED=<base64 encrypted DEK>
+#   + provider-specific settings (KMS_AWS_*, KMS_YANDEX_*, KMS_VAULT_*)
 #
 MESSAGE_ENCRYPTION_KEY = env("MESSAGE_ENCRYPTION_KEY", default="")
 KMS_PROVIDER = env("KMS_PROVIDER", default="")
@@ -42,8 +42,8 @@ KMS_VAULT_TOKEN = env("KMS_VAULT_TOKEN", default="")
 KMS_VAULT_KEY_NAME = env("KMS_VAULT_KEY_NAME", default="")
 KMS_VAULT_MOUNT = env("KMS_VAULT_MOUNT", default="transit")
 
-# Р РµР¶РёРј РѕС‚Р»Р°РґРєРё Р°РІС‚РѕСЂРёР·Р°С†РёРё: РґР»СЏ РЅРѕРјРµСЂРѕРІ РёР· AUTH_DEBUG_PHONES РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ SMS,
-# РІС…РѕРґ РїРѕ РєРѕРґСѓ РёР· AUTH_DEBUG_CODE. РўРѕР»СЊРєРѕ РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚РєРё.
+# Auth debug mode: for phone numbers in AUTH_DEBUG_PHONES, SMS is not sent,
+# login uses the code from AUTH_DEBUG_CODE. Development only.
 AUTH_DEBUG = env.bool("AUTH_DEBUG", default=False)
 AUTH_DEBUG_PHONES = env.list(
     "AUTH_DEBUG_PHONES",
@@ -158,7 +158,7 @@ REST_FRAMEWORK = {
     },
 }
 
-# В dev-режиме ослабляем лимиты, чтобы тестовые входы не упирались в 429.
+# In dev mode, relax rate limits so test logins don't hit 429.
 if DEBUG:
     REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["auth_send_code"] = env("AUTH_SEND_CODE_RATE", default="1000/min")
 
@@ -246,8 +246,8 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = not _REDIS_OK  # execute tasks synchronously when no Redis
 
-FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024 * 1024   # 2 Р“Р‘
-DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024 * 1024  # 2 Р“Р‘
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024 * 1024   # 2 GB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 
 # Frontend URL for invite links etc.
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")

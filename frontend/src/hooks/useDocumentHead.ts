@@ -4,8 +4,8 @@ import { useLang, t } from "../lib/i18n";
 const DEFAULT_DESCRIPTION = "Свой мессенджер без VPN и блокировок. Чаты на 2–300 человек, файлы до 2 ГБ. Регистрация по SMS, личный чат бесплатно.";
 
 /**
- * Устанавливает document.title, meta name="description" и при необходимости canonical для SEO.
- * При размонтировании возвращает дефолтные title/description.
+ * Sets document.title, meta name="description", and optionally canonical for SEO.
+ * Restores default title/description on unmount.
  */
 export function useDocumentHead(title: string, description?: string, setCanonical = true) {
   const lang = useLang();

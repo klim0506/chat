@@ -17,7 +17,7 @@ export default function AndroidDownloadPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
           <Link to="/" aria-label="Pingy" className="inline-flex items-center text-blue-600">
-            <img src="/logo2_not_height_png_ai_transparent.png" alt="Pingy" className="h-[3.75rem] w-auto object-contain" />
+            <img src="/assets/logo.png" alt="Pingy" className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex gap-4">
             <Link to="/" className="text-slate-600 hover:text-slate-900 font-medium text-sm">

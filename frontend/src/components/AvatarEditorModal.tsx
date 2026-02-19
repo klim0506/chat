@@ -338,7 +338,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
         </div>
 
         <div className="p-4 border-t border-slate-200 space-y-4">
-          {/* Режимы */}
+          {/* Modes */}
           <div className="flex gap-2 flex-wrap">
             {imageUrl && (
               <>

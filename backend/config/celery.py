@@ -19,6 +19,6 @@ app.conf.beat_schedule = {
     },
     "send-scheduled-messages": {
         "task": "apps.chats.tasks.send_scheduled_messages",
-        "schedule": crontab(minute="*"),  # каждую минуту
+        "schedule": crontab(minute="*"),  # every minute
     },
 }

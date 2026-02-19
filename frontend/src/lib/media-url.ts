@@ -1,8 +1,8 @@
 /**
- * Переписывает URL медиа/файлов на origin страницы.
- * В dev: API возвращает localhost:8000, страница на 5173 — запросы идут
- * через Vite proxy и работают. Без этого img src на 8000 даёт cross-origin ошибку.
- * Относительные пути (avatar.png, avatars/xxx.jpg) приводятся к абсолютным с /media/.
+ * Rewrites media/file URLs to the page origin.
+ * In dev: API returns localhost:8000, page is on 5173 — requests go
+ * through Vite proxy and work. Without this, img src on 8000 gives cross-origin error.
+ * Relative paths (avatar.png, avatars/xxx.jpg) are converted to absolute with /media/.
  */
 export function toSameOriginMediaUrl(url: string | null | undefined): string {
   if (!url || typeof url !== "string") return url || "";
@@ -13,7 +13,7 @@ export function toSameOriginMediaUrl(url: string | null | undefined): string {
     const page = new URL(window.location.href);
     const origin = page.origin;
 
-    // Относительный путь без ведущего / — бэкенд отдаёт медиа из /media/
+    // Relative path without leading / — backend serves media from /media/
     if (!s.startsWith("http://") && !s.startsWith("https://") && !s.startsWith("/")) {
       const path = s.startsWith("media/") ? `/${s}` : `/media/${s}`;
       return `${origin}${path}`;

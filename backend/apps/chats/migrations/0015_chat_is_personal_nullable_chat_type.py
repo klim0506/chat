@@ -1,5 +1,5 @@
-# Личный чат — отдельная сущность: нет типа, нет ссылки-приглашения.
-# Группа (даже на 2 человека) остаётся группой с типом open/closed.
+# Personal chat — a separate entity: no type, no invite link.
+# A group (even with 2 members) remains a group with type open/closed.
 
 from django.db import migrations, models
 

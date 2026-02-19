@@ -1,5 +1,5 @@
 """
-Сервис подписок и звёзд.
+Subscription and stars service.
 """
 from datetime import timedelta
 from django.db import transaction
@@ -20,9 +20,9 @@ from .constants import (
 
 def create_subscription_for_user(user, *, is_referral: bool = False) -> UserSubscription:
     """
-    Создаёт подписку пользователю при регистрации.
-    - Обычная регистрация: trial на 7 дней
-    - По реферальной ссылке: trial на 14 дней
+    Creates a subscription for the user upon registration.
+    - Regular registration: 7-day trial
+    - Referral registration: 14-day trial
     """
     sub, created = UserSubscription.objects.get_or_create(
         user=user,
@@ -48,14 +48,14 @@ def create_subscription_for_user(user, *, is_referral: bool = False) -> UserSubs
 @transaction.atomic
 def award_referral_stars(inviter, invitee):
     """
-    Начисляет звёзды при реферальной регистрации.
-    inviter (пригласивший) → +10 звёзд
-    invitee (приглашённый) → +10 звёзд
+    Awards stars upon referral registration.
+    inviter → +10 stars
+    invitee → +10 stars
     """
     if not inviter or not invitee or inviter.pk == invitee.pk:
         return False
 
-    # Блокируем обоих пользователей в стабильном порядке, чтобы избежать дублей в гонках.
+    # Lock both users in stable order to avoid duplicates in race conditions.
     user_ids = sorted([inviter.pk, invitee.pk], key=str)
     users = {
         u.pk: u
@@ -79,7 +79,7 @@ def award_referral_stars(inviter, invitee):
     if inviter_tx_exists or invitee_tx_exists:
         return False
 
-    # Пригласивший
+    # Inviter
     locked_inviter.stars += STARS_PER_REFERRAL_INVITER
     locked_inviter.save(update_fields=["stars"])
     StarTransaction.objects.create(
@@ -90,7 +90,7 @@ def award_referral_stars(inviter, invitee):
         related_user=locked_invitee,
     )
 
-    # Приглашённый
+    # Invitee
     locked_invitee.stars += STARS_PER_REFERRAL_INVITEE
     locked_invitee.save(update_fields=["stars"])
     StarTransaction.objects.create(
@@ -106,8 +106,8 @@ def award_referral_stars(inviter, invitee):
 @transaction.atomic
 def expand_chat(user, chat, target_tier: int) -> dict:
     """
-    Прокачивает чат звёздами: 10→100 за 50 звёзд, 100→1000 за 100 звёзд (раз и навсегда).
-    target_tier: 100 или 1000.
+    Expands a chat with stars: 10→100 for 50 stars, 100→1000 for 100 stars (permanently).
+    target_tier: 100 or 1000.
     """
     from apps.chats.models import DEFAULT_MAX_MEMBERS, EXPANSION_TIER_100, EXPANSION_TIER_1000
 

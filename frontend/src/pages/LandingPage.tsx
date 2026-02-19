@@ -4,6 +4,7 @@ import { useTranslation } from "../lib/i18n";
 import { useAuthStore } from "../store/auth";
 import { usePreferencesStore, type AppLanguage } from "../store/preferences";
 import { api } from "../api/client";
+import { getPreferredDownload } from "../lib/device";
 
 const PREFERENCES_STORAGE_KEY = "preferences";
 const GEO_TIMEOUT_MS = 3500;
@@ -41,9 +42,13 @@ export default function LandingPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setLanguage = usePreferencesStore((s) => s.setLanguage);
   const [suggestedLanguage, setSuggestedLanguage] = useState<AppLanguage | null>(null);
+  const [geoReady, setGeoReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setGeoReady(true);
+    }, GEO_TIMEOUT_MS);
 
     const detectLanguageByIp = async () => {
       const hasStoredPreferences = safeGetItem(PREFERENCES_STORAGE_KEY) !== null;
@@ -52,35 +57,38 @@ export default function LandingPage() {
       let countryCode: string | null = null;
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
+        const requestTimeout = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
         const { data } = await api.get<{ country_code?: string | null }>("/geo/country-code/", {
           signal: controller.signal,
         });
-        clearTimeout(timeout);
+        clearTimeout(requestTimeout);
         countryCode = getCountryCode(data);
       } catch {
         // Backend geo or network failure; keep current language
       }
-      if (!countryCode || cancelled) return;
+
+      if (cancelled) return;
 
       const recommendedLanguage: AppLanguage = countryCode === "RU" ? "ru" : "en";
 
-      if (!hasStoredPreferences) {
+      if (!hasStoredPreferences && countryCode === "RU") {
         if (currentLanguage !== recommendedLanguage) setLanguage(recommendedLanguage);
-        return;
+      } else if (countryCode && hasStoredPreferences) {
+        const dismissKey = `landing-lang-suggest-dismissed-${recommendedLanguage}`;
+        const isDismissed = safeGetItem(dismissKey) === "1";
+        if (!isDismissed && currentLanguage !== recommendedLanguage) {
+          setSuggestedLanguage(recommendedLanguage);
+        }
       }
 
-      const dismissKey = `landing-lang-suggest-dismissed-${recommendedLanguage}`;
-      const isDismissed = safeGetItem(dismissKey) === "1";
-      if (!isDismissed && currentLanguage !== recommendedLanguage) {
-        setSuggestedLanguage(recommendedLanguage);
-      }
+      setGeoReady(true);
     };
 
     void detectLanguageByIp();
 
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
     };
   }, [setLanguage]);
 
@@ -155,12 +163,22 @@ export default function LandingPage() {
     { count: "1000", label: t("landing.scope.community") },
   ];
 
+  const preferredDownload = getPreferredDownload();
+
+  if (!geoReady) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" aria-hidden />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-slate-800 antialiased">
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center max-w-4xl">
           <Link to="/" aria-label={t("landing.brand")} className="inline-flex items-center text-blue-600">
-            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
+            <img src="/assets/logo.png" alt={t("landing.brand")} className="h-[3.75rem] w-auto object-contain" />
           </Link>
           <nav className="flex items-center gap-4">
             <Link to="/wiki" className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
@@ -248,18 +266,39 @@ export default function LandingPage() {
                   </svg>
                 </Link>
               )}
-              <Link
-                to="/downloads/desktop"
-                className="inline-flex items-center gap-2 border-2 border-blue-600 text-blue-600 px-6 py-3 rounded-lg font-medium hover:bg-blue-50 transition-colors"
-              >
-                {t("landing.downloads.desktop")}
-              </Link>
-              <Link
-                to="/downloads/android"
-                className="inline-flex items-center gap-2 border-2 border-green-600 text-green-700 px-6 py-3 rounded-lg font-medium hover:bg-green-50 transition-colors"
-              >
-                {t("landing.downloads.android")}
-              </Link>
+              {preferredDownload === "android" ? (
+                <>
+                  <Link
+                    to="/downloads/android"
+                    className="inline-flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                  >
+                    {t("landing.downloads.android")}
+                    <span className="text-xs opacity-90">({t("landing.downloads.forYourDevice")})</span>
+                  </Link>
+                  <Link
+                    to="/downloads/desktop"
+                    className="inline-flex items-center gap-2 border-2 border-blue-600 text-blue-600 px-6 py-3 rounded-lg font-medium hover:bg-blue-50 transition-colors"
+                  >
+                    {t("landing.downloads.desktop")}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/downloads/desktop"
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    {t("landing.downloads.desktop")}
+                    <span className="text-xs opacity-90">({t("landing.downloads.forYourDevice")})</span>
+                  </Link>
+                  <Link
+                    to="/downloads/android"
+                    className="inline-flex items-center gap-2 border-2 border-green-600 text-green-700 px-6 py-3 rounded-lg font-medium hover:bg-green-50 transition-colors"
+                  >
+                    {t("landing.downloads.android")}
+                  </Link>
+                </>
+              )}
             </div>
             <p className="text-center text-slate-500 text-sm">{t("landing.downloads.subtitle")}</p>
           </div>

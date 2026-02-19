@@ -18,12 +18,13 @@ from .serializers import ChatSerializer, ChatCreateSerializer, ChatMemberSeriali
 from .utils import verify_invite_code, generate_slug, make_verification_code
 from apps.payments.permissions import HasActiveSubscription
 from apps.users.models import User
+from apps.common.image_utils import compress_uploaded_image, AVATAR_MAX_DIM, BACKGROUND_MAX_DIM
 
 logger = logging.getLogger(__name__)
 
 
 def _broadcast_mark_read(chat_id, user_id, last_read_at):
-    """Уведомить участников чата, что пользователь прочитал чат (для галочек «прочитано»)."""
+    """Notify chat members that a user has read the chat (for read receipts)."""
     try:
         layer = get_channel_layer()
         if layer:
@@ -55,13 +56,13 @@ class ChatViewSet(viewsets.ModelViewSet):
             to_attr="current_user_membership",
         )
 
-        # Prefetch последнего не-удалённого сообщения для превью в списке чатов
+        # Prefetch the last non-deleted message for chat list preview
         last_message_prefetch = Prefetch(
             "messages",
             queryset=Message.objects.filter(is_deleted=False).order_by("-created_at")[:1].select_related("file"),
             to_attr="_prefetched_last_message",
         )
-        # Время последнего сообщения для сортировки списка чатов
+        # Last message timestamp for chat list sorting
         last_message_at_subquery = Message.objects.filter(
             chat_id=OuterRef("pk"),
             is_deleted=False,
@@ -136,7 +137,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="mark-read")
     def mark_read(self, request, pk=None):
-        """Отметить чат как прочитанный."""
+        """Mark chat as read."""
         chat = self.get_object()
         membership = ChatMember.objects.filter(
             chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
@@ -150,7 +151,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="mark-unread")
     def mark_unread(self, request, pk=None):
-        """Пометить чат как непрочитанный (сброс last_read_at)."""
+        """Mark chat as unread (reset last_read_at)."""
         chat = self.get_object()
         membership = ChatMember.objects.filter(
             chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
@@ -164,7 +165,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="mute")
     def mute(self, request, pk=None):
-        """Установить или снять беззвучный режим. duration: 1h, 3h, 8h, forever, off."""
+        """Set or clear mute mode. duration: 1h, 3h, 8h, forever, off."""
         from django.utils import timezone
 
         chat = self.get_object()
@@ -202,7 +203,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="toggle-archive")
     def toggle_archive(self, request, pk=None):
-        """Переключить статус «в архиве» для чата."""
+        """Toggle archived status for a chat."""
         chat = self.get_object()
         membership = ChatMember.objects.filter(
             chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
@@ -215,7 +216,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="leave")
     def leave(self, request, pk=None):
-        """Выйти из чата. Админ должен предварительно назначить другого администратора."""
+        """Leave chat. Admin must assign another administrator first."""
         chat = self.get_object()
         membership = ChatMember.objects.filter(
             chat=chat, user=request.user, status=ChatMember.Status.ACTIVE
@@ -224,7 +225,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         if getattr(chat, "is_favorites", False):
             return Response({"detail": "Из чата «Избранное» выйти нельзя."}, status=status.HTTP_400_BAD_REQUEST)
-        # Личный чат: участник может выйти (удалить себя из чата). Группа: админ должен назначить другого.
+        # DM: member can leave (remove self from chat). Group: admin must assign another admin first.
         if not getattr(chat, "is_personal", False):
             admins_count = chat.members.filter(
                 status=ChatMember.Status.ACTIVE, role=ChatMember.Role.ADMIN
@@ -280,13 +281,13 @@ class ChatViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="avatar",
             parser_classes=[MultiPartParser, FormParser, JSONParser])
     def upload_avatar(self, request, pk=None):
-        """Загрузить или удалить аватарку чата."""
+        """Upload or remove chat avatar."""
         chat = self.get_object()
         if chat.owner_id != request.user.id:
             return Response({"detail": "Только владелец может менять аватарку."}, status=status.HTTP_403_FORBIDDEN)
         avatar_file = request.FILES.get("avatar")
         if avatar_file:
-            # Удалим старую аватарку
+            avatar_file = compress_uploaded_image(avatar_file, max_dim=AVATAR_MAX_DIM)
             if chat.avatar:
                 chat.avatar.delete(save=False)
             chat.avatar = avatar_file
@@ -303,12 +304,13 @@ class ChatViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="background",
             parser_classes=[MultiPartParser, FormParser, JSONParser])
     def upload_background(self, request, pk=None):
-        """Загрузить или удалить фоновое изображение чата."""
+        """Upload or remove chat background image."""
         chat = self.get_object()
         if chat.owner_id != request.user.id:
             return Response({"detail": "Только владелец может менять фон чата."}, status=status.HTTP_403_FORBIDDEN)
         bg_file = request.FILES.get("background")
         if bg_file:
+            bg_file = compress_uploaded_image(bg_file, max_dim=BACKGROUND_MAX_DIM)
             if chat.background:
                 chat.background.delete(save=False)
             chat.background = bg_file
@@ -332,11 +334,12 @@ class ChatViewSet(viewsets.ModelViewSet):
 
 
 class CreateOrGetDMView(APIView):
-    """Получить или создать личный чат с пользователем. POST { \"user_id\": \"uuid\" }."""
+    """Get or create a DM chat with a user. POST { \"user_id\": \"uuid\" }."""
     permission_classes = [HasActiveSubscription]
 
     def post(self, request):
         user_id = request.data.get("user_id")
+        is_secret = request.data.get("is_secret", False)
         if not user_id:
             return Response({"detail": "user_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -346,8 +349,7 @@ class CreateOrGetDMView(APIView):
         if target_user.pk == request.user.pk:
             return Response({"detail": "Нельзя написать самому себе."}, status=status.HTTP_400_BAD_REQUEST)
 
-        def find_existing_dm():
-            # Без двойного filter(members__user=...) — иначе JOIN дублирует строки и Count даёт не 2, а 4
+        def find_existing_dm(*, secret: bool):
             my_chat_ids = ChatMember.objects.filter(
                 user=request.user, status=ChatMember.Status.ACTIVE
             ).values_list("chat_id", flat=True)
@@ -358,6 +360,7 @@ class CreateOrGetDMView(APIView):
                 Chat.objects.filter(
                     is_active=True,
                     is_personal=True,
+                    is_secret=secret,
                     id__in=my_chat_ids,
                 )
                 .filter(id__in=their_chat_ids)
@@ -368,28 +371,28 @@ class CreateOrGetDMView(APIView):
             )
 
         with transaction.atomic():
-            existing = find_existing_dm()
+            existing = find_existing_dm(secret=is_secret)
             if existing:
                 return Response(ChatSerializer(existing, context={"request": request}).data)
 
-            # Проверка приватности: кто может писать в ЛС
+            # Privacy check: who can send DMs
             if target_user.dm_privacy == User.DM_PRIVACY_NOBODY:
                 return Response(
                     {"detail": "Пользователь запретил писать ему в личные сообщения."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            # Создать новый личный чат (без типа, без ссылки-приглашения)
             slug = generate_slug()
             while Chat.objects.filter(slug=slug).exists():
                 slug = generate_slug()
             chat = Chat.objects.create(
-                title="Личный чат",
+                title="Секретный чат" if is_secret else "Личный чат",
                 description="",
                 slug=slug,
                 verification_code=make_verification_code(slug),
                 chat_type=None,
                 is_personal=True,
+                is_secret=is_secret,
                 max_members=DEFAULT_MAX_MEMBERS,
                 owner=request.user,
                 is_active=True,
@@ -406,15 +409,14 @@ class CreateOrGetDMView(APIView):
                 role=ChatMember.Role.MEMBER,
                 status=ChatMember.Status.ACTIVE,
             )
-            # Повторная проверка на случай гонки: другой запрос мог уже создать чат
-            existing = find_existing_dm()
+            existing = find_existing_dm(secret=is_secret)
             if existing and existing.id != chat.id:
                 return Response(ChatSerializer(existing, context={"request": request}).data)
         return Response(ChatSerializer(chat, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class JoinChatPreviewView(APIView):
-    """Предпросмотр чата по инвайт-ссылке (без вступления). Возвращает разный объём данных для open/closed."""
+    """Chat preview by invite link (without joining). Returns different data for open/closed chats."""
     permission_classes = [HasActiveSubscription]
 
     def post(self, request):
@@ -557,7 +559,7 @@ class ChatMemberViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["post"], url_path="invite")
     def invite(self, request, chat_id=None):
-        """Пригласить пользователя в группу по user_id или username. Только owner/admin."""
+        """Invite a user to a group by user_id or username. Owner/admin only."""
         chat_id = chat_id or request.resolver_match.kwargs.get("chat_id")
         chat = get_object_or_404(Chat, id=chat_id)
         if getattr(chat, "is_personal", False) or getattr(chat, "is_favorites", False):
@@ -631,7 +633,7 @@ class ChatMemberViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["post"], url_path="set-admin")
     def set_admin(self, request, chat_id=None):
-        """Назначить участника администратором. Только текущий админ или владелец чата."""
+        """Promote a member to admin. Current admin or chat owner only."""
         chat_id = chat_id or request.resolver_match.kwargs.get("chat_id")
         chat = get_object_or_404(Chat, id=chat_id)
         my_membership = ChatMember.objects.filter(

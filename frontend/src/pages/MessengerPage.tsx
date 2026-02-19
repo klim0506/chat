@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
-import { authApi, chatsApi, paymentsApi, type Chat, type UserSearchResult } from "../api/client";
+import { authApi, chatsApi, paymentsApi, type Chat, type UserSearchResult, type GlobalSearchResult } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
 import { getAvatarInitials } from "../lib/avatar-initials";
@@ -17,7 +17,7 @@ import JoinChatPreviewModal from "../components/JoinChatPreviewModal";
 import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
 import type { AppLanguage } from "../store/preferences";
 
-/** Превью сообщения для списка чатов (совпадает с логикой бэкенда get_last_message_preview). */
+/** Message preview for the chat list (matches backend get_last_message_preview logic). */
 function formatMessagePreview(msg: { msg_type?: string; content?: string; file?: { mime_type?: string }; is_encrypted?: boolean }, lang: AppLanguage): string {
   if (!msg) return "";
   if ((msg as { is_encrypted?: boolean }).is_encrypted) return tFn("common.encryptedMessage", lang);
@@ -73,6 +73,9 @@ export default function MessengerPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<UserSearchResult[]>([]);
   const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [msgSearchResults, setMsgSearchResults] = useState<GlobalSearchResult[]>([]);
+  const [msgSearchLoading, setMsgSearchLoading] = useState(false);
+  const msgSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const userSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -99,7 +102,7 @@ export default function MessengerPage() {
   const [joinPreviewSlug, setJoinPreviewSlug] = useState("");
   const [joinPreviewCode, setJoinPreviewCode] = useState("");
   const [showJoinPreviewModal, setShowJoinPreviewModal] = useState(false);
-  /** Контекстное меню по правому клику на чат */
+  /** Context menu on right-click on a chat */
   const [chatContextMenu, setChatContextMenu] = useState<{ x: number; y: number; chat: Chat } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showCreateChatModal, setShowCreateChatModal] = useState(false);
@@ -121,7 +124,7 @@ export default function MessengerPage() {
     }).catch(() => {});
   }, []);
 
-  // Toast: ссылка скопирована при создании чата (группа — приглашение, личный — ссылка на чат)
+  // Toast: link copied on chat creation (group — invite link, DM — chat link)
   useEffect(() => {
     const state = location.state as { inviteLinkCopied?: boolean } | null;
     if (state?.inviteLinkCopied) {
@@ -444,7 +447,7 @@ export default function MessengerPage() {
     } catch { /* ignore */ }
   }, [sidebarWidth]);
 
-  // Закрытие контекстного меню при клике снаружи
+  // Close context menu on outside click
   useEffect(() => {
     if (!chatContextMenu) return;
     const close = () => setChatContextMenu(null);
@@ -515,7 +518,7 @@ export default function MessengerPage() {
     [storeUpdateChat]
   );
 
-  // Единый поиск: по чатам (filteredChats) и по юзернеймам (debounced API)
+  // Unified search: by chats (filteredChats) and by usernames (debounced API)
   useEffect(() => {
     const q = searchQuery.trim();
     if (q.length < 2) {
@@ -536,6 +539,22 @@ export default function MessengerPage() {
     };
   }, [searchQuery]);
 
+  // Global message search
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) { setMsgSearchResults([]); return; }
+    if (msgSearchDebounceRef.current) clearTimeout(msgSearchDebounceRef.current);
+    msgSearchDebounceRef.current = setTimeout(() => {
+      setMsgSearchLoading(true);
+      chatsApi
+        .globalSearch(q, { limit: 20 })
+        .then((res) => setMsgSearchResults(res.data.results || []))
+        .catch(() => setMsgSearchResults([]))
+        .finally(() => setMsgSearchLoading(false));
+    }, 400);
+    return () => { if (msgSearchDebounceRef.current) clearTimeout(msgSearchDebounceRef.current); };
+  }, [searchQuery]);
+
   const handleWriteToUser = useCallback(
     (userId: string) => {
       chatsApi
@@ -546,7 +565,6 @@ export default function MessengerPage() {
           openChat(chat.id);
           setSearchQuery("");
           setUserSearchResults([]);
-          // У личного чата нет пригласительной ссылки — копируем ссылку на чат в буфер
           if (chat.is_personal) {
             const chatLink = `${window.location.origin}/chat/${chat.id}`;
             if (navigator.clipboard?.writeText) {
@@ -565,7 +583,7 @@ export default function MessengerPage() {
           setTimeout(() => setError(""), 5000);
         });
     },
-    [openChat, t]
+    [openChat, t, storeUpsertChat]
   );
 
   const handleJoinByLinkSubmit = () => {
@@ -663,7 +681,7 @@ export default function MessengerPage() {
     <div className="flex flex-col h-screen bg-slate-50 overflow-hidden relative">
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
-      {/* Toast: ссылка-приглашение скопирована */}
+      {/* Toast: invite link copied */}
       {showInviteLinkCopiedToast && (
         <button
           type="button"
@@ -677,7 +695,7 @@ export default function MessengerPage() {
         </button>
       )}
 
-      {/* Toast: новый вход в аккаунт */}
+      {/* Toast: new account login */}
       {newLoginToast && (
         <button
           type="button"
@@ -701,7 +719,7 @@ export default function MessengerPage() {
         </button>
       )}
 
-      {/* Модалка: вступить по ссылке */}
+      {/* Modal: join by link */}
       {showJoinByLinkModal && (
         <div className="fixed inset-0 z-[150] min-h-screen w-screen flex items-center justify-center p-4 bg-black/50 overflow-y-auto" onClick={closeJoinByLinkModal}>
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 text-left my-auto" onClick={(e) => e.stopPropagation()}>
@@ -739,7 +757,7 @@ export default function MessengerPage() {
         </div>
       )}
 
-      {/* Контекстное меню чата (правый клик) */}
+      {/* Chat context menu (right-click) */}
       {chatContextMenu && (
         <div
           className="fixed z-[60] w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
@@ -831,7 +849,7 @@ export default function MessengerPage() {
         {/* Sidebar header */}
         <div className="border-b px-4 py-3 flex items-center gap-2">
           <h1 className="flex-1 flex items-center min-w-0">
-            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("messenger.chats")} className="h-7 w-auto object-contain" />
+            <img src="/assets/logo.png" alt={t("messenger.chats")} className="h-7 w-auto object-contain" />
           </h1>
           <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors" title={t("dashboard.createChat")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -876,7 +894,7 @@ export default function MessengerPage() {
           </div>
         </div>
 
-        {/* Единый поиск: чаты + пользователи по юзернейму */}
+        {/* Unified search: chats + users by username */}
         <div className="px-3 py-2 border-b">
           <div className="relative">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -892,7 +910,7 @@ export default function MessengerPage() {
           </div>
         </div>
 
-        {/* Список: при активном поиске — чаты + пользователи, иначе только чаты */}
+        {/* List: when search is active — chats + users, otherwise chats only */}
         <div className="flex-1 overflow-y-auto">
           {(loading || chatListLoading) && <p className="text-slate-500 text-sm text-center py-8">{t("common.loading")}</p>}
           {(error || chatListError) && <p className="text-red-500 text-sm text-center py-8">{error || chatListError}</p>}
@@ -1089,8 +1107,8 @@ export default function MessengerPage() {
                               )}
                               <span className={`font-medium truncate text-sm flex items-center gap-1 ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
                                 {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? (chat.other_member.display_name || chat.other_member.phone) : chat.title}
-                                {chat.is_personal && (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-slate-400" aria-hidden>
+                                {chat.is_secret && (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
                                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                                   </svg>
                                 )}
@@ -1174,12 +1192,44 @@ export default function MessengerPage() {
                   )}
                 </div>
               )}
+              {q.length >= 2 && (
+                <div className="border-t border-slate-200">
+                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("search.globalPlaceholder")}</p>
+                  {msgSearchLoading ? (
+                    <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.searching")}</p>
+                  ) : msgSearchResults.length === 0 ? (
+                    <p className="text-slate-500 text-xs py-3 px-4">{t("search.noResults")}</p>
+                  ) : (
+                    <ul className="py-1">
+                      {msgSearchResults.map((r) => (
+                        <li key={r.id}>
+                          <button
+                            type="button"
+                            onClick={() => { openChat(r.chat_id); setSearchQuery(""); setMsgSearchResults([]); }}
+                            className="w-full text-left flex items-start gap-3 px-4 py-2 hover:bg-slate-50 transition-colors"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400 mt-0.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-xs font-medium text-slate-700 truncate">{r.sender_name}</span>
+                                <span className="text-[10px] text-slate-400 shrink-0">{new Date(r.created_at).toLocaleDateString()}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 truncate">{r.content}</p>
+                              <p className="text-[10px] text-blue-500 truncate mt-0.5">{r.chat_title}</p>
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
       </aside>
 
-      {/* Resizer — всегда виден на десктопе, позиция сохраняется */}
+      {/* Resizer — always visible on desktop, position is persisted */}
       <div
         role="separator"
         aria-label={t("messenger.resizeSidebar")}
@@ -1187,7 +1237,7 @@ export default function MessengerPage() {
         className="hidden md:block w-1 flex-shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400 active:bg-blue-500 transition-colors min-h-full"
       />
 
-      {/* ═══════ Right panel — Chat or Settings (скрыт, если есть чаты и ничего не выбрано) ═══════ */}
+      {/* ═══════ Right panel — Chat or Settings (hidden when chats exist but none selected) ═══════ */}
       <main className={`${showRightPanel ? "flex" : "hidden md:flex"} flex-col flex-1 min-w-0 min-h-0 overflow-hidden bg-white`}>
         {showSettings ? (
           <>
@@ -1371,14 +1421,14 @@ export default function MessengerPage() {
       </main>
       </div>
 
-      {/* Модалка: создать чат */}
+      {/* Modal: create chat */}
       <CreateChatModal
         isOpen={showCreateChatModal}
         onClose={() => setShowCreateChatModal(false)}
         onCreated={handleChatCreated}
       />
 
-      {/* Модалка: предпросмотр чата перед вступлением */}
+      {/* Modal: chat preview before joining */}
       <JoinChatPreviewModal
         isOpen={showJoinPreviewModal}
         slug={joinPreviewSlug}

@@ -3,7 +3,7 @@
 # Usage:
 #   1. Copy backend/.env.production.example → backend/.env  (fill in real values)
 #   2. Set DOMAIN in shell:   export DOMAIN=example.com
-#   3. Run init script:       bash init-letsencrypt.sh
+#   3. Run init script:       bash scripts/init-letsencrypt.sh
 #   4. Start:                 docker compose -f docker-compose.prod.yml up -d
 #
 # The frontend is built inside a Docker build stage, then its dist/
@@ -119,7 +119,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.ssl.conf:/etc/nginx/nginx.conf.template:ro
+      - ./docker/nginx/ssl.conf:/etc/nginx/nginx.conf.template:ro
       - frontend_dist:/var/www/frontend:ro
       - backend_static:/var/www/static:ro
       - certbot_conf:/etc/letsencrypt:ro

@@ -3,8 +3,8 @@ from rest_framework.permissions import BasePermission
 
 class HasActiveSubscription(BasePermission):
     """
-    Разрешает доступ только пользователям с действующей подпиской
-    (status=active или trial, и период не истёк).
+    Allows access only to users with an active subscription
+    (status=active or trial, and period has not expired).
     """
     message = "Для доступа необходима активная подписка."
 
@@ -13,7 +13,7 @@ class HasActiveSubscription(BasePermission):
             return False
         sub = getattr(request.user, "subscription", None)
         if sub is None:
-            # Попробуем загрузить напрямую
+            # Try loading directly
             from .models import UserSubscription
             sub = UserSubscription.objects.filter(user=request.user).first()
         if sub is None:

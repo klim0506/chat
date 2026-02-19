@@ -188,7 +188,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             result["files"] = [result["file"]]
         else:
             result["files"] = []
-        # Реакции — для единообразия с REST API (новое сообщение: пустые)
+        # Reactions — for consistency with REST API (new message: empty)
         result["reactions"] = {}
         result["my_reactions"] = []
         return result
@@ -428,7 +428,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         return now
 
     async def _broadcast_chat_mark_read(self, chat_id, last_read_at):
-        """Уведомить участников чата о прочтении (галочки)."""
+        """Notify chat members about read status (checkmarks)."""
         try:
             if self.channel_layer:
                 await self.channel_layer.group_send(

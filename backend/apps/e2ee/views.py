@@ -31,8 +31,11 @@ class DeviceViewSet(viewsets.ViewSet):
     def create(self, request):
         serializer = DeviceRegisterSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        device = serializer.save()
-        return Response(DeviceSerializer(device).data, status=status.HTTP_201_CREATED)
+        device, created = serializer.save()
+        return Response(
+            DeviceSerializer(device).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
     def destroy(self, request, pk=None):
         device = get_object_or_404(Device, pk=pk, user=request.user)

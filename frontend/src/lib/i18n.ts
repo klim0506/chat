@@ -98,6 +98,7 @@ const translations = {
   "landing.footer.copy": { en: "© Pingy", ru: "© Pingy" },
   "landing.downloads.desktop": { en: "Download desktop app", ru: "Скачать десктоп" },
   "landing.downloads.android": { en: "Download for Android", ru: "Скачать на Android" },
+  "landing.downloads.forYourDevice": { en: "For your device", ru: "Для вашего устройства" },
   "landing.downloads.subtitle": { en: "Desktop (Windows, macOS, Linux) · Android app", ru: "Десктоп (Windows, macOS, Linux) · приложение для Android" },
 
   "downloads.desktop.pageTitle": { en: "Download Pingy Desktop | Pingy", ru: "Скачать Pingy для ПК | Pingy" },
@@ -334,6 +335,24 @@ const translations = {
   "createChat.serverError": { en: "Could not connect to server.", ru: "Не удалось подключиться к серверу." },
   "createChat.genericError": { en: "Error creating chat", ru: "Ошибка создания чата" },
   "createChat.maxChars": { en: "Max %s characters", ru: "Максимум %s символов" },
+
+  // ─── Secret chat ──────────────────────────────────────────
+  "secretChat.title": { en: "Secret chat", ru: "Секретный чат" },
+  "secretChat.createTitle": { en: "Create secret chat", ru: "Создать секретный чат" },
+  "secretChat.warningTitle": { en: "Secret chat limitations", ru: "Ограничения секретного чата" },
+  "secretChat.warning1": { en: "Messages are end-to-end encrypted — only you and the recipient can read them.", ru: "Сообщения зашифрованы сквозным шифрованием — их можете прочитать только вы и собеседник." },
+  "secretChat.warning2": { en: "Messages are NOT synced between devices. You can only read them on the device where you sent or received them.", ru: "Сообщения НЕ синхронизируются между устройствами. Вы сможете прочитать их только на том устройстве, где отправили или получили." },
+  "secretChat.warning3": { en: "Server search is unavailable — the server does not have access to your messages.", ru: "Серверный поиск недоступен — сервер не имеет доступа к вашим сообщениям." },
+  "secretChat.warning4": { en: "If you clear app data, the message history will be lost.", ru: "При очистке данных приложения история сообщений будет потеряна." },
+  "secretChat.confirm": { en: "Create secret chat", ru: "Создать секретный чат" },
+
+  // ─── Message search ──────────────────────────────────────
+  "search.placeholder": { en: "Search messages…", ru: "Поиск сообщений…" },
+  "search.noResults": { en: "No messages found", ru: "Сообщений не найдено" },
+  "search.result": { en: "%n message found", ru: "%n сообщение найдено" },
+  "search.results": { en: "%n messages found", ru: "%n сообщений найдено" },
+  "search.secretLocal": { en: "Search in secret chat (local only)", ru: "Поиск в секретном чате (только локально)" },
+  "search.globalPlaceholder": { en: "Search across all chats…", ru: "Поиск по всем чатам…" },
 
   // ─── Join chat modal ─────────────────────────────────────
   "joinChat.title": { en: "Joining chat", ru: "Вступление в чат" },

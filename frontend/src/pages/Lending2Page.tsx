@@ -124,16 +124,16 @@ const footerColumns: FooterColumn[] = [
   {
     title: "Для мобильных",
     items: [
-      { label: "Android", to: "/telegram-3-shaga" },
-      { label: "iPhone / iPad", to: "/telegram-3-shaga" },
+      { label: "Android", to: "/downloads/android" },
+      { label: "iPhone / iPad", to: "/downloads/android" },
       { label: "Мобильная web-версия", to: "/auth" },
     ],
   },
   {
     title: "Для компьютера",
     items: [
-      { label: "PC / Mac / Linux", to: "/telegram-3-shaga" },
-      { label: "Desktop клиент", to: "/telegram-3-shaga" },
+      { label: "PC / Mac / Linux", to: "/downloads/desktop" },
+      { label: "Desktop клиент", to: "/downloads/desktop" },
       { label: "Web-клиент", to: "/auth" },
     ],
   },
@@ -217,7 +217,7 @@ export default function Lending2Page() {
           <div className="tg2-mobile-platforms">
             <article className="tg2-platform-card tg2-platform-card--android">
               <img src={asset("SiteAndroid_2x.jpg")} alt="Pingy для Android" className="tg2-platform-image" />
-              <Link to="/telegram-3-shaga" className="tg2-platform-link tg2-platform-link--active">
+              <Link to="/downloads/android" className="tg2-platform-link tg2-platform-link--active">
                 <img src={asset("SiteIconAndroid.svg")} alt="" aria-hidden="true" />
                 Pingy для Android
               </Link>
@@ -225,7 +225,7 @@ export default function Lending2Page() {
 
             <article className="tg2-platform-card tg2-platform-card--ios">
               <img src={asset("SiteiOS_2x.jpg")} alt="Pingy для iPhone / iPad" className="tg2-platform-image" />
-              <Link to="/telegram-3-shaga" className="tg2-platform-link">
+              <Link to="/downloads/android" className="tg2-platform-link">
                 <img src={asset("SiteIconApple.svg")} alt="" aria-hidden="true" />
                 Pingy для iPhone / iPad
               </Link>
@@ -235,8 +235,8 @@ export default function Lending2Page() {
           <article className="tg2-desktop-platform">
             <img src={asset("SiteDesktop_2x.jpg")} alt="Pingy для ПК и macOS" className="tg2-desktop-image" />
             <div className="tg2-desktop-links">
-              <Link to="/telegram-3-shaga">Pingy для PC / Linux</Link>
-              <Link to="/telegram-3-shaga">Pingy для macOS</Link>
+              <Link to="/downloads/desktop">Pingy для PC / Linux</Link>
+              <Link to="/downloads/desktop">Pingy для macOS</Link>
             </div>
           </article>
         </section>

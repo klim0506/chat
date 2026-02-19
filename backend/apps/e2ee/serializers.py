@@ -45,25 +45,43 @@ class DeviceRegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         user = self.context["request"].user
         prekeys_data = validated_data.pop("prekeys")
+        device_id = validated_data["device_id"]
+        name = validated_data.get("name", "")[:128]
+        identity_key = validated_data["identity_key"]
+        signed_prekey = validated_data["signed_prekey"]
+        signed_prekey_id = validated_data["signed_prekey_id"]
+        signed_prekey_sig = validated_data["signed_prekey_sig"]
 
-        device = Device.objects.create(
+        device, created = Device.objects.update_or_create(
             user=user,
-            device_id=validated_data["device_id"],
-            name=validated_data.get("name", "")[:128],
-            identity_key=validated_data["identity_key"],
-            signed_prekey=validated_data["signed_prekey"],
-            signed_prekey_id=validated_data["signed_prekey_id"],
-            signed_prekey_sig=validated_data["signed_prekey_sig"],
+            device_id=device_id,
+            defaults={
+                "name": name,
+                "identity_key": identity_key,
+                "signed_prekey": signed_prekey,
+                "signed_prekey_id": signed_prekey_id,
+                "signed_prekey_sig": signed_prekey_sig,
+                "is_active": True,
+            },
         )
 
-        for pk in prekeys_data:
-            OneTimePreKey.objects.create(
-                device=device,
-                key_id=pk["key_id"],
-                public_key=pk["public_key"],
-            )
+        if created:
+            for pk in prekeys_data:
+                OneTimePreKey.objects.create(
+                    device=device,
+                    key_id=pk["key_id"],
+                    public_key=pk["public_key"],
+                )
+        else:
+            OneTimePreKey.objects.filter(device=device).delete()
+            for pk in prekeys_data:
+                OneTimePreKey.objects.create(
+                    device=device,
+                    key_id=pk["key_id"],
+                    public_key=pk["public_key"],
+                )
 
-        return device
+        return device, created
 
 
 class PreKeyUploadSerializer(serializers.Serializer):

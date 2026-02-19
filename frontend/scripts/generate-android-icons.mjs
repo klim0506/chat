@@ -11,7 +11,7 @@ import { existsSync, mkdirSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const SOURCE = path.resolve(__dirname, "../public/logo2_not_height_png_ai_transparent.png");
+const SOURCE = path.resolve(__dirname, "../public/assets/logo.png");
 const OUT_BASE = path.resolve(__dirname, "../../android/app/src/main/res");
 
 // Pingy theme color (from manifest.json)

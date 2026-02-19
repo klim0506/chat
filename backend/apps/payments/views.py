@@ -36,7 +36,7 @@ def _is_allowed_return_url(return_url: str) -> bool:
 
 
 class SubscriptionStatusView(APIView):
-    """GET — текущий статус подписки + баланс звёзд."""
+    """GET — current subscription status + star balance."""
 
     permission_classes = [IsAuthenticated]
 
@@ -65,7 +65,7 @@ class SubscriptionStatusView(APIView):
 
 
 class StarsBalanceView(APIView):
-    """GET — баланс звёзд + история транзакций."""
+    """GET — star balance + transaction history."""
 
     permission_classes = [IsAuthenticated]
 
@@ -88,7 +88,7 @@ class StarsBalanceView(APIView):
 
 
 class ExpandChatView(APIView):
-    """POST — прокачать чат звёздами: target_max_members 100 (50 звёзд) или 1000 (100 звёзд)."""
+    """POST — expand chat with stars: target_max_members 100 (50 stars) or 1000 (100 stars)."""
 
     permission_classes = [IsAuthenticated]
 
@@ -118,7 +118,7 @@ class ExpandChatView(APIView):
 
 
 class CreateSubscriptionPaymentView(APIView):
-    """POST — создать платёж для активации/продления подписки пользователя."""
+    """POST — create a payment to activate/renew user subscription."""
 
     permission_classes = [IsAuthenticated]
 
@@ -130,7 +130,7 @@ class CreateSubscriptionPaymentView(APIView):
                 "status": UserSubscription.Status.CANCELLED,
             },
         )
-        # Если подписка активна и ещё не истекла — не нужно платить
+        # If subscription is active and hasn't expired — no payment needed
         if sub.is_valid and sub.yookassa_payment_method_id:
             return Response(
                 {"detail": "Подписка уже активна."},
@@ -254,7 +254,7 @@ class YooKassaWebhookView(APIView):
         if currency != "RUB" or amount_kopecks != subscription.price_kopecks:
             return Response(status=status.HTTP_200_OK)
 
-        # Сохраняем payment method для рекуррентных платежей
+        # Save payment method for recurring payments
         pm = getattr(payment, "payment_method", None) or (
             payment.get("payment_method") if isinstance(payment, dict) else None
         )

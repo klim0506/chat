@@ -1,4 +1,4 @@
-# Закрепление сообщений: для всех (Chat.pinned_message) и для себя (UserPinnedMessage)
+# Message pinning: for all (Chat.pinned_message) and for self (UserPinnedMessage)
 
 from django.conf import settings
 from django.db import migrations, models

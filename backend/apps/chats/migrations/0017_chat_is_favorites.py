@@ -1,4 +1,4 @@
-# Generated manually for chat "Избранное"
+# Generated manually for the Favorites chat
 
 from django.db import migrations, models
 
