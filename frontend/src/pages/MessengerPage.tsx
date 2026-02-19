@@ -827,7 +827,9 @@ export default function MessengerPage() {
       >
         {/* Sidebar header */}
         <div className="border-b px-4 py-3 flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-slate-800 flex-1">{t("messenger.chats")}</h1>
+          <h1 className="flex-1 flex items-center min-w-0">
+            <img src="/logo2_not_height_png_ai_transparent.png" alt={t("messenger.chats")} className="h-7 w-auto object-contain" />
+          </h1>
           <button type="button" onClick={() => setShowCreateChatModal(true)} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors" title={t("dashboard.createChat")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
@@ -1037,42 +1039,40 @@ export default function MessengerPage() {
                               }`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                               </div>
-                            ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
-                              <>
-                                <img
-                                  src={
-                                    withPreviewParams(
-                                      toSameOriginMediaUrl(
-                                        chat.is_personal && chat.other_member
-                                          ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)
-                                          : chat.avatar_url
-                                      ),
-                                      96
-                                    ) || ""
-                                  }
-                                  alt=""
-                                  className="w-12 h-12 rounded-full object-cover"
-                                  loading="lazy"
-                                  decoding="async"
-                                  onError={(e) => { const img = e.currentTarget; img.style.display = 'none'; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ''; }}
-                                />
-                                <div style={{ display: 'none' }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                            ) : (() => {
+                              const rawUrl = chat.is_personal && chat.other_member
+                                ? (chat.other_member.avatar_url ?? chat.other_member.avatar)
+                                : chat.avatar_url;
+                              const src = rawUrl ? (withPreviewParams(toSameOriginMediaUrl(rawUrl), 96) ?? "") : "";
+                              const showImg = Boolean(src);
+                              return showImg ? (
+                                <>
+                                  <img
+                                    src={src}
+                                    alt=""
+                                    className="w-12 h-12 rounded-full object-cover"
+                                    loading="lazy"
+                                    decoding="async"
+                                    onError={(e) => { const img = e.currentTarget; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ""; }}
+                                  />
+                                  <div style={{ display: "none" }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                                    isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
+                                  }`}>
+                                    {chat.is_personal && chat.other_member
+                                      ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
+                                      : getAvatarInitials(chat.title || "Ч")}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
                                   isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                 }`}>
                                   {chat.is_personal && chat.other_member
                                     ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
                                     : getAvatarInitials(chat.title || "Ч")}
                                 </div>
-                              </>
-                            ) : (
-                              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
-                                isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
-                              }`}>
-                                {chat.is_personal && chat.other_member
-                                  ? getAvatarInitials(chat.other_member.display_name || chat.other_member.phone)
-                                  : getAvatarInitials(chat.title || "Ч")}
-                              </div>
-                            )}
+                              );
+                            })()}
                             {chat.is_personal && chat.other_member?.is_online && (
                               <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
                             )}
