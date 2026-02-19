@@ -16,8 +16,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from apps.chats.models import ChatMember
+from apps.chats.models import Chat, ChatMember
+from apps.users.models import User, UserAvatar
 from .models import FileAttachment
+from .protected_media import verify_protected_media_token
 from .serializers import FileAttachmentSerializer
 from .tasks import scan_uploaded_file
 from PIL import Image, ImageOps
@@ -201,6 +203,93 @@ class SecureFileServeView(APIView):
             response["Content-Disposition"] = f'inline; filename="{att.original_name}"'
         else:
             response["Content-Disposition"] = f'attachment; filename="{att.original_name}"'
+        response["Cache-Control"] = "private, max-age=3600"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+# ─── Protected media (avatars, chat avatars, backgrounds) ─────────────────────
+# Только для авторизованных, с проверкой доступа. URL с HMAC-токеном — перебор невозможен.
+
+ALLOWED_MEDIA_PREFIXES = ("avatars/", "user_avatars/", "chat_avatars/", "chat_backgrounds/")
+
+
+def _user_has_access_to_user_avatar(requester: User, owner: User) -> bool:
+    """Доступ: владелец или общий чат."""
+    if requester.id == owner.id:
+        return True
+    # Есть общий активный чат (личный или группа)
+    owner_chat_ids = ChatMember.objects.filter(
+        user=owner,
+        status=ChatMember.Status.ACTIVE,
+    ).values_list("chat_id", flat=True)
+    return ChatMember.objects.filter(
+        user=requester,
+        status=ChatMember.Status.ACTIVE,
+        chat_id__in=owner_chat_ids,
+    ).exists()
+
+
+def _user_has_access_to_chat_media(requester: User, chat: Chat) -> bool:
+    """Доступ: участник чата."""
+    return ChatMember.objects.filter(
+        chat=chat,
+        user=requester,
+        status=ChatMember.Status.ACTIVE,
+    ).exists()
+
+
+class ProtectedMediaServeView(APIView):
+    """Раздача аватарок и медиа чатов. Требует авторизацию и проверку доступа."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from urllib.parse import unquote
+
+        path_raw = request.query_params.get("path", "")
+        token = request.query_params.get("t", "")
+        path = unquote(path_raw).strip().replace("\\", "/").lstrip("/")
+
+        if not path or not token:
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        if not any(path.startswith(p) for p in ALLOWED_MEDIA_PREFIXES):
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        if ".." in path or path.startswith("/"):
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not verify_protected_media_token(path, token):
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        full_path = (media_root / path).resolve()
+        if media_root not in full_path.parents and full_path != media_root:
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        if not full_path.is_file():
+            raise Http404
+
+        # Проверка доступа по типу пути
+        if path.startswith("avatars/"):
+            user = User.objects.filter(avatar=path).first()
+            if not user or not _user_has_access_to_user_avatar(request.user, user):
+                return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        elif path.startswith("user_avatars/"):
+            ua = UserAvatar.objects.filter(image=path).select_related("user").first()
+            if not ua or not _user_has_access_to_user_avatar(request.user, ua.user):
+                return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        elif path.startswith("chat_avatars/"):
+            chat = Chat.objects.filter(avatar=path).first()
+            if not chat or not _user_has_access_to_chat_media(request.user, chat):
+                return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        elif path.startswith("chat_backgrounds/"):
+            chat = Chat.objects.filter(background=path).first()
+            if not chat or not _user_has_access_to_chat_media(request.user, chat):
+                return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
+
+        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        response = FileResponse(open(full_path, "rb"), content_type=content_type)
+        response["Content-Disposition"] = "inline"
         response["Cache-Control"] = "private, max-age=3600"
         response["X-Content-Type-Options"] = "nosniff"
         return response

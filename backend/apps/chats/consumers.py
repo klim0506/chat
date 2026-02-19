@@ -1,5 +1,6 @@
 import json
 import re
+from django.conf import settings
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from .models import Chat, ChatMember, Message
@@ -119,7 +120,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 msg.save(update_fields=["file"])
         sender = getattr(msg, "sender", None)
         display_name = (sender.display_name or sender.phone) if sender else str(user_id)
-        sender_avatar_url = sender.get_avatar_url() if sender else None
+        base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        sender_avatar_url = sender.get_avatar_url(base_url=base) if sender else None
         # Build reply_to snapshot if replying
         reply_to_data = None
         if msg.reply_to_id:

@@ -106,36 +106,20 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     objects = UserManager()
 
-    def get_avatar_url(self, request=None):
-        """Первая аватарка из галереи или legacy User.avatar. Всегда возвращает путь от корня (/media/...) или полный URL."""
+    def get_avatar_url(self, request=None, base_url: str | None = None):
+        """Первая аватарка из галереи или legacy User.avatar. Возвращает защищённый URL с HMAC-токеном."""
         from django.conf import settings as django_settings
+        from apps.files.protected_media import make_protected_media_url
 
-        def ensure_absolute_path(u):
-            if not u or u.startswith("/") or u.startswith("http"):
-                return u
-            media = (django_settings.MEDIA_URL or "/media/").rstrip("/")
-            return f"{media}/{u.lstrip('/')}"
-
+        base = base_url or (getattr(django_settings, "FRONTEND_URL", "") or "").rstrip("/")
         try:
             first = self.avatars.order_by("order").first()
             if first and first.image:
-                url = first.image.url
-                url = ensure_absolute_path(url)
-                if request and getattr(request, "build_absolute_uri", None):
-                    try:
-                        return request.build_absolute_uri(url)
-                    except Exception:
-                        pass
-                return url
+                path = first.image.name
+                return make_protected_media_url(path, request, base_url=base or None)
             if self.avatar:
-                url = self.avatar.url
-                url = ensure_absolute_path(url)
-                if request and getattr(request, "build_absolute_uri", None):
-                    try:
-                        return request.build_absolute_uri(url)
-                    except Exception:
-                        pass
-                return url
+                path = self.avatar.name
+                return make_protected_media_url(path, request, base_url=base or None)
         except (ValueError, OSError):
             pass  # missing file
         return None

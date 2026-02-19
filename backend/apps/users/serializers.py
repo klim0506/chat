@@ -1,15 +1,7 @@
 import re
-from django.conf import settings as django_settings
 from rest_framework import serializers
+from apps.files.protected_media import make_protected_media_url
 from .models import User, UserAvatar
-
-
-def _absolute_media_url(url: str) -> str:
-    """Если url относительный — вернуть путь от корня с MEDIA_URL."""
-    if not url or url.startswith("/") or url.startswith("http"):
-        return url or ""
-    media = (django_settings.MEDIA_URL or "/media/").rstrip("/")
-    return f"{media}/{url.lstrip('/')}"
 
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 
@@ -97,34 +89,22 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.get_avatar_url(request)
 
     def get_avatars(self, obj):
-        avatars = UserAvatar.objects.filter(user=obj).order_by("order", "id")
         request = self.context.get("request")
-        request_uri = getattr(request, "build_absolute_uri", None) if request else None
+        avatars = UserAvatar.objects.filter(user=obj).order_by("order", "id")
         result = []
         for a in avatars:
             try:
-                url = a.image.url if a.image else None
+                if a.image:
+                    url = make_protected_media_url(a.image.name, request)
+                    if url:
+                        result.append({"id": a.id, "url": url, "order": a.order})
             except (ValueError, OSError):
                 continue
-            if not url:
-                continue
-            if request_uri:
-                try:
-                    url = request_uri(url)
-                except Exception:
-                    pass
-            url = _absolute_media_url(url)
-            result.append({"id": a.id, "url": url, "order": a.order})
         if not result and obj.avatar:
             try:
-                url = obj.avatar.url
-                if request_uri:
-                    try:
-                        url = request_uri(url)
-                    except Exception:
-                        pass
-                url = _absolute_media_url(url)
-                result.append({"id": "legacy", "url": url, "order": 0})
+                url = make_protected_media_url(obj.avatar.name, request)
+                if url:
+                    result.append({"id": "legacy", "url": url, "order": 0})
             except (ValueError, OSError):
                 pass
         return result

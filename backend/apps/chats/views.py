@@ -457,7 +457,8 @@ class JoinChatPreviewView(APIView):
 
         avatar_url = None
         if chat.avatar:
-            avatar_url = request.build_absolute_uri(chat.avatar.url)
+            from apps.files.protected_media import make_protected_media_url
+            avatar_url = make_protected_media_url(chat.avatar.name, request)
         return Response({
             "chat_type": "open",
             "title": chat.title,

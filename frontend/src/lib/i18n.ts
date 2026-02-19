@@ -96,6 +96,8 @@ const translations = {
   "landing.cta.loginOrRegister": { en: "Log in or register", ru: "Войти или зарегистрироваться" },
   "landing.cta.createNew": { en: "Create new chat", ru: "Создать новый чат" },
   "landing.footer.copy": { en: "© Pingy", ru: "© Pingy" },
+  "landing.downloads.desktop": { en: "Download desktop app", ru: "Скачать десктоп" },
+  "landing.downloads.android": { en: "Download for Android", ru: "Скачать на Android" },
 
   // ─── Settings page ───────────────────────────────────────
   "settings.profile": { en: "Profile", ru: "Профиль" },
