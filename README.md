@@ -60,6 +60,88 @@ npm run docker:down
 - Nginx: `http://localhost`
 - PostgreSQL: `localhost:5433`
 
+## Продакшн: запуск на сервере по SSH
+
+Docker-стек с HTTPS (SSL из ISPmanager: `/var/www/httpd-cert/www-root/`).
+
+### 1. Подключиться по SSH
+
+```bash
+ssh root@109.172.100.103
+```
+
+### 2. Скачать/обновить код из Git
+
+**Первый раз (клон):**
+```bash
+cd /root
+git clone -b release/v1-prod --depth 1 https://github.com/klim0506/chat.git chat-app
+cd chat-app
+```
+
+**Обновление (залить последние изменения):**
+```bash
+cd /root/chat-app
+git fetch origin
+git pull origin release/v1-prod
+```
+
+### 3. Подготовить `backend/.env`
+
+```bash
+cd /root/chat-app   # или путь к репозиторию
+cp backend/.env.production.example backend/.env
+```
+
+Отредактировать `backend/.env`:
+- `SECRET_KEY` — сгенерировать: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
+- `MESSAGE_ENCRYPTION_KEY` — сгенерировать: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+- `ALLOWED_HOSTS=pingy.com,www.pingy.com`
+- `CSRF_TRUSTED_ORIGINS=https://pingy.com,https://www.pingy.com`
+- `CORS_ALLOWED_ORIGINS=https://pingy.com`
+- `FRONTEND_URL=https://pingy.com`
+- SMS, YooKassa, Telegram — по необходимости
+
+### 4. Установить переменные и запустить
+
+```bash
+export DOMAIN=pingy.com
+export DB_PASSWORD=твой_пароль_postgres
+
+bash scripts/docker-prod-start.sh
+```
+
+Скрипт проверит порты 80 и 443; если они заняты — покажет процессы и попросит подтверждение («yes») перед их завершением. Либо запустите вручную:
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### 5. Первый запуск — миграции и статика
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
+docker compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
+```
+
+### 6. Проверка
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl -I https://pingy.com
+```
+
+Открыть в браузере: `https://pingy.com`.
+
+### Полезные команды
+
+```bash
+# логи
+docker compose -f docker-compose.prod.yml logs -f
+
+# перезапуск nginx после обновления сертификата в ISPmanager
+docker compose -f docker-compose.prod.yml restart nginx
+```
+
 ## Запуск через командную строку (локально)
 
 Требования:

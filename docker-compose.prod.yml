@@ -115,25 +115,22 @@ services:
   nginx:
     image: nginx:alpine
     restart: always
+    # 80/443 заняты ISPmanager — используем 8080/8443
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
     volumes:
       - ./docker/nginx/ssl.conf:/etc/nginx/nginx.conf.template:ro
       - frontend_dist:/var/www/frontend:ro
       - backend_static:/var/www/static:ro
-      - certbot_conf:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot:ro
+      - /var/www/httpd-cert/www-root/pingy.com.crt:/etc/ssl/host/fullchain.pem:ro
+      - /var/www/httpd-cert/www-root/pingy.com.key:/etc/ssl/host/privkey.pem:ro
     environment:
       DOMAIN: ${DOMAIN}
-    # Only substitute $DOMAIN — leave nginx variables ($host, $uri, etc.) untouched
+      HTTPS_PORT: ${HTTPS_PORT:-8443}
     command: >
-      /bin/sh -c "envsubst '$$DOMAIN' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+      /bin/sh -c "envsubst '$$DOMAIN $$HTTPS_PORT' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
       && nginx -g 'daemon off;'"
-    depends_on:
-      - backend
-      - frontend-build
-
   # ─── Certbot (auto-renewal) ─────────────────────────────────────────
   certbot:
     image: certbot/certbot
@@ -144,10 +141,14 @@ services:
     # Renew every 12 hours
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done'"
 
+    depends_on:
+      - backend
+      - frontend-build
+
 volumes:
+  certbot_conf:
+  certbot_www:
   postgres_data:
   backend_media:
   backend_static:
   frontend_dist:
-  certbot_conf:
-  certbot_www:
