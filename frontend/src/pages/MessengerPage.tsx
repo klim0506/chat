@@ -388,7 +388,7 @@ export default function MessengerPage() {
       timedOut = true;
       setLoading(false);
       useChatListStore.getState().setLoading(false);
-      setError(tRef.current("dashboard.loadError"));
+      // Не выставляем error по таймауту — ошибку выставит loadChats при реальном падении запроса
     }, LOAD_TIMEOUT_MS);
 
     const finish = () => {
@@ -407,12 +407,11 @@ export default function MessengerPage() {
           if (!timedOut) lastSyncedPinnedRef.current = useChatListStore.getState().pinnedChatIds;
         });
       })
-      .catch((e) => {
+      .catch(() => {
         if (timedOut) return;
         setSub(null);
         try { localStorage.setItem(SUB_CACHE_KEY, "null"); } catch { /* ignore */ }
-        const status = (e as { response?: { status?: number } })?.response?.status;
-        if (status !== 403) setError(tRef.current("dashboard.loadError"));
+        // Не показываем «Не удалось загрузить чаты» из‑за ошибки подписки — только при реальной ошибке loadChats
         return loadChats().catch(() => {}).then(() => {
           if (!timedOut) lastSyncedPinnedRef.current = useChatListStore.getState().pinnedChatIds;
         });

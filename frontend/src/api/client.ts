@@ -355,6 +355,8 @@ export interface Message {
   reactions: Record<string, number>;
   /** Up to 3 reactions by the current user on this message */
   my_reactions: string[];
+  /** Channel mode only: number of comments under the post */
+  comments_count?: number;
   /** Own messages only: delivered (1 check) or read (2 checks). */
   read_status?: "delivered" | "read" | null;
   /** Own messages only: who read this message (last_read_at >= created_at). */
@@ -559,6 +561,31 @@ export interface ChannelPost {
   encrypted_keys?: Record<string, unknown>;
 }
 
+export interface ReplyComment {
+  id: string;
+  author: User;
+  msg_type: string;
+  content: string;
+  file: FileAttachment | null;
+  created_at: string;
+  is_deleted: boolean;
+}
+
+export interface ChannelPostComment {
+  id: string;
+  post: string;
+  author: User;
+  msg_type: string;
+  content: string;
+  file: FileAttachment | null;
+  files: FileAttachment[];
+  created_at: string;
+  edited_at: string | null;
+  is_deleted: boolean;
+  waveform?: number[] | null;
+  reply_to?: ReplyComment | null;
+}
+
 export const channelsApi = {
   list: () => api.get<PaginatedResponse<Channel>>("/channels/"),
   create: (data: { title: string; username: string; description?: string; is_public?: boolean; title_icon?: string }) =>
@@ -596,6 +623,20 @@ export const channelPostsApi = {
     api.delete(`/channels/${channelId}/posts/${postId}/`),
   setReaction: (channelId: string, postId: string, emoji: string) =>
     api.post<ChannelPost>(`/channels/${channelId}/posts/${postId}/reactions/`, { emoji }),
+};
+
+export const channelPostCommentsApi = {
+  list: (channelId: string, postId: string, params?: { limit?: number; offset?: number }) =>
+    api.get<ChannelPostComment[]>(`/channels/${channelId}/posts/${postId}/comments/`, { params }),
+  create: (
+    channelId: string,
+    postId: string,
+    data: { msg_type?: string; content?: string; file_id?: string | null; file_ids?: string[]; reply_to_id?: string; waveform?: number[] }
+  ) => api.post<ChannelPostComment>(`/channels/${channelId}/posts/${postId}/comments/`, data),
+  update: (channelId: string, postId: string, commentId: string, data: { content: string }) =>
+    api.patch<ChannelPostComment>(`/channels/${channelId}/posts/${postId}/comments/${commentId}/`, data),
+  delete: (channelId: string, postId: string, commentId: string) =>
+    api.delete(`/channels/${channelId}/posts/${postId}/comments/${commentId}/`),
 };
 
 export interface GlobalSearchResult {

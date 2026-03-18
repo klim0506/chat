@@ -540,6 +540,17 @@ const translations = {
   "channelPage.publishError": { en: "Failed to publish post", ru: "Не удалось опубликовать пост" },
   "channelPage.channelNotFound": { en: "Channel not found", ru: "Канал не найден" },
   "channelPage.onlyAuthorCanPost": { en: "Only the channel author can post", ru: "Публиковать может только автор канала" },
+  "channelComments.title": { en: "Comments", ru: "Комментарии" },
+  "channelComments.open": { en: "Comments", ru: "Комментарии" },
+  "channelComments.openDiscussion": { en: "Open discussion", ru: "Открыть обсуждение" },
+  "channelComments.loading": { en: "Loading comments…", ru: "Загрузка комментариев…" },
+  "channelComments.empty": { en: "No comments yet", ru: "Пока нет комментариев" },
+  "channelComments.placeholder": { en: "Write a comment…", ru: "Напишите комментарий…" },
+  "channelComments.replyTo": { en: "Reply to", ru: "Ответ" },
+  "channelComments.cancelReply": { en: "Cancel reply", ru: "Отменить ответ" },
+  "channelComments.sendError": { en: "Failed to send comment", ru: "Не удалось отправить комментарий" },
+  "channelComments.loadError": { en: "Failed to load comments", ru: "Не удалось загрузить комментарии" },
+  "channelComments.disabled": { en: "Comments are disabled", ru: "Комментарии отключены" },
 
   // ─── Secret chat ──────────────────────────────────────────
   "secretChat.title": { en: "Secret chat", ru: "Секретный чат" },

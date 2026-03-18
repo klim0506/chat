@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, stickersApi, paymentsApi, userDisplayName } from "../api/client";
-import type { Chat, ChatMember, Channel, ChannelPost, Message, ReplyMessage, User, UserSearchResult, ScheduledMessage as ScheduledMessageType, Contact } from "../api/client";
+import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, channelPostCommentsApi, stickersApi, paymentsApi, userDisplayName } from "../api/client";
+import type { Chat, ChatMember, Channel, ChannelPost, ChannelPostComment, Message, ReplyMessage, User, UserSearchResult, ScheduledMessage as ScheduledMessageType, Contact } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { usePremiumModalStore } from "../store/premiumModal";
 import { usePreferencesStore } from "../store/preferences";
@@ -57,6 +57,8 @@ const MESSAGE_MAX_LENGTH = 4096;
 const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
 const VIRTUAL_OVERSCAN = 10;
+const GROUP_TIME_MS = 5 * 60 * 1000;
+const CHANNEL_COMMENTS_PAGE_SIZE = 200;
 
 type VoiceInfoKind = "voice" | "circle";
 type VoiceInfoItem = { kind: VoiceInfoKind; msg: Message };
@@ -792,9 +794,40 @@ function channelPostToMessage(post: ChannelPost, chId: string, channel: Channel 
     is_deleted: post.is_deleted,
     reactions: post.reactions ?? {},
     my_reactions: post.my_reactions ?? [],
+    comments_count: post.comments_count ?? 0,
     waveform: post.waveform ?? undefined,
     forwarded_from: post.forwarded_from,
     forwarded_from_chat_title: post.forwarded_from_chat_title,
+  };
+}
+
+function commentToMessage(comment: ChannelPostComment, chId: string): Message & { authorId?: string } {
+  return {
+    id: comment.id,
+    chat: chId,
+    sender: comment.author,
+    authorId: comment.author?.id,
+    msg_type: comment.msg_type,
+    content: comment.content,
+    file: comment.file,
+    files: comment.files ?? [],
+    created_at: comment.created_at,
+    edited_at: comment.edited_at,
+    is_deleted: comment.is_deleted,
+    reactions: {},
+    my_reactions: [],
+    waveform: comment.waveform ?? undefined,
+    reply_to: comment.reply_to
+      ? {
+          id: comment.reply_to.id,
+          sender: comment.reply_to.author,
+          msg_type: comment.reply_to.msg_type,
+          content: comment.reply_to.content,
+          file: comment.reply_to.file,
+          created_at: comment.reply_to.created_at,
+          is_deleted: comment.reply_to.is_deleted,
+        }
+      : null,
   };
 }
 
@@ -931,6 +964,15 @@ export default function ChatPage({
   const [copiedState, setCopiedState] = useState(false);
   const [inviteCopyShake, setInviteCopyShake] = useState(false);
   const [joinRequestsPanelHidden, setJoinRequestsPanelHidden] = useState(false);
+  /** Open discussion thread for a channel post (Telegram-style comments). */
+  const [openCommentsPost, setOpenCommentsPost] = useState<(Message & { authorId?: string }) | null>(null);
+  const [postComments, setPostComments] = useState<(Message & { authorId?: string })[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState("");
+  const [commentInput, setCommentInput] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [replyToComment, setReplyToComment] = useState<Message | null>(null);
+  const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (chatId && typeof localStorage !== "undefined") {
@@ -945,6 +987,31 @@ export default function ChatPage({
     localStorage.setItem(`pingy_join_requests_hidden_${chatId}`, "1");
     setJoinRequestsPanelHidden(true);
   }, [chatId]);
+
+  useEffect(() => {
+    setOpenCommentsPost(null);
+    setPostComments([]);
+    setCommentsError("");
+    setCommentInput("");
+    setReplyToComment(null);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!openCommentsPost) return;
+    commentsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [openCommentsPost, postComments.length]);
+
+  useEffect(() => {
+    if (!openCommentsPost) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenCommentsPost(null);
+        setReplyToComment(null);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [openCommentsPost]);
 
   const canPostToChannel = useMemo(
     () => !!(channelRaw && (channelRaw.owner?.id === myUserId || channelRaw.my_role === "admin")),
@@ -1044,6 +1111,96 @@ export default function ChatPage({
     inputEditableRef.current?.focus();
   }, []);
   const handleForward = useCallback((m: Message) => setForwardModalMessages([m]), []);
+  const updateChannelPostCommentsCount = useCallback((postId: string, commentsCount: number) => {
+    if (!channelId) return;
+    const nextCount = Math.max(0, commentsCount);
+    storeUpdateMessage(channelId, postId, { comments_count: nextCount });
+    setOpenCommentsPost((prev) => (prev && prev.id === postId ? { ...prev, comments_count: nextCount } : prev));
+  }, [channelId, storeUpdateMessage]);
+  const loadChannelPostComments = useCallback(async (postId: string) => {
+    if (!channelId) return;
+    setCommentsLoading(true);
+    setCommentsError("");
+    try {
+      const res = await channelPostCommentsApi.list(channelId, postId, { limit: CHANNEL_COMMENTS_PAGE_SIZE, offset: 0 });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      setPostComments(rows.map((comment) => commentToMessage(comment, channelId)));
+      updateChannelPostCommentsCount(postId, rows.filter((comment) => !comment.is_deleted).length);
+    } catch {
+      setCommentsError(t("channelComments.loadError"));
+    } finally {
+      setCommentsLoading(false);
+    }
+  }, [channelId, t, updateChannelPostCommentsCount]);
+  const openPostComments = useCallback((post: Message) => {
+    setOpenCommentsPost(post as Message & { authorId?: string });
+    setPostComments([]);
+    setCommentsError("");
+    setCommentInput("");
+    setReplyToComment(null);
+    void loadChannelPostComments(post.id);
+  }, [loadChannelPostComments]);
+  const closePostComments = useCallback(() => {
+    setOpenCommentsPost(null);
+    setReplyToComment(null);
+    setCommentsError("");
+    setCommentInput("");
+  }, []);
+  const handleCommentsPostUpdated = useCallback((updated: Message) => {
+    setOpenCommentsPost((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+  }, []);
+  const handleChannelPostReactionUpdated = useCallback((messageId: string, data: { reactions: Record<string, number>; my_reactions: string[] }) => {
+    handleReactionUpdated(messageId, data);
+    setOpenCommentsPost((prev) => (prev && prev.id === messageId ? { ...prev, reactions: data.reactions, my_reactions: data.my_reactions } : prev));
+  }, [handleReactionUpdated]);
+  const handleCommentUpdated = useCallback((updated: Message) => {
+    setPostComments((prev) => prev.map((msg) => (msg.id === updated.id ? { ...msg, ...updated } : msg)));
+  }, []);
+  const handleCommentDeleted = useCallback((messageId: string) => {
+    setPostComments((prev) => {
+      const next = prev.map((msg) => (msg.id === messageId ? { ...msg, is_deleted: true } : msg));
+      if (openCommentsPost) {
+        updateChannelPostCommentsCount(openCommentsPost.id, next.filter((msg) => !msg.is_deleted).length);
+      }
+      return next;
+    });
+    setReplyToComment((prev) => (prev?.id === messageId ? null : prev));
+  }, [openCommentsPost, updateChannelPostCommentsCount]);
+  const handleUpdateCommentContent = useCallback(async (messageId: string, content: string): Promise<Message> => {
+    if (!channelId || !openCommentsPost) throw new Error("Discussion is not open");
+    const res = await channelPostCommentsApi.update(channelId, openCommentsPost.id, messageId, { content });
+    return commentToMessage(res.data, channelId);
+  }, [channelId, openCommentsPost]);
+  const handleDeleteComment = useCallback(async (messageId: string) => {
+    if (!channelId || !openCommentsPost) return;
+    await channelPostCommentsApi.delete(channelId, openCommentsPost.id, messageId);
+  }, [channelId, openCommentsPost]);
+  const handleSendComment = useCallback(async () => {
+    if (!channelId || !openCommentsPost) return;
+    const trimmed = commentInput.trim();
+    if (!trimmed) return;
+    setCommentSubmitting(true);
+    setCommentsError("");
+    try {
+      const res = await channelPostCommentsApi.create(channelId, openCommentsPost.id, {
+        msg_type: "text",
+        content: trimmed,
+        ...(replyToComment ? { reply_to_id: replyToComment.id } : {}),
+      });
+      const nextComment = commentToMessage(res.data, channelId);
+      setPostComments((prev) => {
+        const next = [...prev, nextComment];
+        updateChannelPostCommentsCount(openCommentsPost.id, next.filter((msg) => !msg.is_deleted).length);
+        return next;
+      });
+      setCommentInput("");
+      setReplyToComment(null);
+    } catch {
+      setCommentsError(t("channelComments.sendError"));
+    } finally {
+      setCommentSubmitting(false);
+    }
+  }, [channelId, commentInput, openCommentsPost, replyToComment, t, updateChannelPostCommentsCount]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   /** Только у одного сообщения может быть открыт пикер реакций; при открытии другого — предыдущий закрывается. */
@@ -3936,6 +4093,155 @@ export default function ChatPage({
           }}
         />
       )}
+      {openCommentsPost && channelId && channelRaw && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[210] bg-black/45 backdrop-blur-sm md:p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closePostComments();
+          }}
+        >
+          <div className="flex h-full w-full items-stretch justify-center">
+            <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-slate-50 shadow-2xl md:h-[92vh] md:rounded-[28px] md:border md:border-white/60">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900">{t("channelComments.title")}</div>
+                  <div className="text-xs text-slate-500">
+                    {postComments.filter((msg) => !msg.is_deleted).length}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closePostComments}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                  aria-label={t("common.close")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="border-b border-slate-200 bg-white/90 px-3 py-3">
+                <div className="rounded-3xl bg-slate-50/90 px-1 py-1">
+                  <MessageBubble
+                    message={openCommentsPost}
+                    isMine={false}
+                    chatId={conversationId}
+                    channelId={channelId}
+                    textScale={textScale}
+                    showAvatar
+                    onMessageUpdated={handleCommentsPostUpdated}
+                    onReactionUpdated={handleChannelPostReactionUpdated}
+                    onSetReaction={(messageId, emoji) =>
+                      channelPostsApi.setReaction(channelId, messageId, emoji).then((res) =>
+                        channelPostToMessage(res.data, channelId, channelRaw)
+                      )}
+                    onAvatarClick={handleAvatarClick}
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-3 py-3">
+                {commentsLoading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">{t("channelComments.loading")}</div>
+                ) : postComments.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">{t("channelComments.empty")}</div>
+                ) : (
+                  <div className="space-y-0">
+                    {postComments.map((msg, index) => {
+                      const prevMsg = postComments[index - 1];
+                      const nextMsg = postComments[index + 1];
+                      const sameNextSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
+                      const nextGap = nextMsg
+                        ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
+                        : Infinity;
+                      const showAvatar = !nextMsg || !sameNextSender || nextGap >= GROUP_TIME_MS;
+                      const isLastInGroup = showAvatar && !!prevMsg && getSenderKey(prevMsg) === getSenderKey(msg);
+                      const isFirstInGroup = !prevMsg || getSenderKey(prevMsg) !== getSenderKey(msg) ||
+                        new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
+                      const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
+                      const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
+                      return (
+                        <div key={msg.id} className={`${isFirstInGroup ? "mt-3" : "mt-2"}`}>
+                          {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
+                          <MessageBubble
+                            message={msg}
+                            isMine={isMine}
+                            chatId={conversationId}
+                            textScale={textScale}
+                            showAvatar={showAvatar}
+                            isLastInGroup={isLastInGroup}
+                            showSenderName={isFirstInGroup}
+                            onMessageUpdated={handleCommentUpdated}
+                            onMessageDeleted={handleCommentDeleted}
+                            onUpdateMessageContent={handleUpdateCommentContent}
+                            onDeleteMessage={handleDeleteComment}
+                            onDeleteError={handleDeleteError}
+                            onReply={setReplyToComment}
+                            onAvatarClick={handleAvatarClick}
+                          />
+                        </div>
+                      );
+                    })}
+                    <div ref={commentsEndRef} />
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200 bg-white px-3 py-3">
+                {commentsError && <div className="mb-2 text-sm text-red-600">{commentsError}</div>}
+                {replyToComment && (
+                  <div className="mb-2 flex items-start justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-blue-700">{t("channelComments.replyTo")}</div>
+                      <div className="truncate text-xs text-slate-600">
+                        {userDisplayName(replyToComment.sender as User)}: {(replyToComment.content || "").trim() || t("common.fileMsg")}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyToComment(null)}
+                      className="shrink-0 text-xs font-medium text-blue-700 hover:text-blue-800"
+                    >
+                      {t("channelComments.cancelReply")}
+                    </button>
+                  </div>
+                )}
+                {channelRaw.comments_enabled ? (
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={commentInput}
+                      onChange={(event) => setCommentInput(event.target.value.slice(0, MESSAGE_MAX_LENGTH))}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleSendComment();
+                        }
+                      }}
+                      rows={1}
+                      placeholder={t("channelComments.placeholder")}
+                      className="min-h-[46px] max-h-32 flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSendComment()}
+                      disabled={commentSubmitting || !commentInput.trim()}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={t("common.send")}
+                    >
+                      <SendIcon size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl bg-slate-100 px-3 py-3 text-sm text-slate-500">{t("channelComments.disabled")}</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {pendingFilesForPreview && (
         <FilePreviewModal
           files={pendingFilesForPreview}
@@ -4458,7 +4764,6 @@ export default function ChatPage({
               const start = virtualState.enabled ? virtualState.start : 0;
               const end = virtualState.enabled ? virtualState.end : messages.length;
               const visibleMessages = messages.slice(start, end);
-              const GROUP_TIME_MS = 5 * 60 * 1000;
               return (
                 <Fragment>
                   {/* Sentinel for loading older messages on scroll up — min-height so IntersectionObserver can fire when scrolled to top */}
@@ -4483,6 +4788,9 @@ export default function ChatPage({
                   {virtualState.enabled && <div style={{ height: virtualState.topPadding }} aria-hidden />}
                   {visibleMessages.map((msg, offset) => {
                     const i = start + offset;
+                    const isMine = channelId
+                      ? ((msg as Message & { authorId?: string }).authorId === myUserId)
+                      : ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId);
                     const nextMsg = messages[i + 1];
                     const sameSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
                     const timeGap = nextMsg
@@ -4496,6 +4804,8 @@ export default function ChatPage({
                     const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
                     const msgTime = msg.created_at ? new Date(msg.created_at).getTime() : 0;
                     const isNewMessage = msgTime > 0 && Date.now() - msgTime < 2800;
+                    const commentsCount = msg.comments_count ?? 0;
+                    const canOpenComments = !!channelId && !!channelRaw && (channelRaw.comments_enabled || commentsCount > 0);
                     return (
                       <div
                         key={msg.id}
@@ -4527,7 +4837,7 @@ export default function ChatPage({
                         )}
                         <MessageBubble
                           message={msg}
-                          isMine={channelId ? ((msg as Message & { authorId?: string }).authorId === myUserId) : ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId)}
+                          isMine={isMine}
                           uploadProgress={(() => { const u = activeUploads.find((x) => x.tempId === msg.id); return u ? { loaded: u.loaded, total: u.total } : undefined; })()}
                           onCancelUpload={msg.id.startsWith("upload-") ? cancelUpload : undefined}
                           downloadProgress={downloadProgressByMessageId[msg.id]}
@@ -4572,7 +4882,7 @@ export default function ChatPage({
                           maxPins={maxPins}
                           myPinnedIds={myPinnedIds}
                           onPinChange={refreshChat}
-                          onReply={handleReply}
+                          onReply={channelId ? undefined : handleReply}
                           onForward={handleForward}
                           onAvatarClick={handleAvatarClick}
                           selectionMode={selectionMode}
@@ -4583,6 +4893,8 @@ export default function ChatPage({
                             channelPostsApi.setReaction(channelId, messageId, emoji).then((res) =>
                               channelPostToMessage(res.data, channelId, channelRaw)
                             ) : undefined}
+                          commentsCount={canOpenComments ? commentsCount : undefined}
+                          onOpenComments={canOpenComments ? () => openPostComments(msg) : undefined}
                           onReactionUpdated={handleReactionUpdated}
                           reactionPickerOpen={openReactionPickerMessageId === msg.id}
                           onOpenReactionPicker={() => setOpenReactionPickerMessageId(msg.id)}
@@ -6976,6 +7288,8 @@ type MessageBubbleProps = {
   onEnterSelectionMode?: (messageId: string) => void;
   /** When set (channel mode), use channel API for reactions instead of messagesApi */
   onSetReaction?: (messageId: string, emoji: string) => Promise<Message>;
+  commentsCount?: number;
+  onOpenComments?: () => void;
   /** Обновить только реакции в сторе (без замены всего сообщения — фото не перезагружаются). */
   onReactionUpdated?: (messageId: string, data: { reactions: Record<string, number>; my_reactions: string[] }) => void;
   /** Пикер реакций открыт только у одного сообщения; управляется родителем */
@@ -7022,6 +7336,8 @@ const MessageBubble = memo(function MessageBubble({
   onToggleSelect,
   onEnterSelectionMode,
   onSetReaction,
+  commentsCount,
+  onOpenComments,
   onReactionUpdated,
   reactionPickerOpen = false,
   onOpenReactionPicker,
@@ -7306,6 +7622,7 @@ const MessageBubble = memo(function MessageBubble({
 
   const hasReactions = Object.keys(reactions).length > 0;
   const reactionEntries = Object.entries(reactions).filter(([, c]) => c > 0);
+  const hasCommentsFooter = typeof commentsCount === "number" && commentsCount >= 0 && !!onOpenComments;
 
   const reactionCount = reactionEntries.length;
   const allowReactionWrap = reactionCount >= 5;
@@ -7549,7 +7866,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
         <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`} style={optimalBubbleWidth != null ? { maxWidth: optimalBubbleWidth } : undefined}>
-        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? "rounded-2xl p-0 overflow-visible" : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
+        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? "overflow-hidden bg-white border border-slate-200" : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
           {/* Имя отправителя — внутри пузырька, тот же размер что и текст сообщения */}
           {showSenderName ? (
             <div className={`mb-0.5 w-full min-w-0 ${isImageBubble || isSticker ? "px-3 pt-2 pb-1" : ""}`}>
@@ -7884,6 +8201,28 @@ const MessageBubble = memo(function MessageBubble({
                 </div>
               )}
             </>
+          )}
+          {hasCommentsFooter && (
+            <button
+              type="button"
+              onClick={onOpenComments}
+              className={`flex w-full items-center justify-between gap-3 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50/80 hover:text-slate-800 ${
+                isImageBubble || isSticker
+                  ? "mt-0 border-t border-slate-200 bg-white/95 px-3 py-2"
+                  : "mx-[-12px] mb-[-6px] mt-2 border-t border-slate-200/80 px-3 py-2"
+              }`}
+              title={t("channelComments.openDiscussion")}
+            >
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <span className="truncate">{t("channelComments.open")}</span>
+              </span>
+              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700">
+                {commentsCount}
+              </span>
+            </button>
           )}
         </div>
         {isLastInGroup && !isSticker && !isImageBubble && (
