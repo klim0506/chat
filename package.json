@@ -3,6 +3,10 @@
   "private": true,
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File ./scripts/dev.ps1",
-    "dev:frontend": "cd frontend && npm run dev"
+    "dev:frontend": "cd frontend && npm run dev",
+    "test": "powershell -ExecutionPolicy Bypass -File ./scripts/run-all-tests.ps1",
+    "test:backend": "powershell -ExecutionPolicy Bypass -File ./scripts/run-all-tests.ps1 -BackendOnly",
+    "test:frontend": "cd frontend && npm run test:unit",
+    "test:e2e": "cd frontend && npm run test:e2e"
   }
 }

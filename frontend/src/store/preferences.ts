@@ -31,6 +31,9 @@ interface PreferencesState {
   soundMention: boolean;
   folderLayout: FolderLayout;
   foldersEnabled: boolean;
+  showFolderPersonal: boolean;
+  showFolderUnread: boolean;
+  showFolderArchive: boolean;
   folderColorPersonal: string;
   folderColorUnread: string;
   folderColorArchive: string;
@@ -45,6 +48,9 @@ interface PreferencesState {
   setSoundMention: (enabled: boolean) => void;
   setFolderLayout: (layout: FolderLayout) => void;
   setFoldersEnabled: (enabled: boolean) => void;
+  setShowFolderPersonal: (enabled: boolean) => void;
+  setShowFolderUnread: (enabled: boolean) => void;
+  setShowFolderArchive: (enabled: boolean) => void;
   setFolderColorPersonal: (color: string) => void;
   setFolderColorUnread: (color: string) => void;
   setFolderColorArchive: (color: string) => void;
@@ -62,6 +68,9 @@ export const usePreferencesStore = create<PreferencesState>()(
       soundMention: true,
       folderLayout: "left",
       foldersEnabled: true,
+      showFolderPersonal: true,
+      showFolderUnread: true,
+      showFolderArchive: true,
       folderColorPersonal: "#3B82F6",
       folderColorUnread: "#F59E0B",
       folderColorArchive: "#6B7280",
@@ -76,6 +85,9 @@ export const usePreferencesStore = create<PreferencesState>()(
       setSoundMention: (enabled) => set({ soundMention: enabled }),
       setFolderLayout: (layout) => set({ folderLayout: layout === "top" ? "top" : "left" }),
       setFoldersEnabled: (enabled) => set({ foldersEnabled: enabled }),
+      setShowFolderPersonal: (enabled) => set({ showFolderPersonal: enabled }),
+      setShowFolderUnread: (enabled) => set({ showFolderUnread: enabled }),
+      setShowFolderArchive: (enabled) => set({ showFolderArchive: enabled }),
       setFolderColorPersonal: (color) => set({ folderColorPersonal: color || "#3B82F6" }),
       setFolderColorUnread: (color) => set({ folderColorUnread: color || "#F59E0B" }),
       setFolderColorArchive: (color) => set({ folderColorArchive: color || "#6B7280" }),
@@ -113,6 +125,9 @@ export const usePreferencesStore = create<PreferencesState>()(
         const soundMention = stored?.soundMention ?? current.soundMention;
         const folderLayout = stored?.folderLayout === "top" ? "top" : "left";
         const foldersEnabled = stored?.foldersEnabled ?? stored?.showFolderPersonal ?? stored?.showFolderUnread ?? stored?.showFolderArchive ?? current.foldersEnabled;
+        const showFolderPersonal = stored?.showFolderPersonal ?? foldersEnabled;
+        const showFolderUnread = stored?.showFolderUnread ?? foldersEnabled;
+        const showFolderArchive = stored?.showFolderArchive ?? foldersEnabled;
         const folderColorPersonal = stored?.folderColorPersonal ?? current.folderColorPersonal;
         const folderColorUnread = stored?.folderColorUnread ?? current.folderColorUnread;
         const folderColorArchive = stored?.folderColorArchive ?? current.folderColorArchive;
@@ -128,6 +143,9 @@ export const usePreferencesStore = create<PreferencesState>()(
           soundMention,
           folderLayout,
           foldersEnabled,
+          showFolderPersonal,
+          showFolderUnread,
+          showFolderArchive,
           folderColorPersonal,
           folderColorUnread,
           folderColorArchive,

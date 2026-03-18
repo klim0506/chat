@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { AnchoredPortal } from "./TopLayerPortal";
 
 /** Popular emojis for chat/channel title icon (Telegram-style). */
 const EMOJI_OPTIONS = ["", "📢", "🎯", "💬", "📱", "🌟", "🔥", "📣", "💡", "🎬", "🏠", "✅", "📎", "🔒"];
@@ -15,11 +16,13 @@ interface TitleIconPickerProps {
 export function TitleIconPicker({ value, onChange, label, compact }: TitleIconPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !popoverRef.current?.contains(target)) setOpen(false);
     };
     const t = setTimeout(() => document.addEventListener("mousedown", handleClick), 0);
     return () => {
@@ -63,9 +66,9 @@ export function TitleIconPicker({ value, onChange, label, compact }: TitleIconPi
           {value || "−"}
         </button>
         {open && (
-          <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-xl border border-slate-200 shadow-lg">
+          <AnchoredPortal anchorRef={ref} portalRef={popoverRef} className="p-2 bg-white rounded-xl border border-slate-200 shadow-lg">
             {grid}
-          </div>
+          </AnchoredPortal>
         )}
       </div>
     );

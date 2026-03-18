@@ -64,6 +64,7 @@ class WebhookSecurityTest(TestCase):
         )
         self.assertEqual(res.status_code, 403)
 
+    @override_settings(YOOKASSA_WEBHOOK_IP_ALLOWLIST=[])
     @patch("apps.payments.views.get_payment")
     def test_webhook_ignores_wrong_currency(self, get_payment):
         """Payment in a different currency does not activate subscription."""
@@ -88,6 +89,7 @@ class WebhookSecurityTest(TestCase):
         self.sub.refresh_from_db()
         self.assertEqual(self.sub.status, UserSubscription.Status.CANCELLED)
 
+    @override_settings(YOOKASSA_WEBHOOK_IP_ALLOWLIST=[])
     @patch("apps.payments.views.get_payment")
     def test_webhook_ignores_wrong_amount(self, get_payment):
         """Payment with a different amount does not activate subscription."""
@@ -112,6 +114,7 @@ class WebhookSecurityTest(TestCase):
         self.sub.refresh_from_db()
         self.assertEqual(self.sub.status, UserSubscription.Status.CANCELLED)
 
+    @override_settings(YOOKASSA_WEBHOOK_IP_ALLOWLIST=[])
     @patch("apps.payments.views.get_payment")
     def test_webhook_idempotent_already_succeeded(self, get_payment):
         """Duplicate webhook for an already processed payment does not change data."""

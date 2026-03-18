@@ -99,12 +99,12 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     """Remove refresh cookie (on explicit logout)."""
-    response.delete_cookie(
-        key=getattr(settings, "REFRESH_COOKIE_NAME", "refresh_token"),
-        path="/",
-        samesite=getattr(settings, "REFRESH_COOKIE_SAMESITE", "Lax"),
-        secure=getattr(settings, "REFRESH_COOKIE_SECURE", False),
-    )
+    # delete_cookie only accepts key, path, domain, samesite (no secure in Django)
+    kwargs = {"key": getattr(settings, "REFRESH_COOKIE_NAME", "refresh_token"), "path": "/"}
+    samesite = getattr(settings, "REFRESH_COOKIE_SAMESITE", "Lax")
+    if samesite is not None:
+        kwargs["samesite"] = samesite
+    response.delete_cookie(**kwargs)
 
 
 class SendCodeView(APIView):

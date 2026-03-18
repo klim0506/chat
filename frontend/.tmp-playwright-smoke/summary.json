@@ -1,0 +1,434 @@
+[
+  {
+    "variant": "desktop",
+    "page": "root",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇧🇪+32",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  },
+  {
+    "variant": "desktop",
+    "page": "auth",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇧🇪+32",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  },
+  {
+    "variant": "desktop",
+    "page": "desktop-download",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/downloads/desktop",
+    "title": "Скачать Pingy для ПК | Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "На главную",
+        "tag": "A"
+      },
+      {
+        "text": "Войти",
+        "tag": "A"
+      },
+      {
+        "text": "Скачать для Windows",
+        "tag": "A"
+      },
+      {
+        "text": "Открыть в браузере",
+        "tag": "A"
+      },
+      {
+        "text": "← На главную",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "variant": "desktop",
+    "page": "telegram-3-shaga",
+    "statusCode": 404,
+    "finalUrl": "http://127.0.0.1:5173/telegram-3-shaga",
+    "title": "Page not found at /telegram-3-shaga",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": []
+  },
+  {
+    "variant": "desktop",
+    "page": "landing2",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/landing2",
+    "title": "Pingy — новая эра в общении",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "Главная",
+        "tag": "A"
+      },
+      {
+        "text": "FAQ",
+        "tag": "A"
+      },
+      {
+        "text": "Приложения",
+        "tag": "A"
+      },
+      {
+        "text": "API",
+        "tag": "A"
+      },
+      {
+        "text": "Модерация",
+        "tag": "A"
+      },
+      {
+        "text": "RU",
+        "tag": "A"
+      },
+      {
+        "text": "Twitter",
+        "tag": "A"
+      },
+      {
+        "text": "Войти",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "variant": "desktop",
+    "page": "chats",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth?next=%2Fchats",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇧🇪+32",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  },
+  {
+    "variant": "mobile",
+    "page": "root",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇧🇪+32",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  },
+  {
+    "variant": "mobile",
+    "page": "auth",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇧🇪+32",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  },
+  {
+    "variant": "mobile",
+    "page": "desktop-download",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/downloads/desktop",
+    "title": "Скачать Pingy для ПК | Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "На главную",
+        "tag": "A"
+      },
+      {
+        "text": "Войти",
+        "tag": "A"
+      },
+      {
+        "text": "Скачать для Windows",
+        "tag": "A"
+      },
+      {
+        "text": "Открыть в браузере",
+        "tag": "A"
+      },
+      {
+        "text": "← На главную",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "variant": "mobile",
+    "page": "telegram-3-shaga",
+    "statusCode": 404,
+    "finalUrl": "http://127.0.0.1:5173/telegram-3-shaga",
+    "title": "Page not found at /telegram-3-shaga",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": []
+  },
+  {
+    "variant": "mobile",
+    "page": "landing2",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/landing2",
+    "title": "Pingy — новая эра в общении",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "Главная",
+        "tag": "A"
+      },
+      {
+        "text": "FAQ",
+        "tag": "A"
+      },
+      {
+        "text": "Приложения",
+        "tag": "A"
+      },
+      {
+        "text": "API",
+        "tag": "A"
+      },
+      {
+        "text": "Модерация",
+        "tag": "A"
+      },
+      {
+        "text": "RU",
+        "tag": "A"
+      },
+      {
+        "text": "Twitter",
+        "tag": "A"
+      },
+      {
+        "text": "Войти",
+        "tag": "A"
+      }
+    ]
+  },
+  {
+    "variant": "mobile",
+    "page": "chats",
+    "statusCode": 200,
+    "finalUrl": "http://127.0.0.1:5173/auth?next=%2Fchats",
+    "title": "Pingy",
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "links": [
+      {
+        "text": "",
+        "tag": "A"
+      },
+      {
+        "text": "Русский",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "English",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "🇷🇺+7",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Получить код",
+        "tag": "BUTTON"
+      },
+      {
+        "text": "Вход по QR-коду",
+        "tag": "BUTTON"
+      }
+    ]
+  }
+]

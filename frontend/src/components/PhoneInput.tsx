@@ -5,6 +5,7 @@ import {
   getCountryByIso,
 } from "../data/countries";
 import { api } from "../api/client";
+import { AnchoredPortal } from "./TopLayerPortal";
 
 type PhoneInputProps = {
   value: string;
@@ -36,6 +37,7 @@ export function PhoneInput({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Parse incoming value into country + number
   useEffect(() => {
@@ -101,7 +103,12 @@ export function PhoneInput({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
         setDropdownOpen(false);
       }
     };
@@ -128,20 +135,20 @@ export function PhoneInput({
 
   return (
     <div ref={containerRef} className="relative">
-    <div className={`flex rounded-lg border overflow-hidden focus-within:ring-2 focus-within:border-transparent ${error ? "border-red-500 focus-within:ring-red-500" : "border-gray-300 focus-within:ring-blue-500"}`}>
+    <div className={`flex overflow-hidden rounded-[18px] border bg-transparent transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${error ? "border-rose-300 focus-within:ring-rose-100" : "border-slate-200 focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
       {/* Country selector */}
       <button
         type="button"
         onClick={() => setDropdownOpen((o) => !o)}
         disabled={disabled}
-        className="flex items-center gap-1.5 px-3 py-2 bg-gray-50 border-r border-gray-300 text-left min-w-0 hover:bg-gray-100 focus:outline-none focus:ring-0 disabled:opacity-50"
+        className="flex min-w-0 items-center gap-2 border-r border-slate-200 bg-slate-50/80 px-3 py-3 text-left hover:bg-slate-100/80 focus:outline-none focus:ring-0 disabled:opacity-50"
         aria-haspopup="listbox"
         aria-expanded={dropdownOpen}
         aria-label="Country"
       >
         <span className="text-lg leading-none" aria-hidden>{country.flag}</span>
-        <span className="text-sm font-medium text-gray-700">+{country.dialCode}</span>
-        <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span className="text-sm font-medium text-slate-700">+{country.dialCode}</span>
+        <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
@@ -157,42 +164,47 @@ export function PhoneInput({
         placeholder={placeholder}
         disabled={disabled}
         data-testid={dataTestId}
-        className="flex-1 min-w-0 px-3 py-2 focus:outline-none focus:ring-0 border-0"
+        className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
       />
 
       {/* Dropdown */}
       {dropdownOpen && (
-        <div
-          className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-hidden flex flex-col"
-          role="listbox"
+        <AnchoredPortal
+          anchorRef={containerRef}
+          portalRef={dropdownRef}
+          width="anchor"
+          offset={8}
+          className="flex max-h-72 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur"
         >
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search country..."
-            className="m-2 px-3 py-2 border border-gray-200 rounded text-sm"
-            autoFocus
-          />
-          <div className="overflow-y-auto flex-1 min-h-0">
-            {filteredCountries.map((c) => (
-              <button
-                key={c.iso}
-                type="button"
-                role="option"
-                aria-selected={c.iso === country.iso}
-                onClick={() => handleCountrySelect(c)}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-50 ${
-                  c.iso === country.iso ? "bg-blue-50 text-blue-700" : ""
-                }`}
-              >
-                <span className="text-lg">{c.flag}</span>
-                <span className="text-sm">+{c.dialCode}</span>
-                <span className="text-sm text-gray-600 truncate">{c.name}</span>
-              </button>
-            ))}
+          <div role="listbox">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search country..."
+              className="m-2 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm text-slate-700 outline-none transition-[border-color,box-shadow] focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+              autoFocus
+            />
+            <div className="overflow-y-auto flex-1 min-h-0">
+              {filteredCountries.map((c) => (
+                <button
+                  key={c.iso}
+                  type="button"
+                  role="option"
+                  aria-selected={c.iso === country.iso}
+                  onClick={() => handleCountrySelect(c)}
+                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 ${
+                    c.iso === country.iso ? "bg-sky-50 text-sky-700" : "text-slate-700"
+                  }`}
+                >
+                  <span className="text-lg">{c.flag}</span>
+                  <span className="text-sm">+{c.dialCode}</span>
+                  <span className="truncate text-sm text-slate-500">{c.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        </AnchoredPortal>
       )}
     </div>
     </div>

@@ -1,4 +1,6 @@
 """Tests for sticker packs API."""
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -15,7 +17,8 @@ class StickerPackAPITest(TestCase):
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {_make_token(self.user)}")
 
-    def test_create_pack(self):
+    @patch("apps.chats.sticker_views.can_create_custom_stickers", return_value=True)
+    def test_create_pack(self, mock_can_create):
         """POST /api/stickers/packs/ creates a pack."""
         res = self.client.post(
             "/api/stickers/packs/",
@@ -39,7 +42,8 @@ class StickerPackAPITest(TestCase):
         )
         self.assertEqual(res.status_code, 401)
 
-    def test_create_pack_validation(self):
+    @patch("apps.chats.sticker_views.can_create_custom_stickers", return_value=True)
+    def test_create_pack_validation(self, mock_can_create):
         """Create pack validates title and short_name."""
         res = self.client.post(
             "/api/stickers/packs/",

@@ -1,0 +1,218 @@
+[
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "/",
+    "finalUrl": "http://127.0.0.1:4173/auth",
+    "status": 200,
+    "title": "Pingy"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "/auth",
+    "finalUrl": "http://127.0.0.1:4173/auth",
+    "status": 200,
+    "title": "Pingy"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/downloads/desktop",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/downloads/desktop",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "/downloads/desktop",
+    "finalUrl": "http://127.0.0.1:4173/downloads/desktop",
+    "status": 200,
+    "title": "Скачать Pingy для ПК | Pingy"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/landing2",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/landing2",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "/landing2",
+    "finalUrl": "http://127.0.0.1:4173/landing2",
+    "status": 200,
+    "title": "Pingy — новая эра в общении"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/telegram-3-shaga",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+    "device": "desktop",
+    "route": "/telegram-3-shaga",
+    "finalUrl": "http://127.0.0.1:4173/telegram-3-shaga",
+    "status": 404,
+    "title": "Page not found at /telegram-3-shaga"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "desktop",
+    "route": "/chats",
+    "finalUrl": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "status": 200,
+    "title": "Pingy"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "/",
+    "finalUrl": "http://127.0.0.1:4173/auth",
+    "status": 200,
+    "title": "Pingy"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "/auth",
+    "finalUrl": "http://127.0.0.1:4173/auth",
+    "status": 200,
+    "title": "Pingy"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/downloads/desktop",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/downloads/desktop",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "/downloads/desktop",
+    "finalUrl": "http://127.0.0.1:4173/downloads/desktop",
+    "status": 200,
+    "title": "Скачать Pingy для ПК | Pingy"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/landing2",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/landing2",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "/landing2",
+    "finalUrl": "http://127.0.0.1:4173/landing2",
+    "status": 200,
+    "title": "Pingy — новая эра в общении"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/telegram-3-shaga",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+    "device": "mobile",
+    "route": "/telegram-3-shaga",
+    "finalUrl": "http://127.0.0.1:4173/telegram-3-shaga",
+    "status": 404,
+    "title": "Page not found at /telegram-3-shaga"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "type": "console",
+    "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+  },
+  {
+    "device": "mobile",
+    "route": "/chats",
+    "finalUrl": "http://127.0.0.1:4173/auth?next=%2Fchats",
+    "status": 200,
+    "title": "Pingy"
+  }
+]

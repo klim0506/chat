@@ -19,6 +19,10 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.06), transparent 22%),
+    linear-gradient(180deg, #fbfdff 0%, #f4f7fb 42%, #eef3f9 100%);
   /* Не задаём глобальный отступ сверху: sticky/fixed хедеры должны управлять safe-area точечно. */
   padding-top: 0;
   /* На mobile web (особенно Android Chrome) safe-area-inset-bottom может давать "пустоту" снизу.
@@ -43,9 +47,19 @@ select {
    ================================================================ */
 :root {
   /* Surfaces */
-  --surface-0: #f6f8fc; /* app background */
-  --surface-1: #ffffff; /* panels */
-  --surface-2: rgba(255, 255, 255, 0.72); /* glass */
+  --surface-0: #f4f7fb; /* app background */
+  --surface-1: rgba(255, 255, 255, 0.94); /* panels */
+  --surface-2: rgba(255, 255, 255, 0.82); /* glass */
+
+  /* Accent hierarchy */
+  --accent-strong-start: #213754;
+  --accent-strong-end: #2c4a6f;
+  --accent-strong-hover-start: #294463;
+  --accent-strong-hover-end: #355882;
+  --accent-strong-shadow: rgba(33, 55, 84, 0.20);
+  --accent-soft-bg: rgba(225, 236, 248, 0.94);
+  --accent-soft-border: rgba(141, 166, 196, 0.32);
+  --accent-soft-text: #27415f;
 
   /* Typography (rem so browser zoom scales text) */
   --ui-fs-body: 0.9375rem;   /* 15px at 16px root */
@@ -61,23 +75,39 @@ select {
   --text-2: #64748b;
 
   /* Borders & shadows */
-  --border-subtle: rgba(148, 163, 184, 0.42);
-  --border-strong: rgba(148, 163, 184, 0.62);
-  --shadow-1: 0 10px 26px rgba(15, 23, 42, 0.08);
-  --shadow-2: 0 18px 48px rgba(15, 23, 42, 0.14);
+  --border-subtle: rgba(148, 163, 184, 0.28);
+  --border-strong: rgba(148, 163, 184, 0.42);
+  --shadow-1: 0 12px 30px rgba(15, 23, 42, 0.06);
+  --shadow-2: 0 26px 64px rgba(15, 23, 42, 0.10);
 
   /* Glass */
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(148, 163, 184, 0.35);
-  --glass-blur: 14px;
+  --glass-bg: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(148, 163, 184, 0.24);
+  --glass-blur: 18px;
+
+  /* Messenger canvases */
+  --messenger-shell-bg:
+    radial-gradient(circle at 0% 0%, rgba(125, 211, 252, 0.18), transparent 18%),
+    radial-gradient(circle at 100% 0%, rgba(96, 165, 250, 0.14), transparent 20%),
+    radial-gradient(circle at 50% 100%, rgba(226, 232, 240, 0.62), transparent 38%),
+    linear-gradient(180deg, #f9fbfe 0%, #f1f6fb 48%, #edf3f9 100%);
+  --messenger-main-bg:
+    radial-gradient(circle at 18% 12%, rgba(191, 219, 254, 0.28), transparent 16%),
+    radial-gradient(circle at 86% 14%, rgba(186, 230, 253, 0.22), transparent 18%),
+    radial-gradient(circle at 50% 100%, rgba(226, 232, 240, 0.46), transparent 40%),
+    linear-gradient(180deg, rgba(252, 254, 255, 0.94) 0%, rgba(244, 248, 252, 0.98) 52%, rgba(239, 244, 250, 0.98) 100%);
 
   /* Chat background pipeline */
   --chat-bg-image-opacity: 1;
   --chat-bg-filter: saturate(0.95) contrast(0.96) brightness(1.03);
-  --chat-bg-overlay: rgba(255, 255, 255, 0.62);
-  --chat-bg-vignette: radial-gradient(120% 110% at 50% 15%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.64) 52%, rgba(255,255,255,0.82) 100%);
+  --chat-bg-overlay: rgba(255, 255, 255, 0.58);
+  --chat-bg-vignette: radial-gradient(120% 110% at 50% 15%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.62) 52%, rgba(255,255,255,0.80) 100%);
   /* Lightweight vector default (no image request) */
-  --chat-bg-vector-default: linear-gradient(165deg, #e8ecf2 0%, #dce4ee 35%, #e2e8f0 70%, #f1f5f9 100%);
+  --chat-bg-vector-default:
+    radial-gradient(circle at 18% 14%, rgba(125, 211, 252, 0.18), transparent 18%),
+    radial-gradient(circle at 82% 10%, rgba(191, 219, 254, 0.20), transparent 18%),
+    radial-gradient(circle at 50% 100%, rgba(226, 232, 240, 0.42), transparent 44%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4fb 46%, #e8eff7 100%);
 
   /* Rounding */
   --radius-xl: 18px;
@@ -88,6 +118,15 @@ select {
   --surface-0: #0b1220;
   --surface-1: #0f172a;
   --surface-2: rgba(15, 23, 42, 0.70);
+
+  --accent-strong-start: #27415f;
+  --accent-strong-end: #35567c;
+  --accent-strong-hover-start: #315174;
+  --accent-strong-hover-end: #41678f;
+  --accent-strong-shadow: rgba(0, 0, 0, 0.34);
+  --accent-soft-bg: rgba(33, 52, 79, 0.90);
+  --accent-soft-border: rgba(84, 112, 149, 0.44);
+  --accent-soft-text: #d8e5f8;
 
   --text-0: #e6eefc;
   --text-1: #c7d6ef;
@@ -101,10 +140,25 @@ select {
   --glass-bg: rgba(11, 18, 32, 0.56);
   --glass-border: rgba(60, 78, 108, 0.55);
 
+  --messenger-shell-bg:
+    radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.12), transparent 20%),
+    radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.12), transparent 20%),
+    radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.42), transparent 36%),
+    linear-gradient(180deg, #0b1220 0%, #0f172a 52%, #101827 100%);
+  --messenger-main-bg:
+    radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.18), transparent 16%),
+    radial-gradient(circle at 84% 14%, rgba(14, 165, 233, 0.14), transparent 18%),
+    radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.34), transparent 36%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(14, 24, 39, 0.98) 56%, rgba(11, 18, 32, 0.98) 100%);
+
   --chat-bg-filter: saturate(0.88) contrast(0.92) brightness(0.84);
   --chat-bg-overlay: rgba(11, 18, 32, 0.62);
   --chat-bg-vignette: radial-gradient(120% 110% at 50% 15%, rgba(11,18,32,0.10) 0%, rgba(11,18,32,0.58) 54%, rgba(11,18,32,0.80) 100%);
-  --chat-bg-vector-default: linear-gradient(165deg, #0f172a 0%, #1e293b 40%, #0f172a 70%, #0b1220 100%);
+  --chat-bg-vector-default:
+    radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.14), transparent 16%),
+    radial-gradient(circle at 82% 12%, rgba(14, 165, 233, 0.12), transparent 16%),
+    radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.30), transparent 40%),
+    linear-gradient(180deg, #0f172a 0%, #182436 48%, #0b1220 100%);
 }
 
 /* Token helpers (use in JSX to avoid fighting Tailwind overrides) */
@@ -120,6 +174,57 @@ select {
 .ui-border-subtle { border-color: var(--border-subtle) !important; }
 .ui-shadow-1 { box-shadow: var(--shadow-1); }
 .ui-shadow-2 { box-shadow: var(--shadow-2); }
+.app-shell-backdrop {
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.10), transparent 24%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 20%),
+    linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(244,247,251,0.96) 45%, rgba(238,243,249,0.98) 100%);
+}
+.messenger-app-bg {
+  background: var(--messenger-shell-bg);
+}
+.messenger-main-backdrop {
+  background: var(--messenger-main-bg);
+}
+.auth-shell {
+  background:
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.12), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.10), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #f1f5fb 55%, #edf2f8 100%);
+}
+.auth-glass-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  box-shadow: 0 26px 80px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.auth-soft-panel {
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.soft-chip {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+}
+.ui-accent-strong {
+  background: linear-gradient(135deg, var(--accent-strong-start), var(--accent-strong-end));
+  color: #f8fbff;
+  box-shadow: 0 14px 30px var(--accent-strong-shadow);
+}
+.ui-accent-strong:hover {
+  background: linear-gradient(135deg, var(--accent-strong-hover-start), var(--accent-strong-hover-end));
+}
+.ui-accent-soft {
+  background: var(--accent-soft-bg);
+  border-color: var(--accent-soft-border) !important;
+  color: var(--accent-soft-text);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
 
 /* Typography helpers */
 .ui-text-body { font-size: var(--ui-fs-body) !important; line-height: var(--ui-lh-body) !important; }

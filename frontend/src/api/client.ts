@@ -357,6 +357,8 @@ export interface Message {
   my_reactions: string[];
   /** Channel mode only: number of comments under the post */
   comments_count?: number;
+  /** Channel mode only: post views counter */
+  views_count?: number;
   /** Own messages only: delivered (1 check) or read (2 checks). */
   read_status?: "delivered" | "read" | null;
   /** Own messages only: who read this message (last_read_at >= created_at). */

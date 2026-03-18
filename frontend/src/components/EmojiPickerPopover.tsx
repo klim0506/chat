@@ -1,35 +1,18 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { EMOJI_SHORTCODES } from "../data/emoji-shortcodes";
-
-/** Unique emojis for picker: empty + popular + shortcodes (deduplicated). */
-const PICKER_EMOJIS = (() => {
-  const popular = ["", "😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊", "😇", "🙂", "😉", "😍", "🥰", "😘", "😋", "😎", "🤩", "🥳", "😢", "😭", "😤", "😡", "🤔", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💕", "💪", "👍", "👎", "👏", "🙌", "🤝", "🙏", "🔥", "✨", "💫", "🌟", "🎉", "🎊", "✅", "❌", "⚠️", "💯", "📢", "🎯", "💬", "📱", "💡", "🎬", "🏠", "📎", "🔒"];
-  const fromShortcodes = [...new Set(EMOJI_SHORTCODES.map((s) => s.emoji))];
-  const seen = new Set<string>(popular);
-  for (const e of fromShortcodes) {
-    if (!seen.has(e)) {
-      popular.push(e);
-      seen.add(e);
-    }
-  }
-  return popular;
-})();
+import { TELEGRAM_EMOJI_CATEGORIES } from "../data/telegram-emojis";
+import { EmojiGlyph } from "./EmojiGlyph";
 
 interface EmojiPickerPopoverProps {
   value: string;
   onChange: (emoji: string) => void;
-  /** Trigger element — click opens popover */
   children: React.ReactNode;
-  /** Optional class for the trigger wrapper */
   className?: string;
-  /** Title for "no emoji" option */
   emptyLabel?: string;
 }
 
 const POPOVER_OFFSET = 4;
 
-/** Popover with full emoji grid; use for channel title icon or profile status. Renders in a portal so it is not clipped by overflow. */
 export function EmojiPickerPopover({ value, onChange, children, className = "", emptyLabel = "Без иконки" }: EmojiPickerPopoverProps) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
@@ -41,10 +24,7 @@ export function EmojiPickerPopover({ value, onChange, children, className = "", 
     const updatePosition = () => {
       if (!triggerRef.current) return;
       const rect = triggerRef.current.getBoundingClientRect();
-      setPosition({
-        top: rect.bottom + POPOVER_OFFSET,
-        left: rect.left,
-      });
+      setPosition({ top: rect.bottom + POPOVER_OFFSET, left: rect.left });
     };
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
@@ -59,13 +39,11 @@ export function EmojiPickerPopover({ value, onChange, children, className = "", 
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
       const target = e.target as Node;
-      const insideTrigger = triggerRef.current?.contains(target);
-      const insidePopover = popoverRef.current?.contains(target);
-      if (!insideTrigger && !insidePopover) setOpen(false);
+      if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) setOpen(false);
     };
-    const t = setTimeout(() => document.addEventListener("mousedown", handleClick), 0);
+    const timer = setTimeout(() => document.addEventListener("mousedown", handleClick), 0);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       document.removeEventListener("mousedown", handleClick);
     };
   }, [open]);
@@ -78,38 +56,54 @@ export function EmojiPickerPopover({ value, onChange, children, className = "", 
     open &&
     position &&
     (
-    <div
-      ref={popoverRef}
-      className="fixed z-[200] p-2 bg-white rounded-xl border border-slate-200 shadow-lg max-h-64 overflow-y-auto"
-      style={{ top: position.top, left: position.left }}
-    >
-      <div className="grid grid-cols-8 gap-1">
-        <button
-          type="button"
-          onClick={() => { onChange(""); setOpen(false); }}
-          title={emptyLabel}
-          className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-colors ${
-            !value ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-          }`}
-        >
-          −
-        </button>
-        {PICKER_EMOJIS.filter(Boolean).map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            onClick={() => { onChange(emoji); setOpen(false); }}
-            title={emoji}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-colors ${
-              value === emoji ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-            }`}
-          >
-            {emoji}
-          </button>
-        ))}
+      <div
+        ref={popoverRef}
+        className="fixed z-[200] max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+        style={{ top: position.top, left: position.left, width: 320 }}
+      >
+        <div className="space-y-3">
+          <section>
+            <div className="mb-1 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400">
+              Options
+            </div>
+            <div className="grid grid-cols-8 gap-1">
+              <button
+                type="button"
+                onClick={() => { onChange(""); setOpen(false); }}
+                title={emptyLabel}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-colors ${
+                  !value ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                -
+              </button>
+            </div>
+          </section>
+          {TELEGRAM_EMOJI_CATEGORIES.map((category) => (
+            <section key={category.id}>
+              <div className="sticky top-0 z-[1] mb-1 bg-white/95 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400 backdrop-blur">
+                {category.label}
+              </div>
+              <div className="grid grid-cols-8 gap-1">
+                {category.items.map((item) => (
+                  <button
+                    key={item.src}
+                    type="button"
+                    onClick={() => { onChange(item.emoji); setOpen(false); }}
+                    title={item.emoji}
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                      value === item.emoji ? "bg-blue-100 ring-1 ring-blue-300" : "bg-slate-100 hover:bg-slate-200"
+                    }`}
+                  >
+                    <EmojiGlyph emoji={item.emoji} size={22} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <>

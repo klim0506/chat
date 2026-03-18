@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import { authApi, chatsApi, channelsApi, foldersApi, paymentsApi, userDisplayName, type Chat, type Channel, type ChatFolder, type UserSearchResult, type GlobalSearchResult } from "../api/client";
 import { useAuthStore } from "../store/auth";
@@ -18,6 +18,7 @@ import { subscribeCrossTabMessageSync } from "../lib/cross-tab-sync";
 import CreateChatModal from "../components/CreateChatModal";
 import CreateChannelModal from "../components/CreateChannelModal";
 import JoinChatPreviewModal from "../components/JoinChatPreviewModal";
+import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
 import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
 import { usePreferencesStore } from "../store/preferences";
 import type { AppLanguage } from "../store/preferences";
@@ -98,6 +99,16 @@ function formatUnread(count: number): string {
   if (count > 999) return "999+";
   return String(count);
 }
+
+function getActivityTimeMs(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const ts = new Date(iso).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+type SidebarConversationItem =
+  | { kind: "chat"; id: string; sortTs: number; titleKey: string; chat: Chat }
+  | { kind: "channel"; id: string; sortTs: number; titleKey: string; channel: Channel };
 
 function ChatListCheckmarks({ status }: { status: "delivered" | "read" | null | undefined }) {
   if (!status) return null;
@@ -237,6 +248,7 @@ export default function MessengerPage() {
     }
   });
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPopoverRef = useRef<HTMLDivElement>(null);
   const token = useAuthStore((s) => s.accessToken);
   const navigate = useNavigate();
   const notifWsRef = useRef<WebSocket | null>(null);
@@ -252,20 +264,23 @@ export default function MessengerPage() {
   const [showJoinPreviewModal, setShowJoinPreviewModal] = useState(false);
   /** Context menu on right-click on a chat */
   const [chatContextMenu, setChatContextMenu] = useState<{ x: number; y: number; chat: Chat } | null>(null);
-  /** Custom folders (no default "Чаты"/"Непрочитанные" — add in Settings → Folders) */
+  /** Custom folders (no default "Чаты"/"Новые" — add in Settings → Folders) */
   const [folders, setFolders] = useState<ChatFolder[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null);
   const folderLayout = usePreferencesStore((s) => s.folderLayout);
   const isFolderLeftWider = useMediaQuery(`(min-width: ${FOLDER_LEFT_BREAKPOINT}px)`);
+  const theme = usePreferencesStore((s) => s.theme);
+  const setTheme = usePreferencesStore((s) => s.setTheme);
   const foldersEnabled = usePreferencesStore((s) => s.foldersEnabled);
-  const folderColorPersonal = usePreferencesStore((s) => s.folderColorPersonal);
-  const folderColorUnread = usePreferencesStore((s) => s.folderColorUnread);
-  const folderColorArchive = usePreferencesStore((s) => s.folderColorArchive);
+  const showFolderPersonal = usePreferencesStore((s) => s.showFolderPersonal);
+  const showFolderUnread = usePreferencesStore((s) => s.showFolderUnread);
+  const showFolderArchive = usePreferencesStore((s) => s.showFolderArchive);
   const [showCreateChatModal, setShowCreateChatModal] = useState(false);
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const createMenuPopoverRef = useRef<HTMLDivElement>(null);
   const [inviteFriendsCopied, setInviteFriendsCopied] = useState(false);
   const [expandedOnboardingBlock, setExpandedOnboardingBlock] = useState<"invite" | "create" | null>(null);
   const [referralLink, setReferralLink] = useState(window.location.origin);
@@ -656,28 +671,54 @@ export default function MessengerPage() {
     return unsub;
   }, []);
 
-  // Close menu on click outside
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [menuOpen]);
-
   useEffect(() => {
     if (!showCreateMenu) return;
     const onClickOutside = (e: MouseEvent) => {
-      if (createMenuRef.current && !createMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        createMenuRef.current &&
+        !createMenuRef.current.contains(target) &&
+        !createMenuPopoverRef.current?.contains(target)
+      ) {
         setShowCreateMenu(false);
       }
     };
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [showCreateMenu]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target) &&
+        !menuPopoverRef.current?.contains(target)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (selectedFolderId === PERSONAL_FOLDER_ID && !showFolderPersonal) {
+      setSelectedFolderId(null);
+    } else if (selectedFolderId === UNREAD_FOLDER_ID && !showFolderUnread) {
+      setSelectedFolderId(null);
+    } else if (selectedFolderId === ARCHIVE_FOLDER_ID && !showFolderArchive) {
+      setSelectedFolderId(null);
+    }
+  }, [selectedFolderId, showFolderArchive, showFolderPersonal, showFolderUnread]);
 
   const openChat = (chatId: string) => {
     setActiveChatId(chatId);
@@ -706,21 +747,44 @@ export default function MessengerPage() {
     navigate("/chats", { replace: true });
   };
 
-  // Sort: pinned first (by pin order), then ALL by last message time (newest first)
-  const sortedChats = [...chats].sort((a, b) => {
-    const ia = pinnedChatIds.indexOf(a.id);
-    const ib = pinnedChatIds.indexOf(b.id);
-    const aPinned = ia !== -1;
-    const bPinned = ib !== -1;
+  const pinnedOrder = useMemo(
+    () => new Map(pinnedChatIds.map((id, index) => [id, index])),
+    [pinnedChatIds],
+  );
+  const compareSidebarItems = useCallback((a: SidebarConversationItem, b: SidebarConversationItem) => {
+    const aPinIndex = a.kind === "chat" ? pinnedOrder.get(a.chat.id) : undefined;
+    const bPinIndex = b.kind === "chat" ? pinnedOrder.get(b.chat.id) : undefined;
+    const aPinned = aPinIndex !== undefined;
+    const bPinned = bPinIndex !== undefined;
     if (aPinned || bPinned) {
       if (!aPinned) return 1;
       if (!bPinned) return -1;
-      return ia - ib;
+      return aPinIndex - bPinIndex;
     }
-    const aTime = (a.last_message_at || a.created_at) ?? a.created_at;
-    const bTime = (b.last_message_at || b.created_at) ?? b.created_at;
-    return new Date(bTime).getTime() - new Date(aTime).getTime();
-  });
+    if (a.sortTs !== b.sortTs) return b.sortTs - a.sortTs;
+    const titleCmp = a.titleKey.localeCompare(b.titleKey, lang === "ru" ? "ru" : "en", { sensitivity: "base" });
+    if (titleCmp !== 0) return titleCmp;
+    if (a.kind !== b.kind) return a.kind === "channel" ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  }, [lang, pinnedOrder]);
+
+  const sortedChats = useMemo(() => [...chats].sort((a, b) => {
+    const aItem: SidebarConversationItem = {
+      kind: "chat",
+      id: a.id,
+      sortTs: getActivityTimeMs(a.last_message_at || a.created_at),
+      titleKey: (a.is_favorites ? t("chat.favoritesTitle") : a.is_personal && a.other_member ? userDisplayName(a.other_member) : a.title || "").trim().toLocaleLowerCase(),
+      chat: a,
+    };
+    const bItem: SidebarConversationItem = {
+      kind: "chat",
+      id: b.id,
+      sortTs: getActivityTimeMs(b.last_message_at || b.created_at),
+      titleKey: (b.is_favorites ? t("chat.favoritesTitle") : b.is_personal && b.other_member ? userDisplayName(b.other_member) : b.title || "").trim().toLocaleLowerCase(),
+      chat: b,
+    };
+    return compareSidebarItems(aItem, bItem);
+  }), [chats, compareSidebarItems, t]);
 
   const archivedCount = chats.filter((c) => c.is_archived && (c.unread_count || 0) > 0).length;
   const unreadCount = chats.filter((c) => !c.is_archived && (c.unread_count || 0) > 0).length;
@@ -757,18 +821,42 @@ export default function MessengerPage() {
       })
     : baseChats;
 
+  const baseChannels = selectedFolderId ? [] : channels;
   const filteredChannels = q
-    ? channels.filter((c) => {
+    ? baseChannels.filter((c) => {
         const title = (c.title || "").toLowerCase();
         const username = (c.username || "").toLowerCase();
         return title.includes(q) || username.includes(q);
       })
-    : channels;
+    : baseChannels;
+  const sidebarItems = useMemo<SidebarConversationItem[]>(() => {
+    const items: SidebarConversationItem[] = [
+      ...filteredChats.map((chat) => ({
+        kind: "chat" as const,
+        id: chat.id,
+        sortTs: getActivityTimeMs(chat.last_message_at || chat.created_at),
+        titleKey: (chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title || "").trim().toLocaleLowerCase(),
+        chat,
+      })),
+      ...filteredChannels.map((channel) => ({
+        kind: "channel" as const,
+        id: channel.id,
+        sortTs: getActivityTimeMs(channel.last_post_at || channel.created_at),
+        titleKey: (channel.title || "").trim().toLocaleLowerCase(),
+        channel,
+      })),
+    ];
+    return items.sort(compareSidebarItems);
+  }, [compareSidebarItems, filteredChannels, filteredChats, t]);
 
   const rightPanelOpen = !!activeChatId || !!activeChannelId || showSettings;
   const onlyFavoritesChat = chats.length === 1 && !!chats[0]?.is_favorites;
+  const hasRegularChats = chats.some((chat) => !chat.is_favorites);
+  const showSidebarSearch = hasRegularChats || channels.length > 0 || archivedCount > 0 || !!selectedFolderId || q.length > 0;
   const showRightPanel = rightPanelOpen || chats.length === 0 || (!rightPanelOpen && onlyFavoritesChat);
-
+  const folderTabBaseClass = "border text-center transition-[background-color,box-shadow,border-color,color,transform] duration-150 ease-out";
+  const folderTabActiveClass = "border-sky-200 bg-white/90 text-slate-900 shadow-[0_8px_18px_rgba(15,23,42,0.05)]";
+  const folderTabInactiveClass = "border-transparent text-slate-600 hover:bg-white/75 hover:text-slate-800";
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -1060,45 +1148,51 @@ export default function MessengerPage() {
   }, [location.search, location.pathname, navigate]);
 
   return (
-    <div className="flex flex-col h-screen ui-surface-0 overflow-hidden relative">
+    <div className="messenger-app-bg flex h-screen flex-col overflow-hidden relative">
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
       {/* Toast: invite link copied */}
       {showInviteLinkCopiedToast && (
-        <button
-          type="button"
-          onClick={() => setShowInviteLinkCopiedToast(false)}
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 px-4 py-3 bg-slate-800 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-slate-700 transition-colors text-left"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-400 shrink-0">
-            <path d="M20 6 9 17l-5-5"/>
-          </svg>
-          <span>{inviteToastIsChatLink ? t("messenger.chatLinkCopied") : t("messenger.inviteLinkCopied")}</span>
-        </button>
+        <TopLayerPortal>
+          <button
+            type="button"
+            onClick={() => setShowInviteLinkCopiedToast(false)}
+            className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-3 bg-slate-800 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-slate-700 transition-colors text-left"
+            style={{ zIndex: TOP_LAYER_Z_INDEX }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-400 shrink-0">
+              <path d="M20 6 9 17l-5-5"/>
+            </svg>
+            <span>{inviteToastIsChatLink ? t("messenger.chatLinkCopied") : t("messenger.inviteLinkCopied")}</span>
+          </button>
+        </TopLayerPortal>
       )}
 
       {/* Toast: new account login */}
       {newLoginToast && (
-        <button
-          type="button"
-          onClick={() => {
-            setNewLoginToast(null);
-            navigate("/chats/settings");
-          }}
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-3 bg-amber-600 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-amber-700 transition-colors text-left max-w-md"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-200 shrink-0">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <div>
-            <p className="font-medium">{t("messenger.newLoginTitle")}</p>
-            <p className="text-amber-100 text-xs mt-0.5">
-              {newLoginToast.device}{newLoginToast.ip ? ` (${newLoginToast.ip})` : ""}. {t("messenger.newLoginDesc")}
-            </p>
-          </div>
-        </button>
+        <TopLayerPortal>
+          <button
+            type="button"
+            onClick={() => {
+              setNewLoginToast(null);
+              navigate("/chats/settings");
+            }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-3 bg-amber-600 text-white text-sm rounded-lg shadow-lg cursor-pointer hover:bg-amber-700 transition-colors text-left max-w-md"
+            style={{ zIndex: TOP_LAYER_Z_INDEX }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-200 shrink-0">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div>
+              <p className="font-medium">{t("messenger.newLoginTitle")}</p>
+              <p className="text-amber-100 text-xs mt-0.5">
+                {newLoginToast.device}{newLoginToast.ip ? ` (${newLoginToast.ip})` : ""}. {t("messenger.newLoginDesc")}
+              </p>
+            </div>
+          </button>
+        </TopLayerPortal>
       )}
 
       {/* Modal: join by link */}
@@ -1142,12 +1236,13 @@ export default function MessengerPage() {
 
       {/* Chat context menu (right-click) */}
       {chatContextMenu && (
-        <div
-          className="fixed z-[60] w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
-          style={{ left: chatContextMenu.x, top: chatContextMenu.y }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <TopLayerPortal>
+          <div
+            className="fixed w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
+            style={{ left: chatContextMenu.x, top: chatContextMenu.y, zIndex: TOP_LAYER_Z_INDEX }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
           <button
             type="button"
             onClick={() => togglePin(chatContextMenu.chat.id)}
@@ -1262,24 +1357,26 @@ export default function MessengerPage() {
               })}
             </>
           )}
-        </div>
+          </div>
+        </TopLayerPortal>
       )}
 
-      {/* ═══════ Left sidebar — Tab panel + Chat list ═══════ */}
+      {/* ═══════ Left sidebar — column-left (Telegram: chatlist-container + folders) ═══════ */}
       <aside
-        className={`${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} flex-row border-r ui-surface-1 shrink-0 relative`}
-        style={{ width: sidebarWidth }}
+        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} app-shell-backdrop flex-row border-r ui-border-subtle ui-surface-1 shrink-0 relative overflow-hidden`}
+        style={{ width: sidebarWidth, minWidth: 220 }}
+        id="column-left"
       >
         {/* Tab panel (left layout): standard folders + user folders — hidden when <xl, top tabs shown instead */}
         {folderLayout === "left" && hasFolderTabs && isFolderLeftWider && (
         <nav
-          className="flex flex-col w-20 shrink-0 bg-slate-800"
+          className="flex w-24 shrink-0 flex-col gap-2 border-r border-slate-200/70 bg-white/62 px-2 py-3 backdrop-blur-xl"
           aria-label={t("messenger.chats")}
         >
           <button
             type="button"
             onClick={() => setSelectedFolderId(null)}
-            className={`flex flex-col items-center justify-center gap-1 w-full h-20 text-center transition-colors duration-150 ease-out ${selectedFolderId !== null ? "hover:bg-slate-700/80 text-slate-400" : "bg-slate-700 text-white"}`}
+            className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-1 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === null ? folderTabActiveClass : folderTabInactiveClass}`}
           >
             <span className="flex items-center justify-center w-11 h-11 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -1290,15 +1387,11 @@ export default function MessengerPage() {
               {t("messenger.chats")}
             </FolderTabLabel>
           </button>
-          {foldersEnabled && (
+          {foldersEnabled && showFolderPersonal && (
             <button
               type="button"
               onClick={() => setSelectedFolderId(PERSONAL_FOLDER_ID)}
-              className={`flex flex-col items-center justify-center gap-1 w-full h-20 text-center transition-colors duration-150 ease-out ${selectedFolderId !== PERSONAL_FOLDER_ID ? "hover:bg-slate-700/80 text-slate-400" : "bg-slate-700"}`}
-              style={selectedFolderId === PERSONAL_FOLDER_ID ? {
-                color: folderColorPersonal,
-                backgroundColor: "rgb(51 65 85)",
-              } : {}}
+              className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-1 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === PERSONAL_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
             >
               <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -1313,15 +1406,11 @@ export default function MessengerPage() {
               <FolderTabLabel className="ui-text-title">{t("folders.standardPersonal")}</FolderTabLabel>
             </button>
           )}
-          {foldersEnabled && (
+          {foldersEnabled && showFolderUnread && (
             <button
               type="button"
               onClick={() => setSelectedFolderId(UNREAD_FOLDER_ID)}
-              className={`flex flex-col items-center justify-center gap-1 w-full h-20 text-center transition-colors duration-150 ease-out ${selectedFolderId !== UNREAD_FOLDER_ID ? "hover:bg-slate-700/80 text-slate-400" : "bg-slate-700"}`}
-              style={selectedFolderId === UNREAD_FOLDER_ID ? {
-                color: folderColorUnread,
-                backgroundColor: "rgb(51 65 85)",
-              } : {}}
+              className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-1 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === UNREAD_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
             >
               <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
@@ -1336,17 +1425,13 @@ export default function MessengerPage() {
               <FolderTabLabel className="ui-text-title">{t("folders.standardUnread")}</FolderTabLabel>
             </button>
           )}
-          {foldersEnabled && (
+          {foldersEnabled && showFolderArchive && (
             <div className="flex flex-col">
               <button
                 type="button"
                 onClick={() => setSelectedFolderId(ARCHIVE_FOLDER_ID)}
-                className={`flex flex-col items-center justify-center gap-1 w-full h-20 text-center transition-colors duration-150 ease-out ${selectedFolderId !== ARCHIVE_FOLDER_ID ? "hover:bg-slate-700/80 text-slate-400" : "bg-slate-700"}`}
-                style={selectedFolderId === ARCHIVE_FOLDER_ID ? {
-                  color: folderColorArchive,
-                  backgroundColor: "rgb(51 65 85)",
-                } : {}}
-              >
+              className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-1 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === ARCHIVE_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
+            >
                 <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                     <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/>
@@ -1362,7 +1447,6 @@ export default function MessengerPage() {
             </div>
           )}
           {folders.map((f) => {
-            const fc = f.color || "#3B82F6";
             const folderChatsList = sortedChats.filter((c) => !c.is_archived && (c.folder_ids || []).includes(f.id));
             return (
               <div key={f.id} className="flex flex-col">
@@ -1372,27 +1456,23 @@ export default function MessengerPage() {
                     setSelectedFolderId(f.id);
                     setExpandedFolderId((prev) => (prev === f.id ? null : f.id));
                   }}
-                  className={`flex flex-col items-center justify-center gap-1 w-full h-20 text-center transition-colors duration-150 ease-out ${selectedFolderId !== f.id ? "hover:bg-slate-700/80 text-slate-400" : "bg-slate-700"}`}
-                  style={selectedFolderId === f.id ? {
-                    color: fc,
-                    backgroundColor: "rgb(51 65 85)",
-                  } : {}}
+                  className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-1 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === f.id ? folderTabActiveClass : folderTabInactiveClass}`}
                 >
                   <span className="flex items-center justify-center w-11 h-11 shrink-0 text-2xl leading-none">{f.emoji || "📁"}</span>
                   <FolderTabLabel className="ui-text-title">{folderDisplayName(f.name)}</FolderTabLabel>
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`shrink-0 transition-transform ${expandedFolderId === f.id ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 {expandedFolderId === f.id && (
-                  <div className="max-h-48 overflow-y-auto border-t border-slate-600/50 bg-slate-700/50">
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/72 p-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
                     {folderChatsList.length === 0 ? null : (
                       folderChatsList.map((chat) => (
                         <button
                           key={chat.id}
                           type="button"
                           onClick={() => openChat(chat.id)}
-                          className={`w-full text-left px-2 py-1.5 flex items-center gap-2 transition-colors duration-150 ease-out ${chat.id === activeChatId && !showSettings ? "bg-slate-600 text-white" : "text-slate-300 hover:bg-slate-600/80"}`}
+                          className={`flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors duration-150 ease-out ${chat.id === activeChatId && !showSettings ? "ui-accent-soft border-sky-200/70 text-slate-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}
                         >
-                          <div className="w-7 h-7 rounded-full bg-slate-500 flex items-center justify-center text-[0.625rem] font-medium text-slate-200 shrink-0 overflow-hidden">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[0.625rem] font-medium text-slate-600">
                             {chat.is_personal && chat.other_member
                               ? getAvatarInitials(userDisplayName(chat.other_member))
                               : getAvatarInitials(chat.title || "?")}
@@ -1411,97 +1491,165 @@ export default function MessengerPage() {
 
         {/* Chat list content */}
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-        {/* Sidebar header */}
+        {/* Sidebar header (Telegram: sidebar-header) */}
         <div
-          className="sticky top-0 z-20 backdrop-blur border-b px-4 h-14 flex items-center gap-2"
+          className="sidebar-header sticky top-0 z-20 flex h-16 items-center border-b px-4 backdrop-blur-xl"
           style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
         >
-          <div className="flex-1 flex items-center min-w-0">
-            <img src="/assets/logo.png" alt="pingy" className="h-6 w-auto object-contain" />
-          </div>
-          <div className="relative" ref={createMenuRef}>
-            <button
-              type="button"
-              onClick={() => setShowCreateMenu((v) => !v)}
-              className="bg-blue-600 text-white p-2 rounded-xl hover:bg-blue-700 active:scale-[0.98] transition-[transform,background-color] shadow-sm shadow-blue-600/10"
-              title={t("dashboard.createChat")}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            </button>
-            {showCreateMenu && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-50 animate-in fade-in slide-in-from-top-1">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-11 shrink-0 items-center justify-center">
+                <img src="/app-icon-header.png" alt="Pingy" className="h-8 w-auto object-contain object-center" />
+              </div>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <div className="relative" ref={createMenuRef}>
                 <button
                   type="button"
-                  onClick={() => { setShowCreateMenu(false); setShowCreateChatModal(true); }}
-                  className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
+                  onClick={() => setShowCreateMenu((v) => !v)}
+                  className="ui-accent-strong flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.98]"
+                  title={t("dashboard.createChat")}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  {t("createMenu.createChat")}
+                  <span aria-hidden className="text-xl leading-none font-semibold">
+                    +
+                  </span>
                 </button>
+                {showCreateMenu && (
+                  <AnchoredPortal
+                    anchorRef={createMenuRef}
+                    portalRef={createMenuPopoverRef}
+                    align="right"
+                    minWidth={168}
+                    className="rounded-2xl border border-slate-200 bg-white/95 py-1.5 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur animate-in fade-in slide-in-from-top-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setShowCreateMenu(false); setShowCreateChatModal(true); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      {t("createMenu.optionGroup")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCreateMenu(false); setShowCreateChannelModal(true); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
+                        <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+                      </svg>
+                      {t("createMenu.optionChannel")}
+                    </button>
+                  </AnchoredPortal>
+                )}
+              </div>
+
+              <div className="relative" ref={menuRef}>
                 <button
                   type="button"
-                  onClick={() => { setShowCreateMenu(false); setShowCreateChannelModal(true); }}
-                  className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors w-full text-left"
+                  onClick={() => setMenuOpen((open) => !open)}
+                  className="soft-chip flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-3 text-sm font-medium text-slate-500 transition-[transform,background-color,color] hover:text-slate-800 active:scale-[0.98]"
+                  title={t("messenger.menu")}
+                  aria-label={t("messenger.menu")}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
-                    <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
                   </svg>
-                  {t("createMenu.createChannel")}
                 </button>
-              </div>
-            )}
-          </div>
 
-          {/* Three-dot menu */}
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="text-slate-500 hover:text-slate-800 p-2 rounded-xl hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color]"
-              title={t("messenger.menu")}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
-              </svg>
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-50 animate-in fade-in slide-in-from-top-1">
-                <Link
-                  to="/chats/settings"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
-                    <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                  </svg>
-                  {t("common.settings")}
-                </Link>
+                {menuOpen && (
+                  <AnchoredPortal
+                    anchorRef={menuRef}
+                    portalRef={menuPopoverRef}
+                    align="right"
+                    minWidth={220}
+                    className="rounded-2xl border border-slate-200 bg-white/95 py-1.5 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur animate-in fade-in slide-in-from-top-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate("/chats/settings");
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                      </svg>
+                      {t("common.settings")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setSelectedFolderId(ARCHIVE_FOLDER_ID);
+                        navigate("/chats", { replace: true });
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                        <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/>
+                      </svg>
+                      {t("messenger.archived")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTheme(theme === "dark" ? "light" : "dark");
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3c0 .89.2 1.73.57 2.49A7 7 0 0 0 18.5 12c.76.37 1.6.57 2.5.57z"/>
+                      </svg>
+                      {t(theme === "dark" ? "messenger.dayTheme" : "messenger.nightTheme")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        navigate("/downloads/desktop");
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                      {t("messenger.downloadApp")}
+                    </button>
+                  </AnchoredPortal>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
 
         {/* Unified search: chats + users by username */}
-        <div className="px-4 py-2 border-b ui-border-subtle ui-surface-1">
-          <div className="relative">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-            </svg>
-            <input
-              type="text"
-              placeholder={t("messenger.searchPlaceholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-100/80 border border-slate-200/70 rounded-xl ui-text-assist text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:border-blue-300 focus:bg-white transition-colors"
-            />
+        {showSidebarSearch && (
+          <div className="border-b px-4 py-3 ui-border-subtle">
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+              </svg>
+              <input
+                type="text"
+                placeholder={t("messenger.searchPlaceholder")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="ui-text-assist w-full rounded-2xl border border-slate-200/80 bg-white/80 py-3 pl-10 pr-4 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] placeholder:text-slate-400 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Folder tabs: when top layout — scrollable row of buttons with icon + label */}
         {hasFolderTabs && (folderLayout === "top" || (folderLayout === "left" && !isFolderLeftWider)) && (
-          <div className="flex overflow-x-auto scrollbar-hide gap-0 px-4 py-2 border-b ui-border-subtle ui-surface-1 shrink-0">
+          <div className="flex h-16 shrink-0 items-center gap-2 overflow-x-auto scrollbar-hide border-b px-4 ui-border-subtle">
             {(() => {
               const short = (s: string) => (s.length > 8 ? `${s.slice(0, 8)}…` : s);
               return (
@@ -1510,8 +1658,10 @@ export default function MessengerPage() {
               type="button"
               onClick={() => setSelectedFolderId(null)}
               title={t("messenger.chats")}
-              className={`relative flex flex-row items-center justify-start gap-1.5 min-w-[5.75rem] px-2 py-1.5 shrink-0 transition-colors duration-150 ease-out after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-5 after:w-px after:bg-slate-200/70 last:after:hidden ${
-                !selectedFolderId ? "text-slate-900" : "text-slate-600 hover:text-slate-800"
+              className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-2 rounded-2xl px-3 text-left ${
+                folderTabBaseClass
+              } ${
+                !selectedFolderId ? folderTabActiveClass : folderTabInactiveClass
               }`}
             >
               <span className="flex items-center justify-center w-6 h-6 shrink-0">
@@ -1521,20 +1671,21 @@ export default function MessengerPage() {
               </span>
               <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("messenger.chats"))}</span>
             </button>
-            {foldersEnabled && (
+            {foldersEnabled && showFolderPersonal && (
               <button
                 type="button"
                 onClick={() => setSelectedFolderId(PERSONAL_FOLDER_ID)}
                 title={t("folders.standardPersonal")}
-                className={`relative flex flex-row items-center justify-start gap-1.5 min-w-[5.75rem] px-2 py-1.5 shrink-0 transition-colors duration-150 ease-out after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-5 after:w-px after:bg-slate-200/70 last:after:hidden ${
-                  selectedFolderId === PERSONAL_FOLDER_ID ? "text-slate-900" : "text-slate-600 hover:text-slate-800"
+                className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-2 rounded-2xl px-3 text-left ${
+                  folderTabBaseClass
+                } ${
+                  selectedFolderId === PERSONAL_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass
                 }`}
-                style={selectedFolderId === PERSONAL_FOLDER_ID ? { color: folderColorPersonal } : undefined}
               >
                 <span className="relative flex items-center justify-center w-6 h-6 shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                   {personalCount > 0 && (
-                    <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[0.625rem] font-semibold flex items-center justify-center ${selectedFolderId === PERSONAL_FOLDER_ID ? "bg-white/25" : "bg-blue-600 text-white"}`}>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1 text-[0.625rem] font-semibold text-white">
                       {personalCount > 99 ? "99+" : personalCount}
                     </span>
                   )}
@@ -1542,20 +1693,21 @@ export default function MessengerPage() {
                 <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("folders.standardPersonal"))}</span>
               </button>
             )}
-            {foldersEnabled && (
+            {foldersEnabled && showFolderUnread && (
               <button
                 type="button"
                 onClick={() => setSelectedFolderId(UNREAD_FOLDER_ID)}
                 title={t("folders.standardUnread")}
-                className={`relative flex flex-row items-center justify-start gap-1.5 min-w-[5.75rem] px-2 py-1.5 shrink-0 transition-colors duration-150 ease-out after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-5 after:w-px after:bg-slate-200/70 last:after:hidden ${
-                  selectedFolderId === UNREAD_FOLDER_ID ? "text-slate-900" : "text-slate-600 hover:text-slate-800"
+                className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-2 rounded-2xl px-3 text-left ${
+                  folderTabBaseClass
+                } ${
+                  selectedFolderId === UNREAD_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass
                 }`}
-                style={selectedFolderId === UNREAD_FOLDER_ID ? { color: folderColorUnread } : undefined}
               >
                 <span className="relative flex items-center justify-center w-6 h-6 shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13 17a1 1 0 0 1-2 0"/></svg>
                   {unreadCount > 0 && (
-                    <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[0.625rem] font-semibold flex items-center justify-center ${selectedFolderId === UNREAD_FOLDER_ID ? "bg-white/25" : "bg-blue-600 text-white"}`}>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1 text-[0.625rem] font-semibold text-white">
                       {unreadCount > 99 ? "99+" : unreadCount}
                     </span>
                   )}
@@ -1563,20 +1715,21 @@ export default function MessengerPage() {
                 <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("folders.standardUnread"))}</span>
               </button>
             )}
-            {foldersEnabled && (
+            {foldersEnabled && showFolderArchive && (
               <button
                 type="button"
                 onClick={() => setSelectedFolderId(ARCHIVE_FOLDER_ID)}
                 title={t("folders.standardArchive")}
-                className={`relative flex flex-row items-center justify-start gap-1.5 min-w-[5.75rem] px-2 py-1.5 shrink-0 transition-colors duration-150 ease-out after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-5 after:w-px after:bg-slate-200/70 last:after:hidden ${
-                  selectedFolderId === ARCHIVE_FOLDER_ID ? "text-slate-900" : "text-slate-600 hover:text-slate-800"
+                className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-2 rounded-2xl px-3 text-left ${
+                  folderTabBaseClass
+                } ${
+                  selectedFolderId === ARCHIVE_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass
                 }`}
-                style={selectedFolderId === ARCHIVE_FOLDER_ID ? { color: folderColorArchive } : undefined}
               >
                 <span className="relative flex items-center justify-center w-6 h-6 shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
                   {archivedCount > 0 && (
-                    <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[0.625rem] font-semibold flex items-center justify-center ${selectedFolderId === ARCHIVE_FOLDER_ID ? "bg-white/25" : "bg-blue-600 text-white"}`}>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1 text-[0.625rem] font-semibold text-white">
                       {archivedCount > 99 ? "99+" : archivedCount}
                     </span>
                   )}
@@ -1585,17 +1738,17 @@ export default function MessengerPage() {
               </button>
             )}
             {folders.map((f) => {
-              const fc = f.color || "#3B82F6";
               return (
                 <button
                   key={f.id}
                   type="button"
                   onClick={() => setSelectedFolderId(f.id)}
                   title={folderDisplayName(f.name)}
-                  className={`relative flex flex-row items-center justify-start gap-1.5 min-w-[5.75rem] px-2 py-1.5 shrink-0 transition-colors duration-150 ease-out after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-5 after:w-px after:bg-slate-200/70 last:after:hidden ${
-                    selectedFolderId === f.id ? "text-slate-900" : "text-slate-600 hover:text-slate-800"
+                  className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-2 rounded-2xl px-3 text-left ${
+                    folderTabBaseClass
+                  } ${
+                    selectedFolderId === f.id ? folderTabActiveClass : folderTabInactiveClass
                   }`}
-                  style={selectedFolderId === f.id ? { color: fc } : undefined}
                 >
                   <span className="flex items-center justify-center w-6 h-6 shrink-0 text-base leading-none">{f.emoji || "📁"}</span>
                   <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(folderDisplayName(f.name))}</span>
@@ -1665,8 +1818,9 @@ export default function MessengerPage() {
             </div>
           )}
 
-          {!needsSub && !loading && !chatListLoading && !error && !chatListError && chats.length === 0 && q.length === 0 && (
-            <div className="p-6 text-center">
+          {!needsSub && !loading && !chatListLoading && !error && !chatListError && chats.length === 0 && channels.length === 0 && q.length === 0 && (
+            <div className="p-5">
+              <div className="mx-auto max-w-sm rounded-[28px] border border-slate-200/80 bg-white/80 p-6 text-center shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
               <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -1692,7 +1846,7 @@ export default function MessengerPage() {
                       setTimeout(() => setError(""), 5000);
                     }
                   }}
-                  className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2.5 rounded-lg hover:bg-amber-100 text-sm font-medium transition-colors"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                   {t("chat.favoritesTitle")}
@@ -1700,7 +1854,7 @@ export default function MessengerPage() {
                 <button
                   type="button"
                   onClick={() => setShowCreateMenu(true)}
-                  className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
                   {t("messenger.createFirst")}
@@ -1722,14 +1876,14 @@ export default function MessengerPage() {
                     }
                     setExpandedOnboardingBlock((v) => (v === "invite" ? null : "invite"));
                   }}
-                  className="inline-flex items-center gap-1.5 text-purple-600 hover:underline text-xs"
+                  className="inline-flex items-center gap-1.5 text-xs text-purple-600 hover:underline"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                   {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${expandedOnboardingBlock === "invite" ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <div className={`overflow-hidden transition-all duration-200 ease-out ${expandedOnboardingBlock === "invite" ? "max-h-32 opacity-100 mt-2" : "max-h-0 opacity-0"}`}>
-                  <div className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 flex items-center gap-2 mx-auto">
+                  <div className="mx-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
                     <div className="flex items-center bg-slate-50 rounded-lg px-2.5 py-1.5 min-w-0 flex-1">
                       <span className="text-[0.6875rem] text-slate-500 truncate select-all">{referralLink}</span>
                     </div>
@@ -1762,14 +1916,15 @@ export default function MessengerPage() {
                       )}
                   </div>
                 </div>
+                  </div>
               </div>
             </div>
           )}
 
-          {!needsSub && !loading && !chatListLoading && (filteredChats.length > 0 || filteredChannels.length > 0 || q.length > 0 || archivedCount > 0 || selectedFolderId) && (
+          {!needsSub && !loading && !chatListLoading && (sidebarItems.length > 0 || q.length > 0 || archivedCount > 0 || selectedFolderId) && (
             <>
-              {filteredChannels.length > 0 && !selectedFolderId && (
-                <ul className="divide-y divide-slate-200/70">
+              {false && (
+                <ul className="flex flex-col gap-1 px-2 py-1">
                   {filteredChannels.map((ch) => {
                     const isActive = ch.id === activeChannelId && !showSettings;
                     const channelSubtitle = ch.last_post_preview || (ch.username ? `@${ch.username}` : t("createMenu.createChannel"));
@@ -1779,8 +1934,8 @@ export default function MessengerPage() {
                         <button
                           type="button"
                           onClick={() => openChannel(ch.id)}
-                          className={`w-full text-left px-4 py-1.5 flex items-center gap-3 transition-[background-color,box-shadow] duration-150 ease-out ${
-                            isActive ? "bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.25)]" : "hover:bg-slate-50/80"
+                          className={`flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
+                            isActive ? "border-sky-200 bg-white/90 shadow-[0_8px_18px_rgba(15,23,42,0.05)]" : "border-transparent hover:bg-white/75"
                           }`}
                         >
                           <div className="relative shrink-0">
@@ -1789,17 +1944,17 @@ export default function MessengerPage() {
                                 <img
                                   src={toSameOriginMediaUrl(getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")) || ""}
                                   alt=""
-                                  className="w-12 h-12 rounded-full object-cover"
+                                  className="h-10 w-10 rounded-full object-cover"
                                   loading="lazy"
                                   decoding="async"
                                   onError={(e) => { e.currentTarget.style.display = "none"; const fb = e.currentTarget.nextElementSibling as HTMLElement; if (fb) fb.style.display = ""; }}
                                 />
-                                <div style={{ display: "none" }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
+                                <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
                                   {getAvatarInitials(ch.title || "К")}
                                 </div>
                               </>
                             ) : (
-                              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                              <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
                                 isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                               }`}>
                                 {getAvatarInitials(ch.title || "К")}
@@ -1808,17 +1963,17 @@ export default function MessengerPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className={`font-medium truncate text-sm flex items-center gap-1 ${isActive ? "text-blue-700" : "text-slate-700"}`}>
+                              <span className={`flex items-center gap-1 truncate text-[0.9375rem] font-medium ${isActive ? "text-blue-700" : "text-slate-700"}`}>
                                 {ch.title}
                                 {ch.title_icon && <span className="shrink-0" aria-hidden>{ch.title_icon}</span>}
                               </span>
                             </div>
-                            <div className="flex items-baseline justify-between gap-2 mt-0.5 min-w-0">
+                            <div className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
                               <span className="text-slate-500 text-xs truncate min-w-0">
                                 {channelSubtitle}
                               </span>
                               {channelTime && (
-                                <span className="text-slate-400 text-[0.6875rem] tabular-nums shrink-0">
+                                <span className="shrink-0 text-[0.625rem] tabular-nums text-slate-400">
                                   {channelTime}
                                 </span>
                               )}
@@ -1830,15 +1985,76 @@ export default function MessengerPage() {
                   })}
                 </ul>
               )}
-              {filteredChats.length > 0 ? (
-                <ul className="divide-y divide-slate-200/70">
-                  {filteredChats.map((chat) => {
+              {sidebarItems.length > 0 ? (
+                <ul className="flex flex-col gap-1 px-2 py-1">
+                  {sidebarItems.map((item) => {
+                    if (item.kind === "channel") {
+                      const ch = item.channel;
+                      const isActive = ch.id === activeChannelId && !showSettings;
+                      const channelSubtitle = ch.last_post_preview || (ch.username ? `@${ch.username}` : t("createMenu.createChannel"));
+                      const channelTime = formatLastMessageTime((ch.last_post_at ?? ch.created_at) ?? undefined, lang);
+                      return (
+                        <li key={`channel-${ch.id}`}>
+                          <button
+                            type="button"
+                            onClick={() => openChannel(ch.id)}
+                            className={`flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
+                              isActive ? "border-sky-200 bg-white/90 shadow-[0_8px_18px_rgba(15,23,42,0.05)]" : "border-transparent hover:bg-white/75"
+                            }`}
+                          >
+                            <div className="relative shrink-0">
+                              {ch.avatar_url ? (
+                                <>
+                                  <img
+                                    src={toSameOriginMediaUrl(getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")) || ""}
+                                    alt=""
+                                    className="h-10 w-10 rounded-full object-cover"
+                                    loading="lazy"
+                                    decoding="async"
+                                    onError={(e) => { e.currentTarget.style.display = "none"; const fb = e.currentTarget.nextElementSibling as HTMLElement; if (fb) fb.style.display = ""; }}
+                                  />
+                                  <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
+                                    {getAvatarInitials(ch.title || "Ðš")}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
+                                  isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
+                                }`}>
+                                  {getAvatarInitials(ch.title || "Ðš")}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`flex items-center gap-1 truncate text-[0.9375rem] font-medium ${isActive ? "text-blue-700" : "text-slate-700"}`}>
+                                  {ch.title}
+                                  {ch.title_icon && <span className="shrink-0" aria-hidden>{ch.title_icon}</span>}
+                                </span>
+                              </div>
+                              <div className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
+                                <span className="text-slate-500 text-xs truncate min-w-0">
+                                  {channelSubtitle}
+                                </span>
+                                {channelTime && (
+                                  <span className="shrink-0 text-[0.625rem] tabular-nums text-slate-400">
+                                    {channelTime}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    }
+
+                    const chat = item.chat;
                     const unread = chat.unread_count || 0;
                     const unreadStr = formatUnread(unread);
                     const isActive = chat.id === activeChatId && !showSettings;
-                    const isPinned = pinnedChatIds.includes(chat.id);
+                    const isPinned = pinnedOrder.has(chat.id);
                     return (
-                      <li key={chat.id}>
+                      <li key={`chat-${chat.id}`}>
                         <button
                           onClick={() => openChat(chat.id)}
                           onContextMenu={(e) => {
@@ -1846,18 +2062,19 @@ export default function MessengerPage() {
                             e.stopPropagation();
                             setChatContextMenu({ x: e.clientX, y: e.clientY, chat });
                           }}
-                          className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-[background-color,box-shadow,transform] duration-150 ease-out ${
+                          className={`chat-list-row flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
                               isActive
-                                ? "bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.25)]"
-                                : "hover:bg-slate-50/80"
+                                ? "border-sky-200 bg-white/90 shadow-[0_8px_18px_rgba(15,23,42,0.05)]"
+                                : "border-transparent hover:bg-white/75"
                           } active:scale-[0.997]`}
                         >
-                          <div className="relative shrink-0">
+                          {/* Avatar left, then content (subtitle row + title row) */}
+                          <div className="chat-list-row-avatar relative shrink-0">
                             {chat.is_favorites ? (
-                              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                              <div className={`dialog-avatar flex h-10 w-10 items-center justify-center rounded-full ${
                                 isActive ? "bg-blue-600" : "bg-blue-500"
                               }`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                               </div>
                             ) : (() => {
                               const rawUrl = chat.is_personal && chat.other_member
@@ -1872,12 +2089,12 @@ export default function MessengerPage() {
                                   <img
                                     src={src}
                                     alt=""
-                                    className="w-12 h-12 rounded-full object-cover"
+                                    className="dialog-avatar avatar-photo h-10 w-10 rounded-full object-cover"
                                     loading="lazy"
                                     decoding="async"
                                     onError={(e) => { const img = e.currentTarget; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ""; }}
                                   />
-                                  <div style={{ display: "none" }} className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                                  <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
                                     isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                   }`}>
                                     {chat.is_personal && chat.other_member
@@ -1886,7 +2103,7 @@ export default function MessengerPage() {
                                   </div>
                                 </>
                               ) : (
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold ${
+                                <div className={`dialog-avatar flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
                                   isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                 }`}>
                                   {chat.is_personal && chat.other_member
@@ -1896,37 +2113,12 @@ export default function MessengerPage() {
                               );
                             })()}
                             {chat.is_personal && chat.other_member?.is_online && (
-                              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full shadow-sm" />
+                              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-green-500 shadow-sm" />
                             )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              {isPinned && (
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
-                                  <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
-                                </svg>
-                              )}
-                              <span className={`font-medium truncate text-sm flex items-center gap-1 ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
-                                {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title}
-                                {chat.title_icon && <span className="shrink-0" aria-hidden>{chat.title_icon}</span>}
-                                {chat.is_secret && (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
-                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                                  </svg>
-                                )}
-                              </span>
-                              {chat.is_muted && (
-                                <span className="shrink-0 inline-flex items-center justify-center w-6 h-5 text-slate-400 bg-slate-100 rounded" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-                                </span>
-                              )}
-                              {(chat.pending_join_requests_count ?? 0) > 0 && (
-                                <span className="shrink-0 text-[0.625rem] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded" title={t("chat.pendingRequests")}>
-                                  {t("chat.pendingRequests")}: {chat.pending_join_requests_count}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-baseline justify-between gap-2 mt-0.5 min-w-0">
+                          <div className="chat-list-row-content flex flex-1 min-w-0 flex-col">
+                            {/* Row 1: preview / typing + unread badge (dialog-subtitle) */}
+                            <div className="chat-list-row-subtitle flex min-w-0 items-center justify-between gap-2">
                               <span className="text-slate-500 text-xs truncate min-w-0">
                                 {typingByChat[chat.id] && chat.id !== activeChatId
                                   ? `${typingByChat[chat.id]} ${t("chat.typing")}`
@@ -1934,8 +2126,50 @@ export default function MessengerPage() {
                                     ? (chat.other_member?.username ? `@${chat.other_member.username}` : t("dashboard.personalChat"))
                                     : `${formatMembersCount(chat.members_count ?? 0, lang)} · ${chat.chat_type === "open" ? t("dashboard.openType") : t("dashboard.closedType")}`))}
                               </span>
+                              {unread > 0 && (
+                                chat.manually_unread && unread <= 1 ? (
+                                  <span className={`dialog-subtitle-badge inline-block w-3 h-3 shrink-0 rounded-full ${
+                                    chat.is_muted ? "bg-slate-400" : "bg-blue-600"
+                                  }`} />
+                                ) : (
+                                  <span className={`dialog-subtitle-badge inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[0.625rem] font-bold text-white ${
+                                    chat.is_muted ? "bg-slate-400" : "bg-blue-600"
+                                  }`}>
+                                    {unreadStr}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                            {/* Row 2: title + icons, time / checkmarks (row-title-row) */}
+                            <div className="chat-list-row-title row-title-row flex min-w-0 items-center justify-between gap-2 mt-0.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                {isPinned && (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
+                                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
+                                  </svg>
+                                )}
+                                <span className={`peer-title flex items-center gap-1 truncate text-[0.9375rem] font-medium ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
+                                  {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title}
+                                  {chat.title_icon && <span className="shrink-0" aria-hidden>{chat.title_icon}</span>}
+                                  {chat.is_secret && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
+                                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                    </svg>
+                                  )}
+                                </span>
+                                {chat.is_muted && (
+                                  <span className="inline-flex h-4.5 w-5 shrink-0 items-center justify-center rounded bg-slate-100 text-slate-400" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                                  </span>
+                                )}
+                                {(chat.pending_join_requests_count ?? 0) > 0 && (
+                                  <span className="shrink-0 text-[0.625rem] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded" title={t("chat.pendingRequests")}>
+                                    {t("chat.pendingRequests")}: {chat.pending_join_requests_count}
+                                  </span>
+                                )}
+                              </div>
                               {(chat.last_message_at || chat.created_at) && (
-                                <span className="text-slate-400 text-[0.6875rem] tabular-nums shrink-0 inline-flex items-center gap-1">
+                                <span className="message-time inline-flex shrink-0 items-center gap-1 text-[0.625rem] tabular-nums text-slate-400">
                                   {chat.last_message_is_mine && (
                                     <ChatListCheckmarks status={chat.last_message_read_status ?? "delivered"} />
                                   )}
@@ -1944,19 +2178,6 @@ export default function MessengerPage() {
                               )}
                             </div>
                           </div>
-                          {unread > 0 && (
-                            chat.manually_unread && unread <= 1 ? (
-                              <span className={`inline-block w-3 h-3 rounded-full shrink-0 ${
-                                chat.is_muted ? "bg-slate-400" : "bg-blue-600"
-                              }`} />
-                            ) : (
-                              <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[0.6875rem] font-bold text-white ${
-                                chat.is_muted ? "bg-slate-400" : "bg-blue-600"
-                              }`}>
-                                {unreadStr}
-                              </span>
-                            )
-                          )}
                         </button>
                       </li>
                     );
@@ -2059,26 +2280,27 @@ export default function MessengerPage() {
         </div>
       </aside>
 
-      {/* Resizer — always visible on desktop, position is persisted */}
+      {/* Resizer — always visible on desktop, position is persisted. Dark cursor so visible in light theme. */}
       <div
         role="separator"
         aria-label={t("messenger.resizeSidebar")}
         onMouseDown={handleResizeStart}
-        className="hidden md:block absolute top-0 bottom-0 cursor-col-resize"
+        className="hidden md:block absolute top-0 bottom-0"
         style={{
           left: sidebarWidth,
           width: 12,
           transform: "translateX(-6px)",
+          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='24' viewBox='0 0 16 24'%3E%3Cpath fill='%23000' d='M5 0h2v24H5zM9 0h2v24H9z'/%3E%3C/svg%3E") 8 12, col-resize`,
         }}
       />
 
-      {/* ═══════ Right panel — Chat or Settings (hidden when chats exist but none selected) ═══════ */}
-      <main className={`${showRightPanel ? "flex" : "hidden md:flex"} flex-col flex-1 min-w-0 min-h-0 overflow-hidden ui-surface-1`}>
+      {/* ═══════ Right panel — column-center (Telegram: main-column / chat area) ═══════ */}
+      <main id="column-center" className={`column-center main-column ${showRightPanel ? "flex" : "hidden md:flex"} messenger-main-backdrop flex-col flex-1 min-w-0 min-h-0 overflow-hidden`}>
         {showSettings ? (
           <div key="settings" className="flex flex-col flex-1 min-h-0 overflow-hidden messenger-panel-fade-in">
             {!(isMobile && settingsMobileInSubSection) && (
               <header
-                className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-14 flex items-center gap-3"
+                className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
                 style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
               >
                 <button
@@ -2119,6 +2341,17 @@ export default function MessengerPage() {
               key={renderChannelId}
               channelId={renderChannelId}
               onBack={closeChannel}
+              onMessageSent={(cid, preview, messageCreatedAt) => {
+                setChannels((prev) => prev.map((channel) => (
+                  channel.id === cid
+                    ? {
+                        ...channel,
+                        last_post_preview: preview,
+                        ...(messageCreatedAt ? { last_post_at: messageCreatedAt } : {}),
+                      }
+                    : channel
+                )));
+              }}
             />
           </div>
         ) : renderChatId ? (
@@ -2167,10 +2400,25 @@ export default function MessengerPage() {
             />
           </div>
         ) : (
-          <div key="welcome" className="flex-1 min-h-0 flex items-center justify-center bg-slate-50 p-6 messenger-panel-fade-in">
+          <div key="welcome" className="messenger-main-backdrop flex-1 min-h-0 flex items-center justify-center p-6 messenger-panel-fade-in">
           {(() => {
             const favChat = chats.find((chat) => chat.is_favorites) ?? null;
             const favChatId = favChat?.id ?? null;
+            const welcomeCopy = lang === "ru"
+              ? {
+                  existingTitle: "Выберите чат",
+                  existingDesc: "Откройте диалог слева или начните новый разговор.",
+                  firstTitle: "Начните с первого чата",
+                  firstDesc: "Создайте группу или канал, вступите по ссылке или используйте Избранное для заметок и файлов.",
+                  inviteHint: "Приглашение можно отправить позже — ссылка уже готова.",
+                }
+              : {
+                  existingTitle: "Choose a chat",
+                  existingDesc: "Open a conversation from the left or start a new one.",
+                  firstTitle: "Start with your first chat",
+                  firstDesc: "Create a group or channel, join via invite link, or use Favorites for notes and files.",
+                  inviteHint: "You can invite friends later, the referral link is already ready.",
+                };
 
             const openFavorites = () => {
               if (favChatId) {
@@ -2193,125 +2441,150 @@ export default function MessengerPage() {
                 });
             };
 
-            return (
-              <div className="text-center max-w-md">
-                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-5">
-                  <span className="text-2xl">👋</span>
-                </div>
-                <h2 className="text-xl font-semibold text-slate-800 mb-2">{t("messenger.welcomeTitle")}</h2>
-                <p className="text-sm text-slate-500 mb-6">{t("messenger.welcomeDesc")}</p>
-                <div className="flex flex-col gap-3">
-                  <div className="w-full">
+            const copyReferral = () => {
+              if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(referralLink).then(() => {
+                  setInviteFriendsCopied(true);
+                  setTimeout(() => setInviteFriendsCopied(false), 2000);
+                });
+              }
+            };
+
+            if (hasRegularChats) {
+              return (
+                <div className="max-w-lg rounded-[32px] border border-slate-200/80 bg-white/72 p-7 text-center shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+                  <div className="mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    {lang === "ru" ? "Открытые чаты" : "Open chats"}
+                  </div>
+                  <h2 className="mb-2 text-xl font-semibold text-slate-800">{welcomeCopy.existingTitle}</h2>
+                  <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.existingDesc}</p>
+                  <div className="mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
+                      <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Список слева" : "List on the left"}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Откройте любой диалог одним нажатием." : "Open any conversation with one tap."}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
+                      <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Новый чат" : "Start new"}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Создайте группу, канал или перейдите в Избранное." : "Create a group, a channel, or open Favorites."}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (expandedOnboardingBlock !== "invite" && navigator.clipboard?.writeText) {
-                          navigator.clipboard.writeText(referralLink).then(() => {
-                            setInviteFriendsCopied(true);
-                            setTimeout(() => setInviteFriendsCopied(false), 2000);
-                          });
-                        }
-                        setExpandedOnboardingBlock((v) => (v === "invite" ? null : "invite"));
-                      }}
-                      className={`flex items-center gap-3 w-full rounded-xl bg-white border px-4 py-3.5 text-left hover:border-purple-300 hover:shadow-sm transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] group ${expandedOnboardingBlock === "invite" ? "border-purple-300 rounded-b-none" : "border-slate-200"}`}
+                      onClick={() => setShowCreateChatModal(true)}
+                      className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
                     >
-                      <span className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shrink-0 group-hover:bg-purple-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      {t("createMenu.createGroup")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateChannelModal(true)}
+                      className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                      {t("createMenu.createChannel")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openFavorites}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <span className="text-base">★</span>
+                      {t("messenger.welcomeFavorites")}
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="max-w-md rounded-[32px] border border-slate-200/80 bg-white/76 p-7 text-center shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
+                  <span className="text-2xl">👋</span>
+                </div>
+                <h2 className="text-2xl font-semibold text-slate-800 mb-2">{welcomeCopy.firstTitle}</h2>
+                <p className="text-sm text-slate-500 mb-6 leading-6">{welcomeCopy.firstDesc}</p>
+                <div className="flex flex-col gap-3">
+                  <div className="w-full rounded-[24px] border border-slate-200 bg-slate-50/70 p-4 text-left">
+                    <div className="mb-3 flex items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                       </span>
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0">
                         <p className="text-sm font-medium text-slate-800">
                           {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
                         </p>
-                        <p className="text-xs text-slate-400">{t("messenger.welcomeInviteFriendsDesc")}</p>
-                      </div>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-slate-400 shrink-0 transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] ${expandedOnboardingBlock === "invite" ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div
-                      className="grid transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
-                      style={{ gridTemplateRows: expandedOnboardingBlock === "invite" ? "1fr" : "0fr" }}
-                    >
-                      <div className="min-h-0 overflow-hidden">
-                        <div className="bg-white border border-t-0 border-purple-300 rounded-b-xl px-4 py-3 flex items-center gap-2">
-                        <div className="flex items-center bg-slate-50 rounded-lg px-3 py-2 min-w-0 flex-1">
-                          <span className="text-xs text-slate-500 truncate select-all">{referralLink}</span>
-                        </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (navigator.clipboard?.writeText) {
-                                navigator.clipboard.writeText(referralLink).then(() => {
-                                  setInviteFriendsCopied(true);
-                                  setTimeout(() => setInviteFriendsCopied(false), 2000);
-                                });
-                              }
-                            }}
-                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 transition-colors whitespace-nowrap shrink-0"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                            {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
-                          </button>
-                          {typeof navigator.share === "function" && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
-                              }}
-                              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                              {t("messenger.inviteShare")}
-                            </button>
-                          )}
-                        </div>
+                        <p className="text-xs leading-5 text-slate-400">{welcomeCopy.inviteHint}</p>
                       </div>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                        <span className="block truncate select-all">{referralLink}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={copyReferral}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-purple-50 px-3 py-2 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
+                      </button>
+                      {typeof navigator.share === "function" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                          {t("messenger.inviteShare")}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="w-full">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <button
                       type="button"
-                      onClick={() => setExpandedOnboardingBlock((v) => (v === "create" ? null : "create"))}
-                      className={`flex items-center gap-3 w-full rounded-xl bg-white border px-4 py-3.5 text-left hover:border-blue-300 hover:shadow-sm transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] group ${expandedOnboardingBlock === "create" ? "border-blue-300 rounded-b-none" : "border-slate-200"}`}
+                      onClick={() => setShowCreateChatModal(true)}
+                      className="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/40"
                     >
-                      <span className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0 group-hover:bg-blue-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeCreateGroup")}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{t("createMenu.createGroup")}</p>
                         <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
                       </div>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-slate-400 shrink-0 transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] ${expandedOnboardingBlock === "create" ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
-                    <div
-                      className="grid transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
-                      style={{ gridTemplateRows: expandedOnboardingBlock === "create" ? "1fr" : "0fr" }}
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateChannelModal(true)}
+                      className="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/40"
                     >
-                      <div className="min-h-0 overflow-hidden">
-                        <div className="bg-white border border-t-0 border-blue-300 rounded-b-xl py-1 flex items-stretch">
-                        <button
-                          type="button"
-                          onClick={() => { setExpandedOnboardingBlock(null); setShowCreateChatModal(true); }}
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                          </svg>
-                          {t("createMenu.createGroup")}
-                        </button>
-                        <div className="w-px self-center min-h-5 bg-slate-200 shrink-0" aria-hidden />
-                        <button
-                          type="button"
-                          onClick={() => { setExpandedOnboardingBlock(null); setShowCreateChannelModal(true); }}
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 shrink-0">
-                            <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
-                          </svg>
-                          {t("createMenu.createChannel")}
-                        </button>
-                        </div>
+                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{t("createMenu.createChannel")}</p>
+                        <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
                       </div>
-                    </div>
+                    </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowJoinByLinkModal(true)}
+                    className="flex items-center gap-3 w-full rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800">{t("messenger.joinChat")}</p>
+                      <p className="text-xs text-slate-400">{t("messenger.noChatsDesc")}</p>
+                    </div>
+                  </button>
                   <button
                     type="button"
                     onClick={openFavorites}

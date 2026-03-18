@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import lottie, { type AnimationItem } from "lottie-web";
 import { REACTION_BY_EMOJI } from "../lib/reaction-animations";
+import { EmojiGlyph } from "./EmojiGlyph";
 
 const animationCache = new Map<string, object>();
 
@@ -40,10 +41,10 @@ export function AnimatedReaction({
   const [visible, setVisible] = useState(loop);
 
   const def = REACTION_BY_EMOJI.get(emoji);
-  const showEmoji = preferEmoji || useFallback || !def;
+  const showEmoji = preferEmoji || useFallback || !def?.animationUrl;
 
   useEffect(() => {
-    if (preferEmoji || !def || useFallback) return;
+    if (preferEmoji || !def?.animationUrl || useFallback) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -87,7 +88,7 @@ export function AnimatedReaction({
   }, [preferEmoji, def, emoji, loop, playOnce, useFallback, visible]);
 
   useEffect(() => {
-    if (preferEmoji || !def || useFallback) return;
+    if (preferEmoji || !def?.animationUrl || useFallback) return;
 
     const container = containerRef.current;
     if (!container) return;
@@ -112,18 +113,7 @@ export function AnimatedReaction({
 
   if (showEmoji) {
     return (
-      <span
-        className={`inline-flex items-center justify-center ${className}`}
-        style={{
-          width: size,
-          height: size,
-          fontSize: Math.round(size * 0.85),
-          lineHeight: 1,
-          fontFamily: '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Android Emoji",emoji',
-        }}
-      >
-        {emoji}
-      </span>
+      <EmojiGlyph emoji={emoji} size={size} className={className} />
     );
   }
 

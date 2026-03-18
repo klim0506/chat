@@ -399,6 +399,8 @@ class NotifyNewLoginTest(TestCase):
     @patch("apps.users.online.is_online", return_value=False)
     def test_existing_user_login_notifies(self, mock_online, mock_sms):
         """Second login (existing user) → notify_new_login IS called."""
+        from apps.users.models import User
+
         # First login — creates user
         client = APIClient()
         client.post("/api/auth/send-code/", {"phone": "+70000000003"}, format="json")
@@ -407,6 +409,8 @@ class NotifyNewLoginTest(TestCase):
             {"phone": "+70000000003", "code": "123456"},
             format="json",
         )
+        # View deletes "incomplete" users (no username) on next verify; set username so user is kept
+        User.objects.filter(phone="+70000000003").update(username="testuser")
         mock_sms.reset_mock()
         # Second login — notifies
         client.post("/api/auth/send-code/", {"phone": "+70000000003"}, format="json")

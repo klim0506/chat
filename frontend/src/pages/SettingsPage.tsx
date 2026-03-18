@@ -21,6 +21,7 @@ import { usePreferencesStore, MESSAGE_TEXT_SCALE_MIN, MESSAGE_TEXT_SCALE_MAX, ME
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AvatarManagerModal } from "../components/AvatarManagerModal";
+import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
 import ConfirmModal from "../components/ConfirmModal";
 import CreateChannelModal from "../components/CreateChannelModal";
 import PaymentMethodsModal from "../components/PaymentMethodsModal";
@@ -67,7 +68,7 @@ function getStatusLabel(status: string, lang: AppLanguage): string {
   return tFn("settings.noSubscription", lang);
 }
 
-const SETTINGS_NAV = [
+export const SETTINGS_NAV = [
   { id: "account", labelKey: "settings.navAccount", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
   { id: "chats", labelKey: "settings.navChatSettings", icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" },
   { id: "privacy", labelKey: "settings.navPrivacy", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
@@ -76,28 +77,69 @@ const SETTINGS_NAV = [
   { id: "premium", labelKey: "settings.navPremium", icon: "M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" },
 ] as const;
 
+const SETTINGS_PANEL_CLASS = "rounded-[28px] border border-slate-200/80 bg-white/82 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur overflow-hidden";
+const SETTINGS_PANEL_HEADER_CLASS = "flex items-start justify-between gap-3 border-b border-slate-100/80 px-6 py-5";
+const SETTINGS_PANEL_BODY_CLASS = "px-6 py-5";
+const SETTINGS_NAV_SHELL_CLASS = "flex h-full min-h-0 flex-col rounded-[30px] bg-white/72 p-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.06)] backdrop-blur";
+const SETTINGS_NAV_ACTION_CLASS = "flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-sm transition-colors";
+
 function SettingsNav({ section, onSection, t, hasSubscription }: { section: SettingsSection; onSection: (s: SettingsSection) => void; t: ReturnType<typeof useTranslation>["t"]; hasSubscription: boolean }) {
   const navItems = SETTINGS_NAV.filter((item) => {
     if (item.id === "privacy" || item.id === "folders") return hasSubscription;
     return true;
   });
+  const getItemSubtitle = (id: SettingsSection) => {
+    switch (id) {
+      case "account":
+        return t("settings.profile");
+      case "chats":
+        return t("settings.messageTextScale");
+      case "privacy":
+        return t("settings.privacy");
+      case "folders":
+        return t("settings.navFolders");
+      case "devices":
+        return t("settings.activeSessions");
+      case "premium":
+        return t("settings.subscription");
+      default:
+        return "";
+    }
+  };
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav className="flex flex-col gap-1 overflow-y-auto pr-1">
       {navItems.map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onSection(item.id)}
-          className={`flex items-center gap-3 px-4 h-12 rounded-2xl text-left transition-colors ${
+          aria-current={section === item.id ? "page" : undefined}
+          className={`flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
             section === item.id
-              ? "bg-blue-50/80 text-blue-700 font-semibold shadow-[inset_0_0_0_1px_rgba(59,130,246,0.22)]"
-              : "text-slate-600 hover:bg-slate-50/80 hover:text-slate-900"
+              ? "border-sky-200/80 bg-white text-slate-900 shadow-[0_10px_26px_rgba(15,23,42,0.08)]"
+              : "border-transparent text-slate-600 hover:bg-white/80 hover:text-slate-900"
           }`}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
-          </svg>
-          <span>{t(item.labelKey)}</span>
+          <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+            section === item.id ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
+          }`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+            </svg>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className={`block truncate text-[0.95rem] font-medium ${section === item.id ? "text-slate-900" : "text-slate-700"}`}>
+              {t(item.labelKey)}
+            </span>
+            <span className="mt-0.5 block truncate text-xs text-slate-400">
+              {getItemSubtitle(item.id)}
+            </span>
+          </span>
+          <span className={`shrink-0 transition-colors ${section === item.id ? "text-sky-500" : "text-slate-300"}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
         </button>
       ))}
     </nav>
@@ -568,6 +610,12 @@ function MessageScaleSlider() {
 function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: ReturnType<typeof useTranslation>["t"]; onFoldersUpdated?: () => void; hasSubscription?: boolean }) {
   const folderLayout = usePreferencesStore((s) => s.folderLayout);
   const setFolderLayout = usePreferencesStore((s) => s.setFolderLayout);
+  const showFolderPersonal = usePreferencesStore((s) => s.showFolderPersonal);
+  const setShowFolderPersonal = usePreferencesStore((s) => s.setShowFolderPersonal);
+  const showFolderUnread = usePreferencesStore((s) => s.showFolderUnread);
+  const setShowFolderUnread = usePreferencesStore((s) => s.setShowFolderUnread);
+  const showFolderArchive = usePreferencesStore((s) => s.showFolderArchive);
+  const setShowFolderArchive = usePreferencesStore((s) => s.setShowFolderArchive);
   const folderColorPersonal = usePreferencesStore((s) => s.folderColorPersonal);
   const setFolderColorPersonal = usePreferencesStore((s) => s.setFolderColorPersonal);
   const folderColorUnread = usePreferencesStore((s) => s.folderColorUnread);
@@ -589,15 +637,17 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
   const [editColor, setEditColor] = useState("#3B82F6");
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const colorPickerRef = useRef<HTMLDivElement | null>(null);
+  const colorPickerPopoverRef = useRef<HTMLDivElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiPickerPopoverRef = useRef<HTMLDivElement | null>(null);
   const chats = useChatListStore((s) => s.chats);
   const storeUpdateChat = useChatListStore((s) => s.updateChat);
   useEffect(() => {
     if (!colorPickerOpen && !emojiPickerOpen) return;
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      const inColor = colorPickerRef.current?.contains(target);
-      const inEmoji = emojiPickerRef.current?.contains(target);
+      const inColor = colorPickerRef.current?.contains(target) || colorPickerPopoverRef.current?.contains(target);
+      const inEmoji = emojiPickerRef.current?.contains(target) || emojiPickerPopoverRef.current?.contains(target);
       if (!inColor && !inEmoji) {
         setColorPickerOpen(null);
         setEmojiPickerOpen(false);
@@ -679,6 +729,23 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
     setFoldersEnabled(!foldersEnabled);
   };
 
+  const renderFolderVisibilityToggle = (enabled: boolean, onToggle: () => void) => (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+        enabled ? "bg-blue-600" : "bg-slate-200"
+      }`}
+      aria-pressed={enabled}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+          enabled ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+
   return (
     <div className="space-y-6">
       {/* Переключатель вкл/выкл папки: бесплатные пользователи не могут включить */}
@@ -744,45 +811,48 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
               <div className="relative shrink-0" ref={colorPickerOpen === "personal" ? colorPickerRef : undefined}>
                 <button type="button" onClick={() => setColorPickerOpen((p) => (p === "personal" ? null : "personal"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorPersonal }} title={t("folders.color")} />
                 {colorPickerOpen === "personal" && (
-                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                  <AnchoredPortal anchorRef={colorPickerRef} portalRef={colorPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
                     <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
                       <button key={c} type="button" onClick={() => { setFolderColorPersonal(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorPersonal === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
                     ))}</div>
-                  </div>
+                  </AnchoredPortal>
                 )}
               </div>
               <span className="text-sm font-medium text-slate-800">{t("folders.standardPersonal")}</span>
             </div>
+            {renderFolderVisibilityToggle(showFolderPersonal, () => setShowFolderPersonal(!showFolderPersonal))}
           </div>
           <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="relative shrink-0" ref={colorPickerOpen === "unread" ? colorPickerRef : undefined}>
                 <button type="button" onClick={() => setColorPickerOpen((p) => (p === "unread" ? null : "unread"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorUnread }} title={t("folders.color")} />
                 {colorPickerOpen === "unread" && (
-                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                  <AnchoredPortal anchorRef={colorPickerRef} portalRef={colorPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
                     <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
                       <button key={c} type="button" onClick={() => { setFolderColorUnread(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorUnread === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
                     ))}</div>
-                  </div>
+                  </AnchoredPortal>
                 )}
               </div>
               <span className="text-sm font-medium text-slate-800">{t("folders.standardUnread")}</span>
             </div>
+            {renderFolderVisibilityToggle(showFolderUnread, () => setShowFolderUnread(!showFolderUnread))}
           </div>
           <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="relative shrink-0" ref={colorPickerOpen === "archive" ? colorPickerRef : undefined}>
                 <button type="button" onClick={() => setColorPickerOpen((p) => (p === "archive" ? null : "archive"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorArchive }} title={t("folders.color")} />
                 {colorPickerOpen === "archive" && (
-                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                  <AnchoredPortal anchorRef={colorPickerRef} portalRef={colorPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
                     <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
                       <button key={c} type="button" onClick={() => { setFolderColorArchive(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorArchive === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
                     ))}</div>
-                  </div>
+                  </AnchoredPortal>
                 )}
               </div>
               <span className="text-sm font-medium text-slate-800">{t("folders.standardArchive")}</span>
             </div>
+            {renderFolderVisibilityToggle(showFolderArchive, () => setShowFolderArchive(!showFolderArchive))}
           </div>
         </div>
       </div>
@@ -800,10 +870,10 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
         <ul className="space-y-3">
           {folders.map((f) => (
             <li key={f.id} className="rounded-lg bg-slate-50 border border-slate-200 overflow-hidden">
-              <div ref={colorPickerOpen === f.id ? colorPickerRef : undefined}>
+              <div>
               <div className="flex items-center justify-between py-2.5 px-3">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <div className="relative shrink-0">
+                  <div className="relative shrink-0" ref={colorPickerOpen === f.id ? colorPickerRef : undefined}>
                     <button
                       type="button"
                       onClick={() => setColorPickerOpen((p) => (p === f.id ? null : f.id))}
@@ -812,13 +882,13 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
                       title={t("folders.color")}
                     />
                     {colorPickerOpen === f.id && (
-                      <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                      <AnchoredPortal anchorRef={colorPickerRef} portalRef={colorPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
                         <div className="grid grid-cols-4 gap-1.5">
                           {FOLDER_COLORS.map((c) => (
                             <button key={c} type="button" onClick={() => handleUpdateFolderColor(f, c)} className={`w-6 h-6 rounded border-2 transition-all ${(f.color || "#3B82F6") === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
                           ))}
                         </div>
-                      </div>
+                      </AnchoredPortal>
                     )}
                   </div>
                   <span className="text-lg shrink-0">{f.emoji || "📁"}</span>
@@ -840,21 +910,21 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
                     <div className="relative" ref={emojiPickerOpen ? emojiPickerRef : undefined}>
                       <button type="button" onClick={() => setEmojiPickerOpen((v) => !v)} className="text-xl px-1 py-0.5 border border-slate-200 rounded">{editEmoji || "📁"}</button>
                       {emojiPickerOpen && (
-                        <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                        <AnchoredPortal anchorRef={emojiPickerRef} portalRef={emojiPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg flex flex-wrap gap-1 max-h-32 overflow-y-auto">
                           {FOLDER_EMOJIS.map((e) => (
                             <button key={e} type="button" onClick={() => { setEditEmoji(e); setEmojiPickerOpen(false); }} className="text-lg p-1 hover:bg-slate-100 rounded">{e}</button>
                           ))}
-                        </div>
+                        </AnchoredPortal>
                       )}
                     </div>
-                    <div className="relative">
+                    <div className="relative" ref={colorPickerOpen === f.id ? colorPickerRef : undefined}>
                       <button type="button" onClick={() => setColorPickerOpen((p) => (p === f.id ? null : f.id))} className="w-6 h-6 rounded border border-slate-300" style={{ backgroundColor: editColor }} title={t("folders.color")} />
                       {colorPickerOpen === f.id && (
-                        <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                        <AnchoredPortal anchorRef={colorPickerRef} portalRef={colorPickerPopoverRef} className="p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
                           <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
                             <button key={c} type="button" onClick={() => { setEditColor(c); handleUpdateFolderColor(f, c); }} className={`w-6 h-6 rounded border-2 transition-all ${editColor === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
                           ))}</div>
-                        </div>
+                        </AnchoredPortal>
                       )}
                     </div>
                     <button type="button" onClick={() => handleSaveFolder(f)} disabled={saving || !editName.trim()} className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "…" : t("common.save")}</button>
@@ -963,6 +1033,9 @@ export default function SettingsPage({
   const [showQrLoginModal, setShowQrLoginModal] = useState(false);
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [myChannels, setMyChannels] = useState<Channel[]>([]);
+  const [showPersonalChannelMenu, setShowPersonalChannelMenu] = useState(false);
+  const personalChannelButtonRef = useRef<HTMLDivElement | null>(null);
+  const personalChannelPopoverRef = useRef<HTMLDivElement | null>(null);
 
   /* subscription */
   const [subLoading, setSubLoading] = useState(false);
@@ -972,6 +1045,32 @@ export default function SettingsPage({
   const [showSubscriptionMenu, setShowSubscriptionMenu] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const subscriptionPlansRef = useRef<HTMLDivElement>(null);
+  const subscriptionMenuButtonRef = useRef<HTMLDivElement | null>(null);
+  const subscriptionMenuPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showSubscriptionMenu) return;
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const insideButton = subscriptionMenuButtonRef.current?.contains(target);
+      const insideMenu = subscriptionMenuPopoverRef.current?.contains(target);
+      if (!insideButton && !insideMenu) setShowSubscriptionMenu(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [showSubscriptionMenu]);
+
+  useEffect(() => {
+    if (!showPersonalChannelMenu) return;
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const insideButton = personalChannelButtonRef.current?.contains(target);
+      const insideMenu = personalChannelPopoverRef.current?.contains(target);
+      if (!insideButton && !insideMenu) setShowPersonalChannelMenu(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [showPersonalChannelMenu]);
 
   const loadProfile = useCallback(() => {
     setError("");
@@ -1020,7 +1119,8 @@ export default function SettingsPage({
 
   /* Плавная прокрутка к началу при смене раздела — убирает дёрганье */
   useEffect(() => {
-    mainContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    if (!mainContentRef.current) return;
+    mainContentRef.current.scrollTop = 0;
   }, [section]);
 
   const handleChannelCreated = useCallback(() => {
@@ -1085,6 +1185,21 @@ export default function SettingsPage({
       setSaving(false);
     }
   };
+
+  const handleSetPersonalChannel = useCallback(async (channelId: string | null) => {
+    setSaving(true);
+    try {
+      const res = await authApi.updateMe({ personal_channel_id: channelId });
+      setUser(res.data);
+      setShowPersonalChannelMenu(false);
+      setSaveMsg(t("common.saved"));
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch {
+      setSaveMsg(t("common.saveError"));
+    } finally {
+      setSaving(false);
+    }
+  }, [t]);
 
   const handleSaveBirthday = async () => {
     setSaving(true);
@@ -1166,6 +1281,42 @@ export default function SettingsPage({
   };
 
   const currentSectionLabel = SETTINGS_NAV.find((n) => n.id === section)?.labelKey ?? "settings.profile";
+  const currentSectionMeta = (() => {
+    if (lang === "ru") {
+      switch (section) {
+        case "account":
+          return { title: "Аккаунт", description: "Имя, username, био и персональный канал в одном спокойном месте." };
+        case "chats":
+          return { title: "Настройки чатов", description: "Масштаб текста, язык интерфейса, звуки и визуальные привычки." };
+        case "privacy":
+          return { title: "Приватность", description: "Кто видит вас, кто может писать первым и кто может приглашать." };
+        case "devices":
+          return { title: "Устройства", description: "Управляйте активными сессиями и быстрым входом по QR." };
+        case "folders":
+          return { title: "Папки", description: "Настройте структуру списка чатов и управляйте рабочими категориями." };
+        case "premium":
+          return { title: "Pingy Premium", description: "Подписка, способы оплаты и реферальный прогресс без визуального шума." };
+        default:
+          return { title: "Настройки", description: "Основные параметры аккаунта и приложения." };
+      }
+    }
+    switch (section) {
+      case "account":
+        return { title: "Account", description: "Name, username, bio, and your personal channel in one calm place." };
+      case "chats":
+        return { title: "Chat settings", description: "Text scale, interface language, sounds, and the way chats feel." };
+      case "privacy":
+        return { title: "Privacy", description: "Control who sees you, who can message first, and who can invite you." };
+      case "devices":
+        return { title: "Devices", description: "Manage active sessions and quick QR-based sign-in." };
+      case "folders":
+        return { title: "Folders", description: "Shape the chat list and manage your working categories." };
+      case "premium":
+        return { title: "Pingy Premium", description: "Subscription, payment methods, and referral progress without clutter." };
+      default:
+        return { title: "Settings", description: "Core account and app preferences." };
+    }
+  })();
 
   const renderSectionContent = () => {
     if (!user) return null;
@@ -1174,13 +1325,16 @@ export default function SettingsPage({
     <>
 {section === "account" && (
             <>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="p-5 border-b border-slate-100">
-                <h2 className="text-lg font-semibold text-slate-800">{t("settings.profile")}</h2>
+            <div className={SETTINGS_PANEL_CLASS}>
+              <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.profile")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                </div>
               </div>
 
               {/* Avatar + name + username + phone */}
-              <div className="p-5">
+              <div className={SETTINGS_PANEL_BODY_CLASS}>
                 <div className="flex items-center gap-4">
                   <button
                     type="button"
@@ -1490,9 +1644,73 @@ export default function SettingsPage({
 
                 {/* Personal channel — user adds it manually to profile (not automatic) */}
                 <div className="mt-4 pt-3 border-t border-slate-100">
-                  <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
-                    {t("settings.personalChannel")}
-                  </label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">
+                      {t("settings.personalChannel")}
+                    </label>
+                    <div ref={personalChannelButtonRef} className="shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowPersonalChannelMenu((v) => !v)}
+                        className="p-0.5 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                        title={u.personal_channel ? t("settings.editUsername") : t("settings.addChannelToProfile")}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  {showPersonalChannelMenu && (
+                    <AnchoredPortal
+                      anchorRef={personalChannelButtonRef}
+                      portalRef={personalChannelPopoverRef}
+                      align="right"
+                      minWidth={280}
+                      className="rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_44px_rgba(15,23,42,0.12)]"
+                    >
+                      <div className="flex flex-col gap-1">
+                        {myChannels.length > 0 ? (
+                          <>
+                            {myChannels.map((ch) => (
+                              <button
+                                key={ch.id}
+                                type="button"
+                                onClick={() => handleSetPersonalChannel(ch.id)}
+                                className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                              >
+                                <span className="min-w-0 truncate">
+                                  {ch.title}
+                                  {ch.username ? <span className="ml-1 text-slate-400">@{ch.username}</span> : null}
+                                </span>
+                                {u.personal_channel?.id === ch.id ? (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-sky-600"><path d="M20 6 9 17l-5-5" /></svg>
+                                ) : null}
+                              </button>
+                            ))}
+                            {u.personal_channel && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetPersonalChannel(null)}
+                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-500 transition-colors hover:bg-slate-50"
+                              >
+                                {t("settings.removeChannelFromProfile")}
+                              </button>
+                            )}
+                            <div className="my-1 border-t border-slate-100" />
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPersonalChannelMenu(false);
+                            setShowCreateChannelModal(true);
+                          }}
+                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-blue-600 transition-colors hover:bg-blue-50"
+                        >
+                          {t("settings.createChannel")}
+                        </button>
+                      </div>
+                    </AnchoredPortal>
+                  )}
                   {u.personal_channel ? (
                     <div className="space-y-1">
                       <div className="flex items-start gap-2 flex-wrap">
@@ -1504,77 +1722,19 @@ export default function SettingsPage({
                           {u.personal_channel.title_icon && <span className="ml-1 shrink-0" aria-hidden>{u.personal_channel.title_icon}</span>}
                           {u.personal_channel.username && <span className="text-slate-500 ml-1">@{u.personal_channel.username}</span>}
                         </Link>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            setSaving(true);
-                            try {
-                              const res = await authApi.updateMe({ personal_channel_id: null });
-                              setUser(res.data);
-                              setSaveMsg(t("common.saved"));
-                              setTimeout(() => setSaveMsg(""), 2000);
-                            } catch {
-                              setSaveMsg(t("common.saveError"));
-                            } finally {
-                              setSaving(false);
-                            }
-                          }}
-                          className="text-xs text-slate-500 hover:text-slate-700 underline"
-                        >
-                          {t("settings.removeChannelFromProfile")}
-                        </button>
                       </div>
                       {u.personal_channel.description && (
                         <p className="text-xs text-slate-500 line-clamp-2">{u.personal_channel.description}</p>
                       )}
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-slate-500">{t("settings.noChannelInProfile")}</p>
-                      {myChannels.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {myChannels.map((ch) => (
-                            <button
-                              key={ch.id}
-                              type="button"
-                              onClick={async () => {
-                                setSaving(true);
-                                try {
-                                  const res = await authApi.updateMe({ personal_channel_id: ch.id });
-                                  setUser(res.data);
-                                  setSaveMsg(t("common.saved"));
-                                  setTimeout(() => setSaveMsg(""), 2000);
-                                } catch {
-                                  setSaveMsg(t("common.saveError"));
-                                } finally {
-                                  setSaving(false);
-                                }
-                              }}
-                              className="text-sm text-blue-600 hover:underline font-medium"
-                            >
-                              {ch.title}{ch.username ? ` @${ch.username}` : ""}
-                            </button>
-                          ))}
-                          <span className="text-slate-400">·</span>
-                          <button
-                            type="button"
-                            onClick={() => setShowCreateChannelModal(true)}
-                            className="text-sm text-slate-500 hover:underline"
-                          >
-                            {t("settings.createChannel")}
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setShowCreateChannelModal(true)}
-                          className="text-sm text-blue-600 hover:underline font-medium"
-                        >
-                          {t("settings.createChannel")}
-                        </button>
-                        
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPersonalChannelMenu((v) => !v)}
+                      className="text-sm text-slate-500 hover:text-slate-700"
+                    >
+                      {t("settings.noChannelInProfile")}
+                    </button>
                   )}
                 </div>
 
@@ -1592,8 +1752,8 @@ export default function SettingsPage({
 
             {/* Referral program */}
             {u.referral_code && (
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mt-4">
-                <div className="p-5 space-y-4">
+              <div className={`${SETTINGS_PANEL_CLASS} mt-4`}>
+                <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
                   <div>
                     <h2 className="text-lg font-semibold text-slate-800 mb-1">{t("settings.referral")}</h2>
                     <p className="text-sm text-slate-500">{t("settings.referralDesc")}</p>
@@ -1620,11 +1780,14 @@ export default function SettingsPage({
             )}
 
               {section === "chats" && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="p-5 border-b border-slate-100">
-                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navChatSettings")}</h2>
+            <div className={SETTINGS_PANEL_CLASS}>
+              <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.navChatSettings")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                </div>
               </div>
-              <div className="p-5 space-y-4">
+              <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-2">
                     {t("settings.messageTextScale")}
@@ -1725,11 +1888,14 @@ export default function SettingsPage({
               )}
 
               {section === "privacy" && u && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="p-5 border-b border-slate-100">
-                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navPrivacy")}</h2>
+            <div className={SETTINGS_PANEL_CLASS}>
+              <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.navPrivacy")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                </div>
               </div>
-              <div className="p-5 space-y-4">
+              <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
                 {!sub?.is_valid ? (
                   <div className="py-6 text-center">
                     <p className="text-slate-600 mb-4">{t("settings.privacyPremiumOnly")}</p>
@@ -1824,11 +1990,14 @@ export default function SettingsPage({
               )}
 
               {section === "devices" && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="p-5 border-b border-slate-100">
-                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navDevices")}</h2>
+            <div className={SETTINGS_PANEL_CLASS}>
+              <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.navDevices")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                </div>
               </div>
-              <div className="p-5 space-y-6">
+              <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-6"}>
                 <div>
                   <button
                     type="button"
@@ -1850,11 +2019,14 @@ export default function SettingsPage({
               )}
 
               {section === "folders" && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="p-5 border-b border-slate-100">
-                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navFolders")}</h2>
+            <div className={SETTINGS_PANEL_CLASS}>
+              <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.navFolders")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                </div>
               </div>
-              <div className="p-5">
+              <div className={SETTINGS_PANEL_BODY_CLASS}>
                 {!sub?.is_valid ? (
                   <div className="py-6 text-center">
                     <p className="text-slate-600 mb-4">{t("settings.foldersPremiumOnly")}</p>
@@ -1872,10 +2044,13 @@ export default function SettingsPage({
               {section === "premium" && (
             <div className="space-y-6" ref={subscriptionPlansRef}>
               {/* Subscription: status + buy/gift */}
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.subscription")}</h2>
-                  <div className="relative shrink-0">
+              <div className={SETTINGS_PANEL_CLASS}>
+                <div className={SETTINGS_PANEL_HEADER_CLASS}>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-slate-800">{t("settings.subscription")}</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
+                  </div>
+                  <div className="relative shrink-0" ref={subscriptionMenuButtonRef}>
                     <button
                       type="button"
                       onClick={() => setShowSubscriptionMenu((v) => !v)}
@@ -1887,9 +2062,13 @@ export default function SettingsPage({
                       </svg>
                     </button>
                     {showSubscriptionMenu && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setShowSubscriptionMenu(false)} aria-hidden />
-                        <div className="absolute right-0 top-full mt-1 py-1 w-48 bg-white rounded-lg border border-slate-200 shadow-lg z-20">
+                      <AnchoredPortal
+                        anchorRef={subscriptionMenuButtonRef}
+                        portalRef={subscriptionMenuPopoverRef}
+                        align="right"
+                        minWidth={192}
+                        className="py-1 bg-white rounded-lg border border-slate-200 shadow-lg"
+                      >
                           <button
                             type="button"
                             onClick={() => { setShowSubscriptionMenu(false); setShowPaymentMethodsModal(true); }}
@@ -1897,12 +2076,11 @@ export default function SettingsPage({
                           >
                             {t("settings.paymentMethods")}
                           </button>
-                        </div>
-                      </>
+                      </AnchoredPortal>
                     )}
                   </div>
                 </div>
-                <div className="p-5 space-y-4">
+                <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
                   {sub && (
                     <>
                       <div className="flex items-center justify-between">
@@ -1978,32 +2156,35 @@ export default function SettingsPage({
         )}
 
         {errorToast && (
-          <div
-            role="alert"
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-3 bg-red-600 text-white text-sm rounded-lg shadow-lg max-w-md"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="flex-1 min-w-0">{errorToast}</span>
-            {error && (
+          <TopLayerPortal>
+            <div
+              role="alert"
+              className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-3 bg-red-600 text-white text-sm rounded-lg shadow-lg max-w-md"
+              style={{ zIndex: TOP_LAYER_Z_INDEX }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="flex-1 min-w-0">{errorToast}</span>
+              {error && (
+                <button
+                  type="button"
+                  onClick={() => { setErrorToast(""); setError(""); loadProfile(); }}
+                  className="shrink-0 px-3 py-1.5 rounded-md bg-white/20 hover:bg-white/30 font-medium"
+                >
+                  {t("common.retry")}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => { setErrorToast(""); setError(""); loadProfile(); }}
-                className="shrink-0 px-3 py-1.5 rounded-md bg-white/20 hover:bg-white/30 font-medium"
+                onClick={() => setErrorToast("")}
+                className="shrink-0 p-1 rounded hover:bg-white/20"
+                aria-label={t("common.close")}
               >
-                {t("common.retry")}
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setErrorToast("")}
-              className="shrink-0 p-1 rounded hover:bg-white/20"
-              aria-label={t("common.close")}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
+            </div>
+          </TopLayerPortal>
         )}
 
         {!loading && (user || error) && (
@@ -2013,7 +2194,7 @@ export default function SettingsPage({
               <div className="flex flex-col flex-1 min-w-0 w-full md:hidden ui-surface-1 overflow-y-auto">
                 <div className={`flex flex-col flex-1 min-h-0 ${embed ? "p-4" : "p-4 sm:p-6"}`}>
                   <div
-                    className="-mx-4 sm:-mx-6 px-4 sm:px-6 sticky top-0 z-20 h-14 flex items-center border-b backdrop-blur"
+                    className="-mx-4 sm:-mx-6 px-4 sm:px-6 sticky top-0 z-20 h-16 flex items-center border-b backdrop-blur"
                     style={{ top: "env(safe-area-inset-top)", background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
                   >
                     <h2 className="text-base font-semibold truncate" style={{ color: "var(--text-0)" }}>
@@ -2021,37 +2202,43 @@ export default function SettingsPage({
                     </h2>
                   </div>
                   <div className="h-4" />
-                  <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
+                  <div className={SETTINGS_NAV_SHELL_CLASS}>
+                    <div className="px-3 pb-3 pt-1">
+                      <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-slate-400">{t("common.settings")}</p>
+                      <p className="mt-1 text-sm text-slate-500">{t("settings.settingsTitle")}</p>
+                    </div>
+                    <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
                   {user?.is_staff && (
-                    <div className="mt-6 pt-4 border-t border-slate-100">
+                    <div className="mt-4 border-t border-slate-100 px-1 pt-4">
                       <Link
                         to="/admin"
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+                        className={`${SETTINGS_NAV_ACTION_CLASS} text-blue-600 hover:bg-blue-50/80`}
                       >
                         Админ-панель
                       </Link>
                     </div>
                   )}
-                  <div className="mt-auto pt-6 border-t border-slate-100">
-                    <p className="px-4 py-2 text-xs text-slate-400">
+                  <div className="mt-auto border-t border-slate-100 px-1 pt-4">
+                    <p className="px-3 py-2 text-xs text-slate-400">
                       {t("settings.version")} {typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "—"}
                     </p>
-                    <div className="flex flex-col gap-2 mt-1">
+                    <div className="mt-1 flex flex-col gap-2">
                       <button
                         onClick={() => setShowSupportModal(true)}
-                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg text-left"
+                        className={`${SETTINGS_NAV_ACTION_CLASS} text-slate-600 hover:bg-white/80`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                         {t("support.menu")}
                       </button>
                       <button
                         onClick={() => setShowLogoutConfirm(true)}
-                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg text-left"
+                        className={`${SETTINGS_NAV_ACTION_CLASS} text-red-600 hover:bg-red-50/80`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                         {t("common.logout")}
                       </button>
                     </div>
+                  </div>
                   </div>
                 </div>
               </div>
@@ -2061,7 +2248,7 @@ export default function SettingsPage({
             {isMobile && mobileShowContent && (
               <div className="flex flex-col flex-1 min-w-0 w-full md:hidden overflow-hidden">
                 <div
-                  className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-14 flex items-center gap-3"
+                  className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
                   style={{ top: "env(safe-area-inset-top)", background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
                 >
                   <button
@@ -2076,7 +2263,7 @@ export default function SettingsPage({
                   <span className="font-semibold truncate" style={{ color: "var(--text-0)" }}>{t(currentSectionLabel)}</span>
                 </div>
                 <main ref={mainContentRef} className={`flex-1 min-w-0 overflow-y-auto ${embed ? "p-4" : "p-4 sm:p-6"}`}>
-                  <div key={section} className="settings-section-fade-in">
+                  <div>
                     {renderSectionContent()}
                   </div>
                 </main>
@@ -2084,44 +2271,50 @@ export default function SettingsPage({
             )}
 
             {/* ===== Desktop: two columns ===== */}
-            <aside className={`hidden md:flex shrink-0 border-r ui-border-subtle ui-surface-1 flex-col ${embed ? "w-56 p-4" : "w-64 p-6"}`}>
-              <SettingsNav section={section} onSection={setSection} t={t} hasSubscription={sub?.is_valid === true} />
-              {user?.is_staff && (
-                <div className="mt-6 pt-4 border-t border-slate-100">
+            <aside className={`hidden md:flex shrink-0 border-r ui-border-subtle ui-surface-1 flex-col ${embed ? "w-[19rem] p-4" : "w-[20rem] p-5"}`}>
+              <div className={SETTINGS_NAV_SHELL_CLASS}>
+                <div className="px-3 pb-3 pt-1">
+                  <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-slate-400">{t("common.settings")}</p>
+                  <p className="mt-1 text-sm text-slate-500">{t("settings.settingsTitle")}</p>
+                </div>
+                <SettingsNav section={section} onSection={setSection} t={t} hasSubscription={sub?.is_valid === true} />
+                {user?.is_staff && (
+                  <div className="mt-4 border-t border-slate-100 px-1 pt-4">
                   <Link
                     to="/admin"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+                    className={`${SETTINGS_NAV_ACTION_CLASS} text-blue-600 hover:bg-blue-50/80`}
                   >
                     Админ-панель
                   </Link>
                 </div>
               )}
-              <div className="mt-auto pt-6 border-t border-slate-100">
-                <p className="px-4 py-2 text-xs text-slate-400">
+                <div className="mt-auto border-t border-slate-100 px-1 pt-4">
+                  <p className="px-3 py-2 text-xs text-slate-400">
                   {t("settings.version")} {typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "—"}
                 </p>
-                <div className="flex flex-col gap-2 mt-1">
+                  <div className="mt-1 flex flex-col gap-2">
                   <button
                     onClick={() => setShowSupportModal(true)}
-                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg text-left"
+                    className={`${SETTINGS_NAV_ACTION_CLASS} text-slate-600 hover:bg-white/80`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                     {t("support.menu")}
                   </button>
                   <button
                     onClick={() => setShowLogoutConfirm(true)}
-                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg text-left"
+                    className={`${SETTINGS_NAV_ACTION_CLASS} text-red-600 hover:bg-red-50/80`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                     {t("common.logout")}
                   </button>
                 </div>
               </div>
+              </div>
             </aside>
 
             {/* ===== Desktop: Section content ===== */}
             <main ref={mainContentRef} className={`hidden md:block flex-1 min-w-0 overflow-y-auto ui-surface-1 ${embed ? "p-4" : "p-6"}`}>
-              <div key={section} className="settings-section-fade-in">
+              <div>
                 {renderSectionContent()}
               </div>
             </main>
@@ -2146,7 +2339,7 @@ export default function SettingsPage({
         className="sticky top-0 z-30 border-b backdrop-blur"
         style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
       >
-        <div className="container mx-auto px-4 h-14 flex justify-between items-center">
+        <div className="container mx-auto px-4 h-16 flex justify-between items-center">
           <Link to="/chats" className="text-lg font-semibold" style={{ color: "var(--text-0)" }}>
             Личный кабинет
           </Link>

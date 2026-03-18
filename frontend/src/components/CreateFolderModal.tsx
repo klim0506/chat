@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { foldersApi, type ChatFolder } from "../api/client";
 import { useTranslation } from "../lib/i18n";
+import { AnchoredPortal } from "./TopLayerPortal";
 
 const FOLDER_EMOJIS = ["📁", "📂", "💼", "⭐", "🏠", "👥", "💬", "❤️", "🔔", "📢", "🎯", "📱", "🌟", "🔥", "📣", "💡", "🎬", "✅", "📎", "🔒"];
 const FOLDER_COLORS = ["#3B82F6", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#6B7280", "#EC4899", "#14B8A6"];
@@ -20,6 +21,7 @@ export default function CreateFolderModal({ isOpen, onClose, onCreated }: Create
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerPopoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -34,7 +36,8 @@ export default function CreateFolderModal({ isOpen, onClose, onCreated }: Create
   useEffect(() => {
     if (!pickerOpen) return;
     const onClickOutside = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (!pickerRef.current?.contains(target) && !pickerPopoverRef.current?.contains(target)) {
         setPickerOpen(false);
       }
     };
@@ -95,7 +98,7 @@ export default function CreateFolderModal({ isOpen, onClose, onCreated }: Create
                 {emoji}
               </button>
               {pickerOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-xl border border-slate-200 shadow-lg">
+                <AnchoredPortal anchorRef={pickerRef} portalRef={pickerPopoverRef} className="p-2 bg-white rounded-xl border border-slate-200 shadow-lg">
                   <div className="flex flex-wrap gap-1 w-52">
                     {FOLDER_EMOJIS.map((e) => (
                       <button
@@ -113,7 +116,7 @@ export default function CreateFolderModal({ isOpen, onClose, onCreated }: Create
                       </button>
                     ))}
                   </div>
-                </div>
+                </AnchoredPortal>
               )}
               <input
                 type="text"

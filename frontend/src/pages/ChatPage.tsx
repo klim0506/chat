@@ -795,6 +795,7 @@ function channelPostToMessage(post: ChannelPost, chId: string, channel: Channel 
     reactions: post.reactions ?? {},
     my_reactions: post.my_reactions ?? [],
     comments_count: post.comments_count ?? 0,
+    views_count: post.views_count ?? 0,
     waveform: post.waveform ?? undefined,
     forwarded_from: post.forwarded_from,
     forwarded_from_chat_title: post.forwarded_from_chat_title,
@@ -973,6 +974,8 @@ export default function ChatPage({
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [replyToComment, setReplyToComment] = useState<Message | null>(null);
   const commentsEndRef = useRef<HTMLDivElement>(null);
+  const isCommentsView = !!channelId && !!openCommentsPost;
+  const visiblePostComments = useMemo(() => postComments.filter((msg) => !msg.is_deleted), [postComments]);
 
   useEffect(() => {
     if (chatId && typeof localStorage !== "undefined") {
@@ -1138,6 +1141,12 @@ export default function ChatPage({
     setCommentsError("");
     setCommentInput("");
     setReplyToComment(null);
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setShowInfo(false);
     void loadChannelPostComments(post.id);
   }, [loadChannelPostComments]);
   const closePostComments = useCallback(() => {
@@ -1146,9 +1155,17 @@ export default function ChatPage({
     setCommentsError("");
     setCommentInput("");
   }, []);
+  const handleBackAction = useCallback(() => {
+    if (isCommentsView) {
+      closePostComments();
+      return;
+    }
+    onBack?.();
+  }, [closePostComments, isCommentsView, onBack]);
   const handleCommentsPostUpdated = useCallback((updated: Message) => {
+    handleMessageUpdated(updated);
     setOpenCommentsPost((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
-  }, []);
+  }, [handleMessageUpdated]);
   const handleChannelPostReactionUpdated = useCallback((messageId: string, data: { reactions: Record<string, number>; my_reactions: string[] }) => {
     handleReactionUpdated(messageId, data);
     setOpenCommentsPost((prev) => (prev && prev.id === messageId ? { ...prev, reactions: data.reactions, my_reactions: data.my_reactions } : prev));
@@ -4093,155 +4110,6 @@ export default function ChatPage({
           }}
         />
       )}
-      {openCommentsPost && channelId && channelRaw && typeof document !== "undefined" && createPortal(
-        <div
-          className="fixed inset-0 z-[210] bg-black/45 backdrop-blur-sm md:p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) closePostComments();
-          }}
-        >
-          <div className="flex h-full w-full items-stretch justify-center">
-            <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-slate-50 shadow-2xl md:h-[92vh] md:rounded-[28px] md:border md:border-white/60">
-              <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900">{t("channelComments.title")}</div>
-                  <div className="text-xs text-slate-500">
-                    {postComments.filter((msg) => !msg.is_deleted).length}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={closePostComments}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                  aria-label={t("common.close")}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 6 6 18" />
-                    <path d="m6 6 12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="border-b border-slate-200 bg-white/90 px-3 py-3">
-                <div className="rounded-3xl bg-slate-50/90 px-1 py-1">
-                  <MessageBubble
-                    message={openCommentsPost}
-                    isMine={false}
-                    chatId={conversationId}
-                    channelId={channelId}
-                    textScale={textScale}
-                    showAvatar
-                    onMessageUpdated={handleCommentsPostUpdated}
-                    onReactionUpdated={handleChannelPostReactionUpdated}
-                    onSetReaction={(messageId, emoji) =>
-                      channelPostsApi.setReaction(channelId, messageId, emoji).then((res) =>
-                        channelPostToMessage(res.data, channelId, channelRaw)
-                      )}
-                    onAvatarClick={handleAvatarClick}
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-3 py-3">
-                {commentsLoading ? (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">{t("channelComments.loading")}</div>
-                ) : postComments.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">{t("channelComments.empty")}</div>
-                ) : (
-                  <div className="space-y-0">
-                    {postComments.map((msg, index) => {
-                      const prevMsg = postComments[index - 1];
-                      const nextMsg = postComments[index + 1];
-                      const sameNextSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
-                      const nextGap = nextMsg
-                        ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
-                        : Infinity;
-                      const showAvatar = !nextMsg || !sameNextSender || nextGap >= GROUP_TIME_MS;
-                      const isLastInGroup = showAvatar && !!prevMsg && getSenderKey(prevMsg) === getSenderKey(msg);
-                      const isFirstInGroup = !prevMsg || getSenderKey(prevMsg) !== getSenderKey(msg) ||
-                        new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
-                      const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
-                      const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
-                      return (
-                        <div key={msg.id} className={`${isFirstInGroup ? "mt-3" : "mt-2"}`}>
-                          {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
-                          <MessageBubble
-                            message={msg}
-                            isMine={isMine}
-                            chatId={conversationId}
-                            textScale={textScale}
-                            showAvatar={showAvatar}
-                            isLastInGroup={isLastInGroup}
-                            showSenderName={isFirstInGroup}
-                            onMessageUpdated={handleCommentUpdated}
-                            onMessageDeleted={handleCommentDeleted}
-                            onUpdateMessageContent={handleUpdateCommentContent}
-                            onDeleteMessage={handleDeleteComment}
-                            onDeleteError={handleDeleteError}
-                            onReply={setReplyToComment}
-                            onAvatarClick={handleAvatarClick}
-                          />
-                        </div>
-                      );
-                    })}
-                    <div ref={commentsEndRef} />
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-slate-200 bg-white px-3 py-3">
-                {commentsError && <div className="mb-2 text-sm text-red-600">{commentsError}</div>}
-                {replyToComment && (
-                  <div className="mb-2 flex items-start justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-blue-700">{t("channelComments.replyTo")}</div>
-                      <div className="truncate text-xs text-slate-600">
-                        {userDisplayName(replyToComment.sender as User)}: {(replyToComment.content || "").trim() || t("common.fileMsg")}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setReplyToComment(null)}
-                      className="shrink-0 text-xs font-medium text-blue-700 hover:text-blue-800"
-                    >
-                      {t("channelComments.cancelReply")}
-                    </button>
-                  </div>
-                )}
-                {channelRaw.comments_enabled ? (
-                  <div className="flex items-end gap-2">
-                    <textarea
-                      value={commentInput}
-                      onChange={(event) => setCommentInput(event.target.value.slice(0, MESSAGE_MAX_LENGTH))}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          void handleSendComment();
-                        }
-                      }}
-                      rows={1}
-                      placeholder={t("channelComments.placeholder")}
-                      className="min-h-[46px] max-h-32 flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleSendComment()}
-                      disabled={commentSubmitting || !commentInput.trim()}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      aria-label={t("common.send")}
-                    >
-                      <SendIcon size={18} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl bg-slate-100 px-3 py-3 text-sm text-slate-500">{t("channelComments.disabled")}</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
       {pendingFilesForPreview && (
         <FilePreviewModal
           files={pendingFilesForPreview}
@@ -4350,18 +4218,18 @@ export default function ChatPage({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onTouchStart={(e) => {
-          if (e.touches.length !== 1 || !onBack) return;
+          if (e.touches.length !== 1 || (!onBack && !isCommentsView)) return;
           swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }}
         onTouchEnd={(e) => {
-          if (e.changedTouches.length !== 1 || !onBack || !swipeStartRef.current) return;
+          if (e.changedTouches.length !== 1 || (!onBack && !isCommentsView) || !swipeStartRef.current) return;
           const start = swipeStartRef.current;
           swipeStartRef.current = null;
           const endX = e.changedTouches[0].clientX;
           const endY = e.changedTouches[0].clientY;
           const dx = endX - start.x;
           const dy = endY - start.y;
-          if (dx > SWIPE_THRESHOLD_PX && Math.abs(dy) < 120) onBack();
+          if (dx > SWIPE_THRESHOLD_PX && Math.abs(dy) < 120) handleBackAction();
         }}
         onTouchCancel={() => { swipeStartRef.current = null; }}
       >
@@ -4391,7 +4259,7 @@ export default function ChatPage({
 
         {/* Header — sticky on mobile so it stays visible when keyboard opens */}
       <header
-        className="sticky z-30 shrink-0 border-b backdrop-blur px-4 h-14 flex items-center gap-3"
+        className="sticky z-30 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
         style={{
           top: "env(safe-area-inset-top)",
           background: "var(--glass-bg)",
@@ -4413,13 +4281,13 @@ export default function ChatPage({
             </>
           ) : (
             <>
-              {onBack && (
+              {(onBack || isCommentsView) && (
                 <button
                   type="button"
-                  onClick={onBack}
-                  className="md:hidden shrink-0 p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color]"
-                  title={t("chat.toChatList")}
-                  aria-label={t("chat.toChatList")}
+                  onClick={handleBackAction}
+                  className={`shrink-0 p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color] ${!isCommentsView ? "md:hidden" : ""}`}
+                  title={isCommentsView ? t("common.back") : t("chat.toChatList")}
+                  aria-label={isCommentsView ? t("common.back") : t("chat.toChatList")}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
                 </button>
@@ -4456,22 +4324,33 @@ export default function ChatPage({
                 </div>
               )}
             </div>
-            <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className="flex-1 text-left hover:bg-slate-50/70 rounded-xl px-2.5 py-1.5 -mx-2 transition-colors min-w-0">
+            <button
+              type="button"
+              onClick={() => { if (isCommentsView) return; setInfoUserId(null); setShowInfo(!showInfo); }}
+              className={`flex-1 text-left rounded-xl px-2.5 py-1.5 -mx-2 min-w-0 ${isCommentsView ? "cursor-default" : "hover:bg-slate-50/70 transition-colors"}`}
+            >
               <h1 className="font-semibold text-slate-900 flex items-center gap-1.5 tracking-tight">
+                {isCommentsView ? (
+                  t("channelComments.title")
+                ) : (<>
                 {displayChat?.is_favorites ? t("chat.favoritesTitle") : displayChat?.is_personal && displayChat.other_member ? userDisplayName(displayChat.other_member) : displayChat?.title ?? "…"}
-                {displayChat?.title_icon && <span className="shrink-0" aria-hidden>{displayChat.title_icon}</span>}
-                {displayChat?.is_secret && (
+                </>)}
+                {!isCommentsView && displayChat?.title_icon && <span className="shrink-0" aria-hidden>{displayChat.title_icon}</span>}
+                {!isCommentsView && displayChat?.is_secret && (
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600" aria-label={t("chat.e2ee")}>
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
                 )}
-                {isMuted && (
+                {!isCommentsView && isMuted && (
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400" aria-label={t("dashboard.muted")}>
                     <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                   </svg>
                 )}
               </h1>
               <p className="text-sm text-slate-600">
+                {isCommentsView ? (
+                  `${visiblePostComments.length}${displayChat?.title ? ` - ${displayChat.title}` : ""}`
+                ) : (<>
                 {displayChat?.is_personal && displayChat.other_member ? (
                   typing ? (
                     <span className="text-slate-400 italic">{typing} {t("chat.typing")}</span>
@@ -4495,26 +4374,31 @@ export default function ChatPage({
                     return membersLabel + onlineLabel;
                   })()
                 )}
+                </>)}
               </p>
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => { setSearchOpen((v) => { if (v) { setSearchQuery(""); setSearchResults([]); } return !v; }); setTimeout(() => searchInputRef.current?.focus(), 100); }}
-            className={`p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${searchOpen ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`}
-            title={t("search.placeholder")}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          </button>
-          <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${showInfo ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`} title={t("chat.chatInfo")}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-          </button>
+          {!isCommentsView && (
+            <>
+              <button
+                type="button"
+                onClick={() => { setSearchOpen((v) => { if (v) { setSearchQuery(""); setSearchResults([]); } return !v; }); setTimeout(() => searchInputRef.current?.focus(), 100); }}
+                className={`p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${searchOpen ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`}
+                title={t("search.placeholder")}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              </button>
+              <button type="button" onClick={() => { setInfoUserId(null); setShowInfo(!showInfo); }} className={`p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${showInfo ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/80"}`} title={t("chat.chatInfo")}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              </button>
+            </>
+          )}
             </>
           )}
       </header>
 
         {/* ── Search bar ── */}
-        {searchOpen && (
+        {!isCommentsView && searchOpen && (
           <div className="shrink-0 bg-white border-b border-slate-200 px-3 py-1.5 flex items-center gap-2">
             <div className="flex-1 relative">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -4570,7 +4454,7 @@ export default function ChatPage({
         )}
 
         {/* ── Unified pinned messages bar (always visible, not scrollable) ── */}
-        {(() => {
+        {!isCommentsView && (() => {
           const allPinned = chat?.pinned_messages ?? (chat?.pinned_message ? [chat.pinned_message] : []);
           const myPinned = chat?.my_pinned_messages ?? [];
           // Deduplicate: personal pins that are also pinned for all → show only once
@@ -4678,6 +4562,76 @@ export default function ChatPage({
             <div className="flex-1 flex items-center justify-center min-h-[200px]">
               <p className="text-slate-500">{t("chat.loadError")}</p>
             </div>
+          ) : isCommentsView ? (
+          <div className="min-h-full flex flex-col">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col">
+              <div className="shrink-0 py-2">
+                {openCommentsPost && channelId && channelRaw && (
+                  <div className="rounded-[28px] border border-white/70 bg-white/80 p-1 shadow-sm backdrop-blur">
+                    <MessageBubble
+                      message={openCommentsPost}
+                      isMine={false}
+                      chatId={conversationId}
+                      channelId={channelId}
+                      textScale={textScale}
+                      showAvatar
+                      onMessageUpdated={handleCommentsPostUpdated}
+                      onReactionUpdated={handleChannelPostReactionUpdated}
+                      onSetReaction={(messageId, emoji) =>
+                        channelPostsApi.setReaction(channelId, messageId, emoji).then((res) =>
+                          channelPostToMessage(res.data, channelId, channelRaw)
+                        )}
+                      onAvatarClick={handleAvatarClick}
+                    />
+                  </div>
+                )}
+              </div>
+              {commentsLoading ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("channelComments.loading")}</div>
+              ) : visiblePostComments.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("channelComments.empty")}</div>
+              ) : (
+                <div className="flex flex-col pb-2">
+                  {postComments.map((msg, index) => {
+                    const prevMsg = postComments[index - 1];
+                    const nextMsg = postComments[index + 1];
+                    const sameNextSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
+                    const nextGap = nextMsg
+                      ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
+                      : Infinity;
+                    const showAvatar = !nextMsg || !sameNextSender || nextGap >= GROUP_TIME_MS;
+                    const isLastInGroup = showAvatar && !!prevMsg && getSenderKey(prevMsg) === getSenderKey(msg);
+                    const isFirstInGroup = !prevMsg || getSenderKey(prevMsg) !== getSenderKey(msg) ||
+                      new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
+                    const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
+                    const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
+                    return (
+                      <div key={msg.id} className={`${isFirstInGroup ? "mt-3" : "mt-2"}`}>
+                        {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
+                        <MessageBubble
+                          message={msg}
+                          isMine={isMine}
+                          chatId={conversationId}
+                          textScale={textScale}
+                          showAvatar={showAvatar}
+                          isLastInGroup={isLastInGroup}
+                          showSenderName={isFirstInGroup}
+                          onMessageUpdated={handleCommentUpdated}
+                          onMessageDeleted={handleCommentDeleted}
+                          onUpdateMessageContent={handleUpdateCommentContent}
+                          onDeleteMessage={handleDeleteComment}
+                          onDeleteError={handleDeleteError}
+                          onReply={setReplyToComment}
+                          onAvatarClick={handleAvatarClick}
+                        />
+                      </div>
+                    );
+                  })}
+                  <div ref={commentsEndRef} />
+                </div>
+              )}
+            </div>
+          </div>
           ) : (
           <div className="min-h-full flex flex-col">
           {/* Floating date on scroll (sticky date header) — first visible message by scroll position (works with and without virtualization) */}
@@ -4825,13 +4779,13 @@ export default function ChatPage({
                             setVirtualMeasureTick((v) => v + 1);
                           }
                         }}
-                        className={`${isFirstInGroup ? "mt-3" : "mt-2"} transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
+                        className={`bubbles-group ${isFirstInGroup ? "mt-3" : "mt-2"} transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
                       >
                         {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         {showUnreadLine && i === firstUnreadIndex && (
                           <div data-unread-line className="flex items-center gap-3 py-1.5">
                             <span className="flex-1 h-px bg-slate-300" aria-hidden />
-                            <span className="text-xs font-medium text-slate-500 shrink-0">Непрочитанные сообщения</span>
+                            <span className="text-xs font-medium text-slate-500 shrink-0">{t("chat.newMessagesLine")}</span>
                             <span className="flex-1 h-px bg-slate-300" aria-hidden />
                           </div>
                         )}
@@ -4921,16 +4875,24 @@ export default function ChatPage({
             <MessageListSkeleton />
           ) : (
             <div className="flex-1 flex items-center justify-center min-h-[120px]">
-              <div className="text-center text-sm max-w-xs rounded-xl bg-white/70 backdrop-blur-sm border border-slate-200/60 shadow-sm px-6 py-5">
+              <div className="max-w-sm rounded-2xl border border-slate-200/70 bg-white/82 px-5 py-4 text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur">
                 {chat?.is_favorites ? (
-                  <>
-                    <p className="font-medium text-slate-700 mb-2">⭐ {t("chat.favoritesTitle")}</p>
-                    <p className="text-slate-500 leading-relaxed">{t("chat.favoritesHint")}</p>
-                  </>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50 text-lg">⭐</span>
+                      <span className="text-sm font-semibold text-slate-700">{t("chat.favoritesTitle")}</span>
+                    </div>
+                    <p className="text-xs leading-5 text-slate-500 max-w-[260px]">{t("chat.favoritesHint")}</p>
+                  </div>
                 ) : (
                   <>
-                    <p className="font-medium text-slate-600 mb-1">{t("chat.emptyChat")}</p>
-                    <p className="text-slate-500">{t("chat.emptyChatHint")}</p>
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </div>
+                    <p className="mb-2 text-base font-semibold text-slate-700">{t("chat.emptyChat")}</p>
+                    <p className="mx-auto max-w-xs text-sm leading-7 text-slate-500">{t("chat.emptyChatHint")}</p>
                   </>
                 )}
               </div>
@@ -4941,7 +4903,7 @@ export default function ChatPage({
           </div>
           )}
         </div>
-      {showScrollToBottom && (
+      {!isCommentsView && showScrollToBottom && (
         <button
           type="button"
           onClick={() => { scrollToBottom(); setShowScrollToBottom(false); }}
@@ -5025,7 +4987,7 @@ export default function ChatPage({
         )}
 
         {/* Selection action bar */}
-        {selectionMode && selectedMessageIds.size > 0 && (
+        {!isCommentsView && selectionMode && selectedMessageIds.size > 0 && (
           <div className="border-t border-slate-200 bg-white px-4 py-3 flex items-center justify-center gap-3">
             <button
               type="button"
@@ -5047,7 +5009,59 @@ export default function ChatPage({
         )}
 
         {/* Input bar — visible as soon as we're on a chat (conversationId) so layout doesn't jerk when chat loads */}
-        {conversationId && (recording ? (
+        {conversationId && (isCommentsView ? (
+          <div
+            className="shrink-0 relative border-t backdrop-blur"
+            style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "0 -12px 28px rgba(15,23,42,0.10)" }}
+          >
+            {commentsError && <div className="px-4 pt-3 text-sm text-red-600">{commentsError}</div>}
+            {replyToComment && (
+              <div className="mx-3 mt-3 flex items-start justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-blue-700">{t("channelComments.replyTo")}</div>
+                  <div className="truncate text-xs text-slate-600">
+                    {userDisplayName(replyToComment.sender as User)}: {(replyToComment.content || "").trim() || t("common.fileMsg")}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyToComment(null)}
+                  className="shrink-0 text-xs font-medium text-blue-700 hover:text-blue-800"
+                >
+                  {t("channelComments.cancelReply")}
+                </button>
+              </div>
+            )}
+            {channelRaw?.comments_enabled ? (
+              <div className="p-2 sm:p-2.5 flex gap-2 items-end">
+                <textarea
+                  value={commentInput}
+                  onChange={(event) => setCommentInput(event.target.value.slice(0, MESSAGE_MAX_LENGTH))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void handleSendComment();
+                    }
+                  }}
+                  rows={1}
+                  placeholder={t("channelComments.placeholder")}
+                  className="min-h-[46px] max-h-32 flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSendComment()}
+                  disabled={commentSubmitting || !commentInput.trim()}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={t("common.send")}
+                >
+                  <SendIcon size={18} />
+                </button>
+              </div>
+            ) : (
+              <div className="px-4 py-3 text-center text-sm text-slate-500">{t("channelComments.disabled")}</div>
+            )}
+          </div>
+        ) : recording ? (
           <div className="shrink-0 border-t bg-white p-2 flex gap-2 items-center">
             <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 shrink-0" title={t("chat.cancelRecording")}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -7546,6 +7560,7 @@ const MessageBubble = memo(function MessageBubble({
   const editedStr = message.edited_at
     ? new Date(message.edited_at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
     : null;
+  const viewsCount = typeof message.views_count === "number" ? message.views_count : null;
   const isPendingOutbox = isMine && message.sender?.id === "self";
   const readStatus = isMine ? (isPendingOutbox ? "pending" : (message.read_status || "delivered")) : null;
   const Checkmarks = readStatus === "pending" ? (
@@ -7655,6 +7670,15 @@ const MessageBubble = memo(function MessageBubble({
   const timeEl = (
     <span className={`inline-flex flex-nowrap items-center gap-x-1 text-[0.625rem] min-w-0 shrink-0 whitespace-nowrap ${isMine ? "text-slate-500" : "text-slate-400"}`}>
       {hasMentionInContent && <span className="font-medium text-slate-500" title={t("chat.mentionLabel")}>@</span>}
+      {viewsCount !== null && (
+        <span className="inline-flex items-center gap-0.5 tabular-nums" title="Views">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span>{viewsCount}</span>
+        </span>
+      )}
       {timeStr}
       {editedStr && <span className="opacity-80 ml-0.5">ред. {editedStr}</span>}
       {Checkmarks}
@@ -7763,10 +7787,10 @@ const MessageBubble = memo(function MessageBubble({
         e.stopPropagation();
       }}
     >
-      {/* Wrapper: [reply icon on swipe] [avatar + bubble + reactions]. */}
+      {/* Wrapper: [reply icon on swipe] [avatar + bubble + reactions]. Structure: bubble (Telegram-like). */}
       <div
         ref={swipeWrapperRef}
-        className={`relative flex flex-row flex-nowrap items-end gap-2 swipe-message w-full ${rowJustify} ${swipeBounce ? "swipe-bounce" : ""}`}
+        className={`bubble relative flex flex-row flex-nowrap items-end gap-2 swipe-message w-full ${rowJustify} ${swipeBounce ? "swipe-bounce" : ""}`}
         style={swipeBounce ? { "--swipe-from": `${swipeBounceFromRef.current}px` } as React.CSSProperties : undefined}
         onAnimationEnd={() => setSwipeBounce(false)}
       >
@@ -7865,8 +7889,8 @@ const MessageBubble = memo(function MessageBubble({
             )}
           </div>
         ) : (
-        <div className={`inline-block max-w-full ${isLastInGroup ? "relative overflow-visible" : ""}`} style={optimalBubbleWidth != null ? { maxWidth: optimalBubbleWidth } : undefined}>
-        <div className={`inline-block max-w-full ${message.edited_at ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? "overflow-hidden bg-white border border-slate-200" : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
+        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${isLastInGroup ? "relative overflow-visible" : ""}`} style={optimalBubbleWidth != null && !hasCommentsFooter ? { maxWidth: optimalBubbleWidth } : undefined}>
+        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${message.edited_at && !hasCommentsFooter ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? "overflow-hidden bg-white border border-slate-200" : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
           {/* Имя отправителя — внутри пузырька, тот же размер что и текст сообщения */}
           {showSenderName ? (
             <div className={`mb-0.5 w-full min-w-0 ${isImageBubble || isSticker ? "px-3 pt-2 pb-1" : ""}`}>
@@ -8206,21 +8230,23 @@ const MessageBubble = memo(function MessageBubble({
             <button
               type="button"
               onClick={onOpenComments}
-              className={`group flex w-full cursor-pointer items-center justify-between gap-3 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-blue-500 hover:text-white ${
+              className={`group block w-full min-w-0 cursor-pointer text-left box-border ${isLastInGroup ? "!rounded-bl-[4px]" : ""} ${
                 isImageBubble || isSticker
-                  ? "mt-0 border-t border-slate-200 bg-white/95 px-3 py-2"
-                  : "mx-[-12px] mb-[-6px] mt-2 border-t border-slate-200/80 px-3 py-2"
+                  ? `mt-0 border-t px-3 py-2 rounded-b-2xl hover:bg-blue-500 hover:text-white transition-colors ${isMine ? "border-blue-200/80 bg-blue-100 text-slate-800" : "border-slate-200 bg-white text-slate-800"}`
+                  : `mt-2 border-t px-3 py-2 rounded-b-2xl hover:bg-blue-500 hover:text-white transition-colors ${isMine ? "border-blue-200/80 bg-blue-100 text-slate-800" : "border-slate-200/80 bg-white text-slate-800"}`
               }`}
               title={t("channelComments.openDiscussion")}
             >
-              <span className="inline-flex min-w-0 items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                <span className="truncate">{t("channelComments.open")}</span>
-              </span>
-              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700 group-hover:bg-white/20 group-hover:text-white">
-                {commentsCount}
+              <span className="flex w-full min-w-0 items-center justify-between gap-3 text-xs font-medium">
+                <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <span className="truncate">{t("channelComments.open")}</span>
+                </span>
+                <span className={`shrink-0 rounded-full px-1.5 py-0.5 tabular-nums group-hover:bg-white/20 group-hover:text-white ${isMine ? "bg-blue-200/70 text-slate-700" : "bg-slate-200/80 text-slate-700"}`}>
+                  {commentsCount}
+                </span>
               </span>
             </button>
           )}

@@ -276,256 +276,450 @@ export default function AuthPage() {
     await requestPermission();
     closeNotifyModalAndNavigate();
   };
+  const authCopy = language === "ru"
+    ? {
+        eyebrow: "Private messaging, calmly refined",
+        title: "Вход без шума, с ощущением настоящего продукта.",
+        subtitle: "Лёгкий экран, понятные шаги, быстрый старт с телефона или QR-кода.",
+        bullets: [
+          "Чистый вход без перегруза интерфейса",
+          "Один сценарий для mobile и web",
+          "Мягкие состояния загрузки и переходов",
+        ],
+      }
+    : {
+        eyebrow: "Private messaging, calmly refined",
+        title: "Sign in without noise, with a product-grade feel.",
+        subtitle: "A lighter entry screen, clearer steps, fast start from phone or QR code.",
+        bullets: [
+          "Clean entry with less visual overload",
+          "One flow tuned for mobile and web",
+          "Softer loading and transition states",
+        ],
+      };
+  const primaryButtonClass = "ui-accent-strong w-full rounded-2xl px-4 py-3 text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50";
+  const secondaryButtonClass = "w-full rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-white";
+  const inputClass = "w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100";
+  const authUxCopy = language === "ru"
+    ? {
+        eyebrow: "Pingy access flow",
+        title: "Один спокойный вход для возвращения и регистрации.",
+        subtitle: "Номер, код и короткая настройка профиля. Без разрозненных экранов и лишних решений.",
+        stages: [
+          { key: "phone" as const, label: "Номер", hint: "Введите телефон или код входа" },
+          { key: "verify" as const, label: "Код", hint: "Подтверждение через Telegram или SMS" },
+          { key: "profile" as const, label: "Профиль", hint: "Имя, username и фото по желанию" },
+        ],
+        flowBadges: { login: "Вход", create: "Новый аккаунт" },
+        titles: {
+          phone: "Введите номер телефона",
+          verify: "Подтвердите вход",
+          profile: "Завершите профиль",
+        },
+        descriptions: {
+          phone: "Мы отправим код в Telegram или по SMS. Этот же сценарий подходит и для нового аккаунта.",
+          verifyTelegram: "Код придёт в Telegram. Введите его и продолжайте без лишних шагов.",
+          verifySms: "Введите шестизначный код из SMS, чтобы продолжить.",
+          profile: "Имя, username и фото можно задать сейчас или позже в настройках.",
+          pairing: "Введите код с другого устройства, чтобы подтвердить вход вручную.",
+        },
+      }
+    : {
+        eyebrow: "Pingy access flow",
+        title: "One calm flow for sign-in and signup.",
+        subtitle: "Phone, code, and a short profile step. No scattered screens and no extra friction.",
+        stages: [
+          { key: "phone" as const, label: "Phone", hint: "Enter your phone or pairing code" },
+          { key: "verify" as const, label: "Code", hint: "Telegram or SMS confirmation" },
+          { key: "profile" as const, label: "Profile", hint: "Name, username, and optional photo" },
+        ],
+        flowBadges: { login: "Log in", create: "New account" },
+        titles: {
+          phone: "Enter your phone number",
+          verify: "Verify your access",
+          profile: "Finish your profile",
+        },
+        descriptions: {
+          phone: "We send a code via Telegram or SMS. The same flow works for both returning and new users.",
+          verifyTelegram: "The code arrives in Telegram. Enter it and keep going without extra steps.",
+          verifySms: "Enter the six-digit SMS code to continue.",
+          profile: "Name, username, and photo can be set now or later in settings.",
+          pairing: "Enter the code from another device to approve this sign-in manually.",
+        },
+      };
+  const flowStage = pairingMode === "code" ? "verify" : step === "phone" ? "phone" : step === "code" ? "verify" : "profile";
+  const currentStageIndex = authUxCopy.stages.findIndex((item) => item.key === flowStage);
+  const flowBadge = flowStage === "profile" || isNewAccount || isNewPhone === true ? authUxCopy.flowBadges.create : authUxCopy.flowBadges.login;
+  const stageTitle = pairingMode === "code" ? t("settings.qrLogin") : authUxCopy.titles[flowStage];
+  const stageDescription = pairingMode === "code"
+    ? authUxCopy.descriptions.pairing
+    : flowStage === "verify"
+      ? (codeMethod === "telegram" ? authUxCopy.descriptions.verifyTelegram : authUxCopy.descriptions.verifySms)
+      : authUxCopy.descriptions[flowStage];
+  const infoCardClass = "rounded-2xl border border-slate-200/80 bg-white/60 px-4 py-3 text-sm leading-6 text-slate-600";
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 p-4">
-      <div className="absolute left-4 top-4">
-        <Link to="/" className="inline-block cursor-pointer opacity-90 hover:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded" aria-label={t("landing.brand")}>
-          <img src={LOGO_URL} alt={t("auth.logo")} className="h-[3.75rem] w-auto object-contain" />
-        </Link>
+    <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-8%] top-[-6%] h-64 w-64 rounded-full bg-sky-200/40 blur-3xl" />
+        <div className="absolute bottom-[-8%] right-[-4%] h-72 w-72 rounded-full bg-blue-200/40 blur-3xl" />
       </div>
-      <div className="flex-1 flex items-center justify-center">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow-md p-6">
-        <h1 className="text-xl font-semibold text-center mb-6">
-          {isNewAccount ? t("auth.createAccount") : t("auth.login")}
-        </h1>
 
-        {refCode && isNewPhone === true && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-            {t("auth.referralBonus")}
-          </div>
-        )}
-
-        {pairingToken && pairingLoading ? (
-          <div className="py-8 text-center">
-            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-sm text-gray-600">{t("common.loading")}</p>
-          </div>
-        ) : pairingMode === "code" ? (
-          <form onSubmit={onPairingCodeSubmit} className="space-y-4">
-            <p className="text-sm text-gray-600">{t("auth.qrLoginEnterCode")}</p>
-            <div>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={8}
-                placeholder="123456"
-                value={pairingCode}
-                onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                className={`w-full border rounded-lg px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:border-transparent border-gray-300 focus:ring-blue-500`}
-              />
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl items-center justify-center">
+        <div className="grid w-full items-stretch gap-5 lg:grid-cols-[1.04fr_0.96fr]">
+          <section className="auth-soft-panel hidden min-h-[40rem] flex-col justify-between rounded-[32px] p-8 lg:flex xl:p-10">
+            <div className="space-y-8">
+              <Link
+                to="/"
+                className="inline-flex items-center rounded-2xl px-2 py-1.5 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2"
+                aria-label={t("landing.brand")}
+              >
+                <img src={LOGO_URL} alt={t("auth.logo")} className="h-14 w-auto object-contain opacity-95" />
+              </Link>
+              <div className="max-w-lg space-y-4">
+                <span className="soft-chip inline-flex rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                  {authUxCopy.eyebrow}
+                </span>
+                <h1 className="max-w-xl text-4xl font-semibold tracking-[-0.04em] text-slate-950 xl:text-5xl">
+                  {authUxCopy.title}
+                </h1>
+                <p className="max-w-md text-base leading-7 text-slate-600">
+                  {authUxCopy.subtitle}
+                </p>
+              </div>
             </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={pairingLoading || pairingCode.length !== 6}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {pairingLoading ? t("common.loading") : t("auth.loginBtn")}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setPairingMode(null); setError(""); setPairingCode(""); }}
-              className="w-full text-sm text-gray-500 hover:text-gray-700 py-1"
-            >
-              {t("common.back")}
-            </button>
-          </form>
-        ) : step === "phone" ? (
-          <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("auth.interfaceLanguage")}</label>
-              <div className="flex gap-2">
+
+            <div className="grid gap-3">
+              {false && authCopy.bullets.map((bullet) => (
+                <div key={bullet} className="soft-chip flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-slate-700">
+                  <span className="ui-accent-strong inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white">•</span>
+                  <span>{bullet}</span>
+                </div>
+              ))}
+              {authUxCopy.stages.map((item, index) => {
+                const isActive = index === currentStageIndex;
+                const isDone = index < currentStageIndex;
+                return (
+                  <div
+                    key={item.key}
+                    className={`rounded-2xl border px-4 py-3 transition-colors ${
+                      isActive
+                        ? "border-slate-900/10 bg-white/78 shadow-[0_12px_30px_rgba(15,23,42,0.08)]"
+                        : "border-white/40 bg-white/40"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ${
+                        isDone || isActive ? "ui-accent-strong text-white" : "bg-white text-slate-500"
+                      }`}>
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{item.label}</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-500">{item.hint}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="auth-glass-card relative mx-auto flex w-full max-w-[32rem] flex-col justify-center rounded-[28px] p-5 sm:p-7 lg:max-w-none lg:rounded-[32px] lg:p-8">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div className="space-y-3">
+                <Link
+                  to="/"
+                  className="inline-flex items-center rounded-2xl lg:hidden"
+                  aria-label={t("landing.brand")}
+                >
+                  <img src={LOGO_URL} alt={t("auth.logo")} className="h-12 w-auto object-contain opacity-95" />
+                </Link>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                    {flowBadge}
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+                    {stageTitle}
+                  </h2>
+                  <p className="max-w-md text-sm leading-6 text-slate-500">
+                    {stageDescription}
+                  </p>
+                </div>
+              </div>
+              <div className="soft-chip inline-flex rounded-full p-1">
                 <button
                   type="button"
                   onClick={() => setLanguage("ru")}
-                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                    language === "ru"
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    language === "ru" ? "ui-accent-strong text-white" : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  Русский
+                  Рус
                 </button>
                 <button
                   type="button"
                   onClick={() => setLanguage("en")}
-                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                    language === "en"
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    language === "en" ? "ui-accent-strong text-white" : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  English
+                  Eng
                 </button>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.phoneNumber")}</label>
-              <Controller
-                name="phone"
-                control={phoneForm.control}
-                render={({ field }) => (
-                  <PhoneInput
-                    value={field.value}
-                    onChange={field.onChange}
-                    onBlur={field.onBlur}
-                    placeholder="917 123 45 67"
-                    error={phoneForm.formState.errors.phone?.message}
-                  />
-                )}
-              />
-            {phoneForm.formState.errors.phone && (
-              <p className="text-red-500 text-sm mt-1">{phoneForm.formState.errors.phone.message}</p>
+
+            <div className="mb-6 grid grid-cols-3 gap-2">
+              {authUxCopy.stages.map((item, index) => {
+                const isCurrent = index === currentStageIndex;
+                const isPassed = index < currentStageIndex;
+                return (
+                  <div
+                    key={item.key}
+                    className={`rounded-2xl border px-3 py-2 text-left transition-colors ${
+                      isCurrent
+                        ? "border-sky-200 bg-sky-50/90"
+                        : isPassed
+                          ? "border-slate-200 bg-white/80"
+                          : "border-slate-200/70 bg-white/45"
+                    }`}
+                  >
+                    <p className={`text-xs font-semibold ${isCurrent || isPassed ? "text-slate-800" : "text-slate-500"}`}>{item.label}</p>
+                    <p className="mt-1 text-[0.6875rem] leading-4 text-slate-400">{item.hint}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {refCode && isNewPhone === true && (
+              <div className="mb-5 rounded-2xl border border-emerald-200/80 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-700">
+                {t("auth.referralBonus")}
+              </div>
             )}
-            </div>
-            <p className="text-xs text-gray-400">
-              {t("auth.codeHint")}
-            </p>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading || sendCodeCooldown > 0}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {loading ? t("auth.sending") : sendCodeCooldown > 0 ? t("auth.retryInSeconds").replace("%s", String(sendCodeCooldown)) : t("auth.sendCode")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setPairingMode("code")}
-              className="w-full text-sm text-blue-600 hover:text-blue-700 py-2"
-            >
-              {t("settings.qrLogin")}
-            </button>
-          </form>
-        ) : step === "username" ? (
-          <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="space-y-4">
-            <p className="text-sm text-gray-600 mb-4 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>{t("auth.verifiedPhone")}:</span>
-              <span className="text-gray-800 font-medium">{phone || existingUser?.phone || "—"}</span>
-              <button
-                type="button"
-                onClick={() => { setStep("phone"); setError(""); }}
-                className="text-blue-600 hover:text-blue-700 hover:underline"
-              >
-                {t("auth.changeNumber")}
-              </button>
-            </p>
-            <p className="text-sm text-gray-600 mb-4">
-              {t("auth.usernameHint")}
-            </p>
-            <div className="flex gap-4 items-start mb-4">
-              <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
-                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
-                <span className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 hover:border-blue-400 transition-colors">
-                  {avatarPreview ? (
-                    <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-gray-400 text-xs font-medium">{t("auth.photoPlaceholder")}</span>
+
+            {pairingToken && pairingLoading ? (
+              <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+                <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-slate-900 border-t-transparent" />
+                <p className="text-sm text-slate-500">{t("common.loading")}</p>
+              </div>
+            ) : pairingMode === "code" ? (
+              <form onSubmit={onPairingCodeSubmit} className="space-y-5">
+                <div className={infoCardClass}>
+                  {t("auth.qrLoginEnterCode")}
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={8}
+                  placeholder="123456"
+                  value={pairingCode}
+                  onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className={`${inputClass} text-center text-xl tracking-[0.35em]`}
+                />
+                {error && <p className="text-sm text-rose-500">{error}</p>}
+                <div className="space-y-3">
+                  <button
+                    type="submit"
+                    disabled={pairingLoading || pairingCode.length !== 6}
+                    className={primaryButtonClass}
+                  >
+                    {pairingLoading ? t("common.loading") : t("auth.loginBtn")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPairingMode(null); setError(""); setPairingCode(""); }}
+                    className={secondaryButtonClass}
+                  >
+                    {t("common.back")}
+                  </button>
+                </div>
+              </form>
+            ) : step === "phone" ? (
+              <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">{t("auth.phoneNumber")}</label>
+                  <div className="rounded-[22px] border border-slate-200/80 bg-white/72 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
+                    <Controller
+                      name="phone"
+                      control={phoneForm.control}
+                      render={({ field }) => (
+                        <PhoneInput
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          placeholder="917 123 45 67"
+                          error={phoneForm.formState.errors.phone?.message}
+                        />
+                      )}
+                    />
+                  </div>
+                  {phoneForm.formState.errors.phone && (
+                    <p className="text-sm text-rose-500">{phoneForm.formState.errors.phone.message}</p>
                   )}
-                </span>
-              </label>
-              <div className="flex-1 min-w-0">
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.nameLabel")}</label>
-                <input
-                  type="text"
-                  autoComplete="name"
-                  placeholder={t("auth.howToAddress")}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  {...usernameForm.register("display_name")}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t("auth.usernameLabel")}</label>
-              <div
-                className={`flex items-center border rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent ${usernameForm.formState.errors.username ? "border-red-500 focus-within:ring-red-500" : "border-gray-300 focus-within:ring-blue-500"}`}
-              >
-                <span className="px-3 py-2 text-gray-500 bg-gray-50 border-r border-gray-200 text-lg font-medium select-none">@</span>
-                <input
-                  type="text"
-                  autoComplete="username"
-                  placeholder="ivan_petrov"
-                  className="flex-1 min-w-0 border-0 rounded-none px-3 py-2 focus:outline-none focus:ring-0 lowercase bg-transparent"
-                  {...usernameForm.register("username", {
-                    onChange: (e) => checkUsernameAvailability(e.target.value),
-                  })}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                {t("auth.usernameRules")}
-              </p>
-              {usernameForm.formState.errors.username && (
-                <p className="text-red-500 text-sm mt-1">{usernameForm.formState.errors.username.message}</p>
-              )}
-              {!usernameForm.formState.errors.username && usernameStatus === "checking" && (
-                <p className="text-xs text-gray-400 mt-1">{t("auth.usernameChecking")}</p>
-              )}
-              {!usernameForm.formState.errors.username && usernameStatus === "available" && (
-                <p className="text-xs text-green-600 mt-1">{t("auth.usernameAvailable")}</p>
-              )}
-              {!usernameForm.formState.errors.username && usernameStatus === "taken" && (
-                <p className="text-xs text-red-500 mt-1">{usernameDetail || t("auth.usernameTakenLive")}</p>
-              )}
-            </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading || usernameStatus === "taken" || usernameStatus === "checking"}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {loading ? t("auth.saving") : t("auth.continue")}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="space-y-4">
-            <p className="text-sm text-gray-600">
-              {codeMethod === "telegram" ? (
-                <>{t("auth.codeSentTelegram")} {phone} ({t("auth.codeSentTelegramFrom")} <strong>@VerificationCodes</strong>)</>
-              ) : (
-                <>{t("auth.codeSentSms")} {phone}</>
-              )}
-              <button
-                type="button"
-                onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); }}
-                className="ml-2 text-blue-600 hover:underline"
-              >
-                {t("auth.changePhone")}
-              </button>
-            </p>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {codeMethod === "telegram" ? t("auth.codeFromTelegram") : t("auth.codeFromSms")}
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="123456"
-                className={`w-full border rounded-lg px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:border-transparent ${codeForm.formState.errors.code ? "border-red-500 focus:ring-red-500" : "border-gray-300 focus:ring-blue-500"}`}
-                {...codeForm.register("code", {
-                  onChange: (e) => {
-                    if (e.target.value.length === 6 && !loading) {
-                      setTimeout(() => codeForm.handleSubmit(onVerifyCode)(), 0);
-                    }
-                  },
-                })}
-              />
-              {codeForm.formState.errors.code && (
-                <p className="text-red-500 text-sm mt-1">{codeForm.formState.errors.code.message}</p>
-              )}
-            </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {loading ? t("auth.checking") : t("auth.loginBtn")}
-            </button>
-          </form>
-        )}
-      </div>
+                </div>
+                <div className={infoCardClass}>{t("auth.codeHint")}</div>
+                {error && <p className="text-sm text-rose-500">{error}</p>}
+                <div className="space-y-3">
+                  <button
+                    type="submit"
+                    disabled={loading || sendCodeCooldown > 0}
+                    className={primaryButtonClass}
+                  >
+                    {loading
+                      ? t("auth.sending")
+                      : sendCodeCooldown > 0
+                        ? t("auth.retryInSeconds").replace("%s", String(sendCodeCooldown))
+                        : t("auth.sendCode")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPairingMode("code")}
+                    className={secondaryButtonClass}
+                  >
+                    {t("settings.qrLogin")}
+                  </button>
+                </div>
+              </form>
+            ) : step === "username" ? (
+              <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="space-y-5">
+                <div className={infoCardClass}>
+                  <span>{t("auth.verifiedPhone")}: </span>
+                  <span className="font-medium text-slate-900">{phone || existingUser?.phone || "—"}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setStep("phone"); setError(""); }}
+                    className="ml-2 font-medium text-sky-700 transition-colors hover:text-sky-800"
+                  >
+                    {t("auth.changeNumber")}
+                  </button>
+                </div>
+                <div className="flex items-start gap-4">
+                  <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
+                    <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
+                    <span className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-300 bg-white/70 text-center text-[0.625rem] font-medium text-slate-400 transition-colors hover:border-sky-300">
+                      {avatarPreview ? (
+                        <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        t("auth.photoPlaceholder")
+                      )}
+                    </span>
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("auth.nameLabel")}</label>
+                    <input
+                      type="text"
+                      autoComplete="name"
+                      placeholder={t("auth.howToAddress")}
+                      className={inputClass}
+                      {...usernameForm.register("display_name")}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">{t("auth.usernameLabel")}</label>
+                  <div className={`flex items-center overflow-hidden rounded-2xl border bg-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${usernameForm.formState.errors.username ? "border-rose-300 focus-within:ring-rose-100" : "border-slate-200 focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
+                    <span className="select-none border-r border-slate-200 bg-slate-50/80 px-4 py-3 text-base font-medium text-slate-500">@</span>
+                    <input
+                      type="text"
+                      autoComplete="username"
+                      placeholder="ivan_petrov"
+                      className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-sm lowercase text-slate-800 focus:outline-none focus:ring-0"
+                      {...usernameForm.register("username", {
+                        onChange: (e) => checkUsernameAvailability(e.target.value),
+                      })}
+                    />
+                  </div>
+                  <p className="text-xs leading-5 text-slate-400">{t("auth.usernameRules")}</p>
+                  {usernameForm.formState.errors.username && (
+                    <p className="text-sm text-rose-500">{usernameForm.formState.errors.username.message}</p>
+                  )}
+                  {!usernameForm.formState.errors.username && usernameStatus === "checking" && (
+                    <p className="text-xs text-slate-400">{t("auth.usernameChecking")}</p>
+                  )}
+                  {!usernameForm.formState.errors.username && usernameStatus === "available" && (
+                    <p className="text-xs text-emerald-600">{t("auth.usernameAvailable")}</p>
+                  )}
+                  {!usernameForm.formState.errors.username && usernameStatus === "taken" && (
+                    <p className="text-xs text-rose-500">{usernameDetail || t("auth.usernameTakenLive")}</p>
+                  )}
+                </div>
+                {error && <p className="text-sm text-rose-500">{error}</p>}
+                <div className="space-y-3">
+                  <button
+                    type="submit"
+                    disabled={loading || usernameStatus === "taken" || usernameStatus === "checking"}
+                    className={primaryButtonClass}
+                  >
+                    {loading ? t("auth.saving") : t("auth.continue")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setStep("phone"); setError(""); }}
+                    className={secondaryButtonClass}
+                  >
+                    {t("common.back")}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="space-y-5">
+                <div className={infoCardClass}>
+                  {codeMethod === "telegram" ? (
+                    <>{t("auth.codeSentTelegram")} {phone} ({t("auth.codeSentTelegramFrom")} <strong>@VerificationCodes</strong>)</>
+                  ) : (
+                    <>{t("auth.codeSentSms")} {phone}</>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); }}
+                    className="ml-2 font-medium text-sky-700 transition-colors hover:text-sky-800"
+                  >
+                    {t("auth.changePhone")}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    {codeMethod === "telegram" ? t("auth.codeFromTelegram") : t("auth.codeFromSms")}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="123456"
+                    className={`${inputClass} text-center text-xl tracking-[0.35em] ${codeForm.formState.errors.code ? "!border-rose-300 !ring-rose-100" : ""}`}
+                    {...codeForm.register("code", {
+                      onChange: (e) => {
+                        if (e.target.value.length === 6 && !loading) {
+                          setTimeout(() => codeForm.handleSubmit(onVerifyCode)(), 0);
+                        }
+                      },
+                    })}
+                  />
+                  {codeForm.formState.errors.code && (
+                    <p className="text-sm text-rose-500">{codeForm.formState.errors.code.message}</p>
+                  )}
+                </div>
+                {error && <p className="text-sm text-rose-500">{error}</p>}
+                <div className="space-y-3">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className={primaryButtonClass}
+                  >
+                    {loading ? t("auth.checking") : t("auth.loginBtn")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); codeForm.reset({ code: "" }); }}
+                    className={secondaryButtonClass}
+                  >
+                    {t("common.back")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
       </div>
 
       {/* Avatar crop modal */}
@@ -540,22 +734,31 @@ export default function AuthPage() {
       {/* Рекомендация включить уведомления после регистрации; по кнопке — запрос разрешения у браузера */}
       {showNotifyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 space-y-4">
-            <p id="notify-modal-title" className="text-gray-800">
+          <div className="auth-glass-card w-full max-w-sm rounded-[28px] p-6 shadow-[0_28px_80px_rgba(15,23,42,0.24)]">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"/>
+                <path d="M10 17a2 2 0 0 0 4 0"/>
+              </svg>
+            </div>
+            <p id="notify-modal-title" className="mb-2 text-xl font-semibold text-slate-900">
+              {t("settings.notifications")}
+            </p>
+            <p className="mb-5 text-sm leading-6 text-slate-500">
               {t("auth.notifyPromptBody")}
             </p>
             <div className="flex gap-3">
               <button
                 type="button"
                 onClick={onEnableNotifications}
-                className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="ui-accent-strong flex-1 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
               >
                 {t("auth.notifyEnable")}
               </button>
               <button
                 type="button"
                 onClick={closeNotifyModalAndNavigate}
-                className="flex-1 py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex-1 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-white"
               >
                 {t("auth.notifyLater")}
               </button>
