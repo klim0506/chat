@@ -8206,7 +8206,7 @@ const MessageBubble = memo(function MessageBubble({
             <button
               type="button"
               onClick={onOpenComments}
-              className={`flex w-full items-center justify-between gap-3 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50/80 hover:text-slate-800 ${
+              className={`group flex w-full cursor-pointer items-center justify-between gap-3 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-blue-500 hover:text-white ${
                 isImageBubble || isSticker
                   ? "mt-0 border-t border-slate-200 bg-white/95 px-3 py-2"
                   : "mx-[-12px] mb-[-6px] mt-2 border-t border-slate-200/80 px-3 py-2"
@@ -8219,7 +8219,7 @@ const MessageBubble = memo(function MessageBubble({
                 </svg>
                 <span className="truncate">{t("channelComments.open")}</span>
               </span>
-              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700">
+              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700 group-hover:bg-white/20 group-hover:text-white">
                 {commentsCount}
               </span>
             </button>
