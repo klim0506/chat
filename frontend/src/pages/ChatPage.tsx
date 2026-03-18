@@ -7633,7 +7633,7 @@ const MessageBubble = memo(function MessageBubble({
           key={emoji}
           type="button"
           onClick={() => handleReaction(emoji)}
-          className={`inline-flex items-center rounded px-1 py-0.5 text-xs transition-colors cursor-pointer shrink-0 ${
+          className={`reaction-chip inline-flex items-center rounded px-1 py-0.5 text-xs cursor-pointer shrink-0 ${
             myReactions.includes(emoji)
               ? "bg-blue-100/80 border border-blue-300/60 text-blue-800"
               : "border border-slate-200/80 text-slate-600 hover:bg-slate-50"
