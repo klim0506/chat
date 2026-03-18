@@ -1,0 +1,84 @@
+# Backup: ISP Manager nginx config for pingychat.com и web.pingychat.com
+# Если web.pingychat.com не открывается — на хосте не было server_name web.pingychat.com.
+# Восстановить конфиг (подставьте свой путь к проекту):
+#   sudo cp /root/chat/docker/nginx/ispmanager-pingychat.com.conf.backup /etc/nginx/vhosts/www-root/pingychat.com.conf
+#   sudo nginx -t && sudo systemctl reload nginx
+# Либо вручную добавить server-блок для web.pingychat.com (прокси на 127.0.0.1:9081).
+#
+# Important: proxy must go to 127.0.0.1:9081 (Docker nginx), NOT 127.0.0.1:8000.
+
+# pingychat.com + web.pingychat.com — reverse proxy to Docker app (127.0.0.1:9081)
+# Do not replace with "PHP/Apache" or proxy to 8000. Backend runs inside Docker.
+# ВАЖНО: web.pingychat.com должен быть в конфиге, иначе приложение по этому домену не открывается.
+upstream pingychat_backend {
+	server 127.0.0.1:9081;
+	keepalive 32;
+}
+
+# HTTP → HTTPS для обоих доменов
+server {
+	server_name pingychat.com www.pingychat.com web.pingychat.com;
+	listen 109.172.100.103:80;
+	listen 80;
+	return 301 https://$host$request_uri;
+}
+
+# pingychat.com + www — лендинг и Wiki
+server {
+	server_name pingychat.com www.pingychat.com;
+	listen 109.172.100.103:443 ssl;
+	listen 443 ssl;
+	ssl_certificate /etc/letsencrypt/live/pingychat.com/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/pingychat.com/privkey.pem;
+	client_max_body_size 200M;
+
+	location / {
+		proxy_pass http://pingychat_backend;
+		proxy_http_version 1.1;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+
+		proxy_connect_timeout 10s;
+		proxy_read_timeout 60s;
+		proxy_send_timeout 60s;
+		proxy_buffering on;
+		proxy_buffer_size 4k;
+		proxy_buffers 8 16k;
+		proxy_busy_buffers_size 24k;
+		proxy_max_temp_file_size 0;
+	}
+}
+
+# web.pingychat.com — приложение (тот же upstream, внутри Docker уже есть прокси к API/WS)
+server {
+	server_name web.pingychat.com;
+	listen 109.172.100.103:443 ssl;
+	listen 443 ssl;
+	ssl_certificate /etc/letsencrypt/live/pingychat.com/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/pingychat.com/privkey.pem;
+	client_max_body_size 512M;
+
+	location / {
+		proxy_pass http://pingychat_backend;
+		proxy_http_version 1.1;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+
+		proxy_connect_timeout 10s;
+		proxy_read_timeout 300s;
+		proxy_send_timeout 300s;
+		proxy_buffering on;
+		proxy_buffer_size 4k;
+		proxy_buffers 8 16k;
+		proxy_busy_buffers_size 24k;
+		proxy_max_temp_file_size 0;
+	}
+}

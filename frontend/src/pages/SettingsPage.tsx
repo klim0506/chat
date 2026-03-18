@@ -1,0 +1,2163 @@
+import { useEffect, useState, useCallback, useRef } from "react";
+
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const handler = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", handler);
+    handler();
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isMobile;
+}
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { authApi, paymentsApi, sessionsApi, foldersApi, channelsApi, type User, type SubscriptionStatus, type SubscriptionPlan, type ReferralProgress, type UserSessionInfo, type ChatFolder, type Channel, type Chat } from "../api/client";
+import { useAuthStore } from "../store/auth";
+import { useChatListStore } from "../store/chatList";
+import { usePreferencesStore, MESSAGE_TEXT_SCALE_MIN, MESSAGE_TEXT_SCALE_MAX, MESSAGE_TEXT_SCALES, type MessageTextScale } from "../store/preferences";
+import { getAvatarInitials } from "../lib/avatar-initials";
+import { toSameOriginMediaUrl } from "../lib/media-url";
+import { AvatarManagerModal } from "../components/AvatarManagerModal";
+import ConfirmModal from "../components/ConfirmModal";
+import CreateChannelModal from "../components/CreateChannelModal";
+import PaymentMethodsModal from "../components/PaymentMethodsModal";
+import SupportModal from "../components/SupportModal";
+
+const FOLDER_COLORS = ["#3B82F6", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#6B7280", "#EC4899", "#14B8A6"];
+const FOLDER_EMOJIS = ["📁", "📂", "💼", "⭐", "🏠", "👥", "💬", "❤️", "🔔", "📢", "🎯", "📱", "🌟", "🔥", "📣", "💡", "🎬", "✅", "📎", "🔒"];
+
+function chatTitle(c: Chat): string {
+  if (c.title) return c.title;
+  if (c.is_personal && c.other_member) {
+    return c.other_member.display_name || (c.other_member as { username?: string }).username || c.other_member.phone || "";
+  }
+  return "";
+}
+import { EmojiPickerPopover } from "../components/EmojiPickerPopover";
+import QrLoginModal from "../components/QrLoginModal";
+
+type SettingsSection = "account" | "chats" | "privacy" | "folders" | "devices" | "premium";
+import { useTranslation, t as tFn, getLocale, type AppLanguage } from "../lib/i18n";
+import { usePremiumModalStore } from "../store/premiumModal";
+import { usePremiumPromptStore } from "../store/premiumPrompt";
+
+function copyToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+}
+
+function getStatusLabel(status: string, lang: AppLanguage): string {
+  if (status === "trial") return tFn("status.trial", lang);
+  if (status === "active") return tFn("status.active", lang);
+  if (status === "past_due") return tFn("status.past_due", lang);
+  if (status === "cancelled") return tFn("status.cancelled", lang);
+  return tFn("settings.noSubscription", lang);
+}
+
+const SETTINGS_NAV = [
+  { id: "account", labelKey: "settings.navAccount", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
+  { id: "chats", labelKey: "settings.navChatSettings", icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" },
+  { id: "privacy", labelKey: "settings.navPrivacy", icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" },
+  { id: "folders", labelKey: "settings.navFolders", icon: "M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" },
+  { id: "devices", labelKey: "settings.navDevices", icon: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
+  { id: "premium", labelKey: "settings.navPremium", icon: "M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" },
+] as const;
+
+function SettingsNav({ section, onSection, t, hasSubscription }: { section: SettingsSection; onSection: (s: SettingsSection) => void; t: ReturnType<typeof useTranslation>["t"]; hasSubscription: boolean }) {
+  const navItems = SETTINGS_NAV.filter((item) => {
+    if (item.id === "privacy" || item.id === "folders") return hasSubscription;
+    return true;
+  });
+  return (
+    <nav className="flex flex-col gap-0.5">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onSection(item.id)}
+          className={`flex items-center gap-3 px-4 h-12 rounded-2xl text-left transition-colors ${
+            section === item.id
+              ? "bg-blue-50/80 text-blue-700 font-semibold shadow-[inset_0_0_0_1px_rgba(59,130,246,0.22)]"
+              : "text-slate-600 hover:bg-slate-50/80 hover:text-slate-900"
+          }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+          </svg>
+          <span>{t(item.labelKey)}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function ReferralProgressBar({ progress, t, lang }: { progress: ReferralProgress; t: ReturnType<typeof useTranslation>["t"]; lang: AppLanguage }) {
+  const { invited_count, next_milestone, milestones } = progress;
+  const nextTier = next_milestone ?? 80;
+  const nextMonths = milestones[String(nextTier)] ?? 12;
+  const progressPct = nextTier > 0 ? Math.min(100, (invited_count / nextTier) * 100) : 100;
+  const nextLabel = next_milestone
+    ? (lang === "ru" ? `${next_milestone} → ${nextMonths} мес.` : `${next_milestone} → ${nextMonths} mo.`)
+    : null;
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-2xl font-bold text-slate-800">{invited_count}</span>
+        <span className="text-sm text-slate-500">{t("sub.invitedCount").toLowerCase()}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="h-2.5 bg-slate-200 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-blue-500 rounded-full transition-all duration-300 min-w-[2px]"
+            style={{ width: `${Math.max(progressPct, invited_count > 0 ? 2 : 0)}%` }}
+          />
+        </div>
+        {nextLabel && <p className="text-xs text-slate-500 mt-0.5">{nextLabel}</p>}
+      </div>
+    </div>
+  );
+}
+
+function SubscriptionPlansBlock({
+  plans,
+  subLoading,
+  onSubscribe,
+  paymentError,
+  t,
+  lang,
+}: {
+  plans: SubscriptionPlan[];
+  subLoading: boolean;
+  onSubscribe: (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) => void;
+  paymentError?: string;
+  t: ReturnType<typeof useTranslation>["t"];
+  lang: AppLanguage;
+}) {
+  const [mode, setMode] = useState<"buy" | "gift">("buy");
+  const [selectedPlan, setSelectedPlan] = useState<1 | 6 | 12 | 24>(1);
+  const [giftQuery, setGiftQuery] = useState("");
+  const [giftResults, setGiftResults] = useState<{ id: string; display_name: string; username?: string | null }[]>([]);
+  const [giftRecipient, setGiftRecipient] = useState<{ id: string; display_name: string } | null>(null);
+
+  useEffect(() => {
+    if (mode !== "gift" || !giftQuery.trim() || giftQuery.length < 2) {
+      setGiftResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      authApi
+        .searchUsers(giftQuery.trim())
+        .then((r) => setGiftResults(r.data.results.slice(0, 5)))
+        .catch(() => setGiftResults([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [mode, giftQuery]);
+
+  const defaultPlans: SubscriptionPlan[] = plans.length > 0 ? plans : [
+    { months: 1, total_rub: 299, per_month_rub: 299, original_rub: null, discount_pct: 0, savings_rub: null },
+    { months: 6, total_rub: 1374, per_month_rub: 229, original_rub: 1794, discount_pct: 23, savings_rub: 420 },
+    { months: 12, total_rub: 1908, per_month_rub: 159, original_rub: 3588, discount_pct: 47, savings_rub: 1680 },
+    { months: 24, total_rub: 2856, per_month_rub: 119, original_rub: 7176, discount_pct: 60, savings_rub: 4320 },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm font-medium text-slate-700">{t("sub.buyOrGift")}</p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => { setMode("buy"); setGiftRecipient(null); setGiftQuery(""); }}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            mode === "buy"
+              ? "bg-slate-200 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
+              : "bg-transparent border border-slate-300 text-slate-600 hover:bg-slate-50/80 hover:border-slate-400"
+          }`}
+        >
+          {t("sub.buy")}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setMode("gift"); setGiftRecipient(null); setGiftQuery(""); }}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            mode === "gift"
+              ? "bg-slate-200 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
+              : "bg-transparent border border-slate-300 text-slate-600 hover:bg-slate-50/80 hover:border-slate-400"
+          }`}
+        >
+          {t("sub.gift")}
+        </button>
+      </div>
+
+      {mode === "gift" && (
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-slate-600">{t("sub.giftRecipient")}</label>
+          <input
+            type="text"
+            value={giftQuery}
+            onChange={(e) => setGiftQuery(e.target.value)}
+            placeholder={t("sub.searchUser")}
+            className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+          />
+          {giftResults.length > 0 && !giftRecipient && (
+            <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-32 overflow-y-auto">
+              {giftResults.map((u) => (
+                <li key={u.id}>
+                  <button
+                    type="button"
+                    onClick={() => { setGiftRecipient({ id: u.id, display_name: u.display_name }); setGiftQuery(u.display_name); setGiftResults([]); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                  >
+                    {u.display_name}{u.username ? ` @${u.username}` : ""}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {giftRecipient && (
+            <p className="text-sm text-slate-600">
+              {t("sub.giftingTo")}: <strong>{giftRecipient.display_name}</strong>
+              <button type="button" onClick={() => setGiftRecipient(null)} className="ml-2 text-red-600 text-xs">
+                {t("common.cancel")}
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {defaultPlans.map((p) => {
+          const discount = p.discount_pct ?? 0;
+          const hasOriginal = p.original_rub != null && p.original_rub > p.total_rub;
+          return (
+            <button
+              key={p.months}
+              type="button"
+              onClick={() => setSelectedPlan(p.months as 1 | 6 | 12 | 24)}
+              className={`relative w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-colors ${
+                selectedPlan === p.months ? "bg-blue-50/80 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.30)]" : "hover:bg-slate-50/70"
+              }`}
+              style={{ borderColor: selectedPlan === p.months ? "rgba(59,130,246,0.40)" : "var(--border-subtle)" }}
+            >
+              {discount > 0 && (
+                <span className="absolute top-0 right-2 -translate-y-1/2 px-2 py-0.5 rounded-md bg-green-500 text-white text-xs font-bold shadow-sm">
+                  −{discount}%
+                </span>
+              )}
+              <div className="text-left flex-1 min-w-0">
+                <span className="font-medium text-slate-800 block">
+                  {p.months === 1 ? (lang === "ru" ? "Ежемесячно" : "Monthly") :
+                   p.months === 6 ? (lang === "ru" ? "На полгода" : "6 months") :
+                   p.months === 12 ? (lang === "ru" ? "Ежегодно" : "Annually") :
+                   (lang === "ru" ? "На 2 года" : "2 years")}
+                </span>
+                <p className="text-sm text-slate-600 mt-1">
+                  {hasOriginal && (
+                    <span className="line-through text-slate-400 mr-2">{p.original_rub} ₽</span>
+                  )}
+                  <span className="font-medium text-slate-800">{p.total_rub} ₽</span>
+                </p>
+              </div>
+              <div className="text-right shrink-0 ml-3">
+                <p className="font-semibold text-slate-800">
+                  {p.per_month_rub} {t("sub.pricePerMonth")}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={() => {
+          if (mode === "gift" && !giftRecipient) return;
+          onSubscribe(selectedPlan, mode === "gift" ? giftRecipient?.id : undefined);
+        }}
+        disabled={subLoading || (mode === "gift" && !giftRecipient)}
+        className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
+      >
+        {subLoading ? t("settings.goToPayment") : (mode === "gift" ? t("sub.giftSubscribe") : t("sub.subscribe"))}
+      </button>
+      {paymentError && (
+        <p className="text-sm text-red-600 mt-2" role="alert">
+          {paymentError}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SessionsSection() {
+  const { t, lang } = useTranslation();
+  const [sessions, setSessions] = useState<UserSessionInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [terminating, setTerminating] = useState<string | null>(null);
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false);
+
+  useEffect(() => {
+    sessionsApi
+      .list()
+      .then((r) => setSessions(r.data))
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleTerminate = async (id: string) => {
+    setTerminating(id);
+    try {
+      await sessionsApi.terminate(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      /* ignore */
+    }
+    setTerminating(null);
+  };
+
+  const handleLogoutAll = async () => {
+    setLogoutAllLoading(true);
+    try {
+      await sessionsApi.logoutAll();
+      setSessions((prev) => prev.filter((s) => s.is_current));
+    } catch {
+      /* ignore */
+    }
+    setLogoutAllLoading(false);
+  };
+
+  if (loading) return <p className="text-sm text-slate-500">{t("common.loading")}</p>;
+  if (sessions.length === 0)
+    return <p className="text-sm text-slate-500">{t("settings.noSessions")}</p>;
+
+  const otherSessions = sessions.filter((s) => !s.is_current);
+  const locale = getLocale(lang);
+
+  return (
+    <div className="space-y-3">
+      {sessions.map((s) => (
+        <div
+          key={s.id}
+          className={`flex items-center justify-between py-2.5 px-3 rounded-2xl border ${s.is_current ? "bg-blue-50/70" : ""}`}
+          style={{ background: s.is_current ? "rgba(59,130,246,0.08)" : "var(--surface-2)", borderColor: "var(--border-subtle)" }}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold truncate" style={{ color: "var(--text-0)" }}>
+                {s.device_label || t("settings.unknownDevice")}
+              </p>
+              {s.is_current && (
+                <span className="shrink-0 text-[0.625rem] font-semibold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                  {t("settings.currentSession")}
+                </span>
+              )}
+            </div>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-2)" }}>
+              {s.ip_address && <span>{s.ip_address} · </span>}
+              {t("settings.loginAt")}: {new Date(s.created_at).toLocaleDateString(locale)}{" "}
+              {new Date(s.created_at).toLocaleTimeString(locale, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {!s.is_current && (
+                <span>
+                  {" "}
+                  · {t("settings.activeAt")}:{" "}
+                  {new Date(s.last_active).toLocaleDateString(locale)}{" "}
+                  {new Date(s.last_active).toLocaleTimeString(locale, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </p>
+          </div>
+          {!s.is_current && (
+            <button
+              type="button"
+              onClick={() => handleTerminate(s.id)}
+              disabled={terminating === s.id}
+              className="shrink-0 ml-3 text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+            >
+              {terminating === s.id ? "..." : t("settings.terminateSession")}
+            </button>
+          )}
+        </div>
+      ))}
+      {otherSessions.length > 0 && (
+        <button
+          type="button"
+          onClick={handleLogoutAll}
+          disabled={logoutAllLoading}
+          className="w-full mt-1 py-2.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {logoutAllLoading
+            ? t("settings.terminatingAll")
+            : `${t("settings.terminateAllOtherSessions")} (${otherSessions.length})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SoundsSection() {
+  const { t } = useTranslation();
+  const soundEnabled = usePreferencesStore((s) => s.soundEnabled);
+  const soundSend = usePreferencesStore((s) => s.soundSend);
+  const soundReceive = usePreferencesStore((s) => s.soundReceive);
+  const soundMention = usePreferencesStore((s) => s.soundMention);
+  const setSoundEnabled = usePreferencesStore((s) => s.setSoundEnabled);
+  const setSoundSend = usePreferencesStore((s) => s.setSoundSend);
+  const setSoundReceive = usePreferencesStore((s) => s.setSoundReceive);
+  const setSoundMention = usePreferencesStore((s) => s.setSoundMention);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-800">{t("settings.enableSounds")}</p>
+        <button
+          type="button"
+          onClick={() => setSoundEnabled(!soundEnabled)}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+            soundEnabled ? "bg-blue-600" : "bg-slate-200"
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+              soundEnabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <div className={`space-y-3 pl-1 ${!soundEnabled ? "opacity-50 pointer-events-none" : ""}`}>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-700">{t("settings.soundSend")}</span>
+          <button
+            type="button"
+            disabled={!soundEnabled}
+            onClick={() => setSoundSend(!soundSend)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
+              soundSend ? "bg-blue-600" : "bg-slate-200"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                soundSend ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-700">{t("settings.soundReceive")}</span>
+          <button
+            type="button"
+            disabled={!soundEnabled}
+            onClick={() => setSoundReceive(!soundReceive)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
+              soundReceive ? "bg-blue-600" : "bg-slate-200"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                soundReceive ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-700">{t("settings.soundMention")}</span>
+          <button
+            type="button"
+            disabled={!soundEnabled}
+            onClick={() => setSoundMention(!soundMention)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
+              soundMention ? "bg-blue-600" : "bg-slate-200"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                soundMention ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const MESSAGE_PREVIEW_BASE_PX = 13;
+
+const SCALE_PRESET_KEYS = ["settings.scaleSmall", "settings.scaleReduced", "settings.scaleNormal", "settings.scaleLarge", "settings.scaleExtraLarge"] as const;
+
+function MessageScaleSlider() {
+  const { t } = useTranslation();
+  const scale = usePreferencesStore((s) => s.messageTextScale);
+  const setScale = usePreferencesStore((s) => s.setMessageTextScale);
+  const currentPresetIndex = MESSAGE_TEXT_SCALES.reduce((best, s, i) =>
+    Math.abs(s - scale) < Math.abs(MESSAGE_TEXT_SCALES[best] - scale) ? i : best
+  , 0);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {MESSAGE_TEXT_SCALES.map((value, i) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setScale(value as MessageTextScale)}
+            className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
+              currentPresetIndex === i
+                ? "bg-blue-600 text-white shadow-sm"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            {t(SCALE_PRESET_KEYS[i])}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={MESSAGE_TEXT_SCALE_MIN}
+          max={MESSAGE_TEXT_SCALE_MAX}
+          step={0.01}
+          value={scale}
+          onChange={(e) => setScale(parseFloat(e.target.value) as MessageTextScale)}
+          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer"
+        />
+        <span className="text-sm font-medium text-slate-600 w-11 tabular-nums shrink-0">{Math.round(scale * 100)}%</span>
+      </div>
+      <div
+        className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 p-4 shadow-sm"
+        style={{ minHeight: 80 }}
+      >
+        <p className="text-[0.625rem] text-slate-400 mb-2 font-medium uppercase tracking-wider">{t("settings.scalePreview")}</p>
+        <div className="flex gap-2 items-end">
+          <div className="w-8 h-8 rounded-full bg-slate-300 shrink-0" />
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <div
+              className="rounded-2xl rounded-tl-sm px-3 py-1.5 bg-blue-500 text-white shadow-sm max-w-[180px] break-words"
+              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale}px` }}
+            >
+              {t("settings.scalePreviewMessage1")}
+            </div>
+            <div
+              className="rounded-2xl rounded-tl-sm px-3 py-1.5 bg-slate-200 text-slate-700 shadow-sm max-w-[140px] break-words"
+              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale * 0.95}px` }}
+            >
+              {t("settings.scalePreviewMessage2")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: ReturnType<typeof useTranslation>["t"]; onFoldersUpdated?: () => void; hasSubscription?: boolean }) {
+  const folderLayout = usePreferencesStore((s) => s.folderLayout);
+  const setFolderLayout = usePreferencesStore((s) => s.setFolderLayout);
+  const folderColorPersonal = usePreferencesStore((s) => s.folderColorPersonal);
+  const setFolderColorPersonal = usePreferencesStore((s) => s.setFolderColorPersonal);
+  const folderColorUnread = usePreferencesStore((s) => s.folderColorUnread);
+  const setFolderColorUnread = usePreferencesStore((s) => s.setFolderColorUnread);
+  const folderColorArchive = usePreferencesStore((s) => s.folderColorArchive);
+  const setFolderColorArchive = usePreferencesStore((s) => s.setFolderColorArchive);
+  const foldersEnabled = usePreferencesStore((s) => s.foldersEnabled);
+  const setFoldersEnabled = usePreferencesStore((s) => s.setFoldersEnabled);
+  const [folders, setFolders] = useState<ChatFolder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null);
+  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmoji, setEditEmoji] = useState("📁");
+  const [editColor, setEditColor] = useState("#3B82F6");
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const colorPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const chats = useChatListStore((s) => s.chats);
+  const storeUpdateChat = useChatListStore((s) => s.updateChat);
+  useEffect(() => {
+    if (!colorPickerOpen && !emojiPickerOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const inColor = colorPickerRef.current?.contains(target);
+      const inEmoji = emojiPickerRef.current?.contains(target);
+      if (!inColor && !inEmoji) {
+        setColorPickerOpen(null);
+        setEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [colorPickerOpen, emojiPickerOpen]);
+
+  const loadFolders = useCallback(() => {
+    foldersApi.list()
+      .then((r) => setFolders(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setFolders([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadFolders();
+  }, [loadFolders]);
+
+  const handleUpdateFolderColor = async (folder: ChatFolder, color: string) => {
+    try {
+      const { data } = await foldersApi.update(folder.id, { color });
+      setFolders((prev) => prev.map((f) => (f.id === folder.id ? data : f)));
+      setColorPickerOpen(null);
+      setEditColor(color);
+      onFoldersUpdated?.();
+    } catch { /* ignore */ }
+  };
+
+  const handleSaveFolder = async (folder: ChatFolder) => {
+    const trimmed = editName.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      const { data } = await foldersApi.update(folder.id, { name: trimmed, emoji: editEmoji || undefined, color: editColor || undefined });
+      setFolders((prev) => prev.map((f) => (f.id === folder.id ? data : f)));
+      setExpandedFolderId(null);
+      onFoldersUpdated?.();
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const handleAddChatToFolder = async (folderId: string, chatId: string) => {
+    setAdding(chatId);
+    try {
+      await foldersApi.addChat(folderId, chatId);
+      const chat = chats.find((c) => c.id === chatId);
+      if (chat) storeUpdateChat(chatId, { folder_ids: [...(chat.folder_ids || []), folderId] });
+    } catch { /* ignore */ }
+    setAdding(null);
+  };
+
+  const handleRemoveChatFromFolder = async (folderId: string, chatId: string) => {
+    setRemoving(chatId);
+    try {
+      await foldersApi.removeChat(folderId, chatId);
+      const chat = chats.find((c) => c.id === chatId);
+      if (chat) storeUpdateChat(chatId, { folder_ids: (chat.folder_ids || []).filter((id) => id !== folderId) });
+    } catch { /* ignore */ }
+    setRemoving(null);
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(id);
+    try {
+      await foldersApi.delete(id);
+      setFolders((prev) => prev.filter((f) => f.id !== id));
+      onFoldersUpdated?.();
+    } catch { /* ignore */ }
+    setDeleting(null);
+  };
+
+  const handleToggleFolders = () => {
+    if (!foldersEnabled && !hasSubscription) {
+      usePremiumPromptStore.getState().openPrompt("folders");
+      return;
+    }
+    setFoldersEnabled(!foldersEnabled);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Переключатель вкл/выкл папки: бесплатные пользователи не могут включить */}
+      <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
+        <p className="text-sm font-medium text-slate-800">{t("folders.enabled")}</p>
+        <button
+          type="button"
+          onClick={handleToggleFolders}
+          className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+            foldersEnabled ? "bg-blue-600 cursor-pointer" : hasSubscription ? "bg-slate-200 cursor-pointer" : "bg-slate-200 cursor-not-allowed opacity-80"
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+              foldersEnabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      <div className={`space-y-6 ${!foldersEnabled ? "opacity-50 pointer-events-none select-none" : ""}`}>
+      {loading ? (
+        <p className="text-sm text-slate-500">{t("common.loading")}</p>
+      ) : (
+      <>
+      <div>
+        <h3 className="text-sm font-medium text-slate-700 mb-2">{t("folders.tabsView")}</h3>
+        <div className="flex flex-wrap gap-3">
+          <label
+            className="flex items-center gap-2 cursor-pointer select-none"
+            onClick={() => setFolderLayout("left")}
+          >
+            <input
+              type="radio"
+              name="folderLayout"
+              value="left"
+              checked={folderLayout === "left"}
+              onChange={() => setFolderLayout("left")}
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-slate-700">{t("folders.tabsLeft")}</span>
+          </label>
+          <label
+            className="flex items-center gap-2 cursor-pointer select-none"
+            onClick={() => setFolderLayout("top")}
+          >
+            <input
+              type="radio"
+              name="folderLayout"
+              value="top"
+              checked={folderLayout === "top"}
+              onChange={() => setFolderLayout("top")}
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-slate-700">{t("folders.tabsTop")}</span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <h3 className="text-sm font-medium text-slate-700 mb-2">{t("folders.standardFolders")}</h3>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="relative shrink-0" ref={colorPickerOpen === "personal" ? colorPickerRef : undefined}>
+                <button type="button" onClick={() => setColorPickerOpen((p) => (p === "personal" ? null : "personal"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorPersonal }} title={t("folders.color")} />
+                {colorPickerOpen === "personal" && (
+                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                    <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
+                      <button key={c} type="button" onClick={() => { setFolderColorPersonal(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorPersonal === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
+                    ))}</div>
+                  </div>
+                )}
+              </div>
+              <span className="text-sm font-medium text-slate-800">{t("folders.standardPersonal")}</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="relative shrink-0" ref={colorPickerOpen === "unread" ? colorPickerRef : undefined}>
+                <button type="button" onClick={() => setColorPickerOpen((p) => (p === "unread" ? null : "unread"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorUnread }} title={t("folders.color")} />
+                {colorPickerOpen === "unread" && (
+                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                    <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
+                      <button key={c} type="button" onClick={() => { setFolderColorUnread(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorUnread === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
+                    ))}</div>
+                  </div>
+                )}
+              </div>
+              <span className="text-sm font-medium text-slate-800">{t("folders.standardUnread")}</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="relative shrink-0" ref={colorPickerOpen === "archive" ? colorPickerRef : undefined}>
+                <button type="button" onClick={() => setColorPickerOpen((p) => (p === "archive" ? null : "archive"))} className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0" style={{ backgroundColor: folderColorArchive }} title={t("folders.color")} />
+                {colorPickerOpen === "archive" && (
+                  <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                    <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
+                      <button key={c} type="button" onClick={() => { setFolderColorArchive(c); setColorPickerOpen(null); }} className={`w-6 h-6 rounded border-2 transition-all ${folderColorArchive === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
+                    ))}</div>
+                  </div>
+                )}
+              </div>
+              <span className="text-sm font-medium text-slate-800">{t("folders.standardArchive")}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+      {/* TODO: re-enable creation of new (custom) folders */}
+      {/* <button
+        type="button"
+        onClick={() => setShowCreateModal(true)}
+        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+        {t("folders.create")}
+      </button> */}
+      {folders.length > 0 && (
+        <ul className="space-y-3">
+          {folders.map((f) => (
+            <li key={f.id} className="rounded-lg bg-slate-50 border border-slate-200 overflow-hidden">
+              <div ref={colorPickerOpen === f.id ? colorPickerRef : undefined}>
+              <div className="flex items-center justify-between py-2.5 px-3">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setColorPickerOpen((p) => (p === f.id ? null : f.id))}
+                      className="w-3 h-3 rounded-full border border-slate-300 hover:ring-2 hover:ring-slate-300 transition-shadow shrink-0"
+                      style={{ backgroundColor: f.color || "#3B82F6" }}
+                      title={t("folders.color")}
+                    />
+                    {colorPickerOpen === f.id && (
+                      <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {FOLDER_COLORS.map((c) => (
+                            <button key={c} type="button" onClick={() => handleUpdateFolderColor(f, c)} className={`w-6 h-6 rounded border-2 transition-all ${(f.color || "#3B82F6") === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-lg shrink-0">{f.emoji || "📁"}</span>
+                  <span className="text-sm font-medium text-slate-800 truncate">{f.name}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button type="button" onClick={() => { setExpandedFolderId(expandedFolderId === f.id ? null : f.id); if (expandedFolderId !== f.id) { setEditName(f.name); setEditEmoji(f.emoji || ""); setEditColor(f.color || "#3B82F6"); } }} className="p-1 text-slate-400 hover:text-blue-600" title={t("folders.settings")}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                  </button>
+                  <button type="button" onClick={() => handleDelete(f.id)} disabled={deleting === f.id} className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50">
+                    {deleting === f.id ? "…" : t("common.delete")}
+                  </button>
+                </div>
+              </div>
+              {expandedFolderId === f.id && (
+                <div className="border-t border-slate-200 px-3 py-3 space-y-3">
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t("folders.namePlaceholder")} className="px-2 py-1 text-sm border border-slate-200 rounded w-32" />
+                    <div className="relative" ref={emojiPickerOpen ? emojiPickerRef : undefined}>
+                      <button type="button" onClick={() => setEmojiPickerOpen((v) => !v)} className="text-xl px-1 py-0.5 border border-slate-200 rounded">{editEmoji || "📁"}</button>
+                      {emojiPickerOpen && (
+                        <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                          {FOLDER_EMOJIS.map((e) => (
+                            <button key={e} type="button" onClick={() => { setEditEmoji(e); setEmojiPickerOpen(false); }} className="text-lg p-1 hover:bg-slate-100 rounded">{e}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <button type="button" onClick={() => setColorPickerOpen((p) => (p === f.id ? null : f.id))} className="w-6 h-6 rounded border border-slate-300" style={{ backgroundColor: editColor }} title={t("folders.color")} />
+                      {colorPickerOpen === f.id && (
+                        <div className="absolute left-0 top-full mt-1 z-50 p-2 bg-white rounded-lg border border-slate-200 shadow-lg">
+                          <div className="grid grid-cols-4 gap-1.5">{FOLDER_COLORS.map((c) => (
+                            <button key={c} type="button" onClick={() => { setEditColor(c); handleUpdateFolderColor(f, c); }} className={`w-6 h-6 rounded border-2 transition-all ${editColor === c ? "border-slate-800 scale-110" : "border-slate-200 hover:border-slate-400"}`} style={{ backgroundColor: c }} />
+                          ))}</div>
+                        </div>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => handleSaveFolder(f)} disabled={saving || !editName.trim()} className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "…" : t("common.save")}</button>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-2">{t("folders.chatsInFolder")}</p>
+                    <div className="space-y-1 mb-2">
+                      {chats.filter((c) => (c.folder_ids || []).includes(f.id)).map((chat) => (
+                        <div key={chat.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-white border border-slate-100">
+                          <span className="text-sm truncate">{chatTitle(chat)}</span>
+                          <button type="button" onClick={() => handleRemoveChatFromFolder(f.id, chat.id)} disabled={removing === chat.id} className="text-red-500 text-xs hover:text-red-700">{removing === chat.id ? "…" : t("common.remove")}</button>
+                        </div>
+                      ))}
+                    </div>
+                    <select
+                      value=""
+                      onChange={(e) => { const id = e.target.value; if (id) { handleAddChatToFolder(f.id, id); e.target.value = ""; } }}
+                      disabled={!!adding}
+                      className="w-full text-sm border border-slate-200 rounded px-2 py-1.5 disabled:opacity-50"
+                    >
+                      <option value="">{t("folders.addChatToFolder")}</option>
+                      {chats.filter((c) => !(c.folder_ids || []).includes(f.id)).map((c) => (
+                        <option key={c.id} value={c.id}>{chatTitle(c)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* TODO: re-enable creation of new (custom) folders */}
+      {/* <CreateFolderModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={(folder) => {
+          setFolders((prev) => [...prev, folder].sort((a, b) => a.position - b.position));
+          setShowCreateModal(false);
+          onFoldersUpdated?.();
+        }}
+      /> */}
+      </div>
+      </>
+      )}
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsPage({
+  embed = false,
+  onFoldersUpdated,
+  onMobileInSubSection,
+}: {
+  embed?: boolean;
+  onFoldersUpdated?: () => void;
+  /** Called when on mobile and user is viewing a subsection (e.g. Account); used by parent to hide top "back to chats" header */
+  onMobileInSubSection?: (value: boolean) => void;
+}) {
+  const { t, lang } = useTranslation();
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section") as SettingsSection | null;
+  const setSection = (s: SettingsSection) => setSearchParams({ section: s });
+  const [mobileShowContent, setMobileShowContent] = useState(false);
+  const clearTokens = useAuthStore((s) => s.clearTokens);
+  const theme = usePreferencesStore((s) => s.theme);
+  const setTheme = usePreferencesStore((s) => s.setTheme);
+  const language = usePreferencesStore((s) => s.language);
+  const setLanguage = usePreferencesStore((s) => s.setLanguage);
+  const messageAlignment = usePreferencesStore((s) => s.messageAlignment);
+  const setMessageAlignment = usePreferencesStore((s) => s.setMessageAlignment);
+
+  const [user, setUser] = useState<User | null>(null);
+  const [sub, setSub] = useState<SubscriptionStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [errorToast, setErrorToast] = useState("");
+  useEffect(() => {
+    if (!errorToast) return;
+    const t = setTimeout(() => setErrorToast(""), 6000);
+    return () => clearTimeout(t);
+  }, [errorToast]);
+
+  const section: SettingsSection = sectionParam && SETTINGS_NAV.some((n) => n.id === sectionParam) ? sectionParam : "account";
+  const mainContentRef = useRef<HTMLElement | null>(null);
+
+  /* edit state */
+  const [editing, setEditing] = useState(false);
+  const [editingBio, setEditingBio] = useState(false);
+  const [editingBirthday, setEditingBirthday] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [bio, setBio] = useState("");
+  const [birthday, setBirthday] = useState("");
+  const [birthdayHideYear, setBirthdayHideYear] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [usernameCopied, setUsernameCopied] = useState(false);
+  const [usernameShake, setUsernameShake] = useState(false);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [showQrLoginModal, setShowQrLoginModal] = useState(false);
+  const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [myChannels, setMyChannels] = useState<Channel[]>([]);
+
+  /* subscription */
+  const [subLoading, setSubLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [referralShake, setReferralShake] = useState(false);
+  const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
+  const [showSubscriptionMenu, setShowSubscriptionMenu] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const subscriptionPlansRef = useRef<HTMLDivElement>(null);
+
+  const loadProfile = useCallback(() => {
+    setError("");
+    setLoading(true);
+    authApi.me()
+      .then((userRes) => {
+        setUser(userRes.data);
+        setDisplayName(userRes.data.display_name || "");
+        setUsername(userRes.data.username ?? "");
+        setBio(userRes.data.bio || "");
+        setBirthday(userRes.data.birthday || "");
+        setBirthdayHideYear(Boolean(userRes.data.birthday_hide_year));
+        return paymentsApi.getSubscription().then((subRes) => {
+          setSub(subRes.data);
+        }).catch(() => setSub(null));
+      })
+      .catch(() => {
+        const msg = t("settings.loadProfileError");
+        setError(msg);
+        setErrorToast(msg);
+      })
+      .finally(() => setLoading(false));
+  }, [t]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  useEffect(() => {
+    if (section === "account" && user && sub?.is_valid) {
+      const uid = user.id;
+      channelsApi.list()
+        .then((res) => {
+          const mine = (res.data.results || []).filter((c) => c.owner.id === uid);
+          setMyChannels(mine);
+        })
+        .catch(() => setMyChannels([]));
+    } else if (section === "account" && user && sub && !sub.is_valid) {
+      setMyChannels([]);
+    }
+  }, [section, user?.id, sub?.is_valid]);
+
+  useEffect(() => {
+    if (embed) onMobileInSubSection?.(isMobile && mobileShowContent);
+  }, [embed, isMobile, mobileShowContent, onMobileInSubSection]);
+
+  /* Плавная прокрутка к началу при смене раздела — убирает дёрганье */
+  useEffect(() => {
+    mainContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [section]);
+
+  const handleChannelCreated = useCallback(() => {
+    // Refresh "my channels" list so newly created channel is available immediately.
+    if (!user?.id) return;
+    channelsApi.list()
+      .then((res) => {
+        const mine = (res.data.results || []).filter((c) => c.owner.id === user.id);
+        setMyChannels(mine);
+      })
+      .catch(() => {});
+  }, [user?.id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const res = await authApi.updateMe({ display_name: displayName });
+      setUser(res.data);
+      setEditing(false);
+      setSaveMsg(t("common.saved"));
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch {
+      setSaveMsg(t("common.saveError"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveUsername = async () => {
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const val = username.trim() || undefined;
+      const res = await authApi.updateMe({ username: val ?? null });
+      setUser(res.data);
+      setEditingUsername(false);
+      setUsername(res.data.username ?? "");
+      setSaveMsg(t("common.saved"));
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { username?: string[]; detail?: string } } })?.response?.data;
+      const err = Array.isArray(msg?.username) ? msg!.username[0] : (msg?.detail ?? t("common.saveError"));
+      setSaveMsg(typeof err === "string" ? err : t("common.saveError"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveBio = async () => {
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const res = await authApi.updateMe({ bio: bio.trim() || undefined });
+      setUser(res.data);
+      setEditingBio(false);
+      setSaveMsg(t("common.saved"));
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch {
+      setSaveMsg(t("common.saveError"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveBirthday = async () => {
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const val = birthday.trim() || undefined;
+      const res = await authApi.updateMe({
+        birthday: val ?? null,
+        birthday_hide_year: birthdayHideYear,
+      });
+      setUser(res.data);
+      setEditingBirthday(false);
+      setBirthday(res.data.birthday || "");
+      setBirthdayHideYear(Boolean(res.data.birthday_hide_year));
+      setSaveMsg(t("common.saved"));
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch {
+      setSaveMsg(t("common.saveError"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAvatarModalUpdated = () => {
+    authApi.me().then((res) => setUser(res.data));
+  };
+
+  const [paymentError, setPaymentError] = useState("");
+  const handleSubscribe = async (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) => {
+    setPaymentError("");
+    setSubLoading(true);
+    try {
+      const returnUrl = window.location.origin + window.location.pathname + "?paid=1";
+      const { data } = await paymentsApi.subscribe({
+        return_url: returnUrl,
+        plan_months: planMonths,
+        ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
+      });
+      if (data.confirmation_url) {
+        window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      const subRes = await paymentsApi.getSubscription();
+      setSub(subRes.data);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const msg = detail || t("settings.paymentError");
+      setPaymentError(msg);
+      setErrorToast(msg);
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  const handleCopyReferral = () => {
+    const code = user?.referral_code;
+    if (!code) return;
+    const link = `${window.location.origin}/auth?ref=${code}`;
+    copyToClipboard(link);
+    setReferralShake(true);
+    setTimeout(() => setReferralShake(false), 400);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const handleLogout = async () => {
+    await authApi.logout().catch(() => {});
+    clearTokens();
+    navigate("/auth");
+  };
+
+  const plans = sub?.plans ?? [];
+  const referralProgress = sub?.referral_progress ?? { invited_count: 0, claimed_tiers: [], next_milestone: 10, milestones: { "10": 1, "40": 6, "80": 12 } };
+
+  const handleSectionSelect = (s: SettingsSection) => {
+    setSection(s);
+    if (isMobile) setMobileShowContent(true);
+  };
+
+  const currentSectionLabel = SETTINGS_NAV.find((n) => n.id === section)?.labelKey ?? "settings.profile";
+
+  const renderSectionContent = () => {
+    if (!user) return null;
+    const u = user;
+    return (
+    <>
+{section === "account" && (
+            <>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-lg font-semibold text-slate-800">{t("settings.profile")}</h2>
+              </div>
+
+              {/* Avatar + name + username + phone */}
+              <div className="p-5">
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAvatarModal(true)}
+                    className="shrink-0 cursor-pointer block rounded-full border-2 border-dashed border-slate-200 hover:border-blue-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                    title={t("settings.manageAvatars")}
+                  >
+                    <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl overflow-hidden">
+                      {u.avatar_url ? (
+                        <img src={toSameOriginMediaUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        getAvatarInitials(u.display_name || u.phone)
+                      )}
+                    </div>
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    {editing ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value.slice(0, 50))}
+                          maxLength={50}
+                          className="w-full px-3 py-2.5 text-sm font-semibold rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                          style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+                          placeholder={t("settings.enterName")}
+                          autoFocus
+                        />
+                        {displayName.length >= 40 && (
+                          <p className="text-xs text-slate-400">{displayName.length}/50</p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleSave}
+                            disabled={saving || !displayName.trim()}
+                            className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {saving ? "..." : t("common.save")}
+                          </button>
+                          <button
+                            onClick={() => { setEditing(false); setDisplayName(u.display_name || ""); setBio(u.bio || ""); }}
+                            className="text-slate-500 hover:text-slate-700 px-2 py-1 text-xs"
+                          >
+                            {t("common.cancel")}
+                          </button>
+                        </div>
+                        {saveMsg && (
+                          <p className={`text-xs ${saveMsg === t("common.saved") ? "text-green-600" : "text-red-500"}`}>
+                            {saveMsg}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-semibold text-slate-800 truncate">
+                            {u.display_name || t("settings.noName")}
+                          </p>
+                          <EmojiPickerPopover
+                            value={u.status_emoji ?? ""}
+                            onChange={async (emoji) => {
+                              try {
+                                const res = await authApi.updateMe({ status_emoji: emoji || undefined });
+                                setUser(res.data);
+                              } catch {
+                                // keep previous
+                              }
+                            }}
+                            emptyLabel={t("settings.statusEmojiNone")}
+                          >
+                            <button
+                              type="button"
+                              className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg border transition-colors ${
+                                u.status_emoji ? "bg-slate-100 border-slate-200 text-slate-700" : "border-dashed border-slate-200 text-slate-400 hover:border-slate-300"
+                              }`}
+                              title={t("settings.statusEmoji")}
+                            >
+                              {u.status_emoji || "😊"}
+                            </button>
+                          </EmojiPickerPopover>
+                          <button
+                            type="button"
+                            onClick={() => setEditing(true)}
+                            className="p-0.5 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                            title={t("settings.editName")}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                          </button>
+                          {saveMsg && (
+                            <span className={`text-xs ml-1 ${saveMsg === t("common.saved") ? "text-green-600" : "text-red-500"}`}>
+                              {saveMsg}
+                            </span>
+                          )}
+                        </div>
+                        {editingUsername ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={username}
+                              onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 30))}
+                              maxLength={30}
+                              placeholder={t("settings.usernamePlaceholder")}
+                              className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                              style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={handleSaveUsername}
+                                disabled={saving || (username.trim().length > 0 && username.trim().length < 3)}
+                                className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {saving ? "..." : t("common.save")}
+                              </button>
+                              <button
+                                onClick={() => { setEditingUsername(false); setUsername(u.username ?? ""); }}
+                                className="text-slate-500 hover:text-slate-700 px-2 py-1 text-xs"
+                              >
+                                {t("common.cancel")}
+                              </button>
+                            </div>
+                            {saveMsg && (
+                              <p className={`text-xs ${saveMsg === t("common.saved") ? "text-green-600" : "text-red-500"}`}>{saveMsg}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {u.username ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const link = `${window.location.origin}/chats?write=${encodeURIComponent(u.username!)}`;
+                                    copyToClipboard(link);
+                                    setUsernameShake(true);
+                                    setTimeout(() => setUsernameShake(false), 400);
+                                    setUsernameCopied(true);
+                                    setTimeout(() => setUsernameCopied(false), 2000);
+                                  }}
+                                  className={`text-sm text-blue-600 truncate hover:underline cursor-pointer text-left ${usernameShake ? "animate-username-shake" : ""}`}
+                                  title={t("settings.copyUsernameLink")}
+                                >
+                                  @{u.username}
+                                </button>
+                                {usernameCopied && (
+                                  <span className="text-xs text-green-600 font-medium shrink-0">{t("common.copied")}</span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-sm text-slate-400 italic">{t("settings.noUsername")}</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => { setUsername(u.username ?? ""); setEditingUsername(true); setSaveMsg(""); }}
+                              className="p-0.5 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                              title={t("settings.editUsername")}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                            </button>
+                          </div>
+                        )}
+                        {u.short_id != null && (
+                          <p className="text-sm text-slate-500" title={t("settings.userId")}>
+                            <span className="text-slate-400">{t("settings.userId")}: </span>
+                            <span className="font-mono tabular-nums">{u.short_id}</span>
+                          </p>
+                        )}
+                        <p className="text-sm text-slate-500 truncate" title={t("settings.phoneNotEditable")}>
+                          {u.phone}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bio: 60 chars for free, 150 for active subscription (BIO_MAX_PREMIUM) */}
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
+                    {t("settings.bio")}
+                  </label>
+                  {editingBio ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={bio}
+                        onChange={(e) => setBio(e.target.value.slice(0, sub?.is_valid ? 150 : 60))}
+                        maxLength={sub?.is_valid ? 150 : 60}
+                        rows={3}
+                        placeholder={t("settings.bioPlaceholder")}
+                        className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50 resize-none"
+                        style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+                      />
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-xs text-slate-400">{bio.length}/{sub?.is_valid ? 150 : 60}</p>
+                        <button
+                          type="button"
+                          onClick={() => usePremiumModalStore.getState().openModal()}
+                          className="text-xs text-slate-500 hover:text-blue-600 transition-colors"
+                        >
+                          {t("settings.bioWithPremium")}
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSaveBio}
+                          disabled={saving}
+                          className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {saving ? "..." : t("common.save")}
+                        </button>
+                        <button
+                          onClick={() => { setEditingBio(false); setBio(u.bio || ""); }}
+                          className="text-slate-500 hover:text-slate-700 px-2 py-1 text-xs"
+                        >
+                          {t("common.cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <p
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setEditingBio(true)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditingBio(true); } }}
+                        className="text-sm text-slate-700 whitespace-pre-wrap break-words flex-1 min-w-0 cursor-pointer hover:text-slate-900"
+                        title={t("settings.editBio")}
+                      >
+                        {u.bio ? u.bio : <span className="text-slate-400 italic">{t("settings.bioEmpty")}</span>}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setEditingBio(true)}
+                        className="p-0.5 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                        title={t("settings.editBio")}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Birthday */}
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
+                    {t("settings.birthday")}
+                  </label>
+                  {editingBirthday ? (
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={birthdayHideYear}
+                          onChange={(e) => setBirthdayHideYear(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        {t("settings.birthdayWithoutYear")}
+                      </label>
+                      <input
+                        type="date"
+                        value={birthday}
+                        onChange={(e) => setBirthday(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                        style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+                        placeholder={t("settings.birthdayPlaceholder")}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSaveBirthday}
+                          disabled={saving}
+                          className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {saving ? "..." : t("common.save")}
+                        </button>
+                        <button
+                          onClick={() => { setEditingBirthday(false); setBirthday(u.birthday || ""); setBirthdayHideYear(Boolean(u.birthday_hide_year)); }}
+                          className="text-slate-500 hover:text-slate-700 px-2 py-1 text-xs"
+                        >
+                          {t("common.cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <p
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setEditingBirthday(true)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditingBirthday(true); } }}
+                        className="text-sm text-slate-700 cursor-pointer hover:text-slate-900"
+                        title={t("settings.editBirthday")}
+                      >
+                        {u.birthday
+                          ? new Date(u.birthday).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", u.birthday_hide_year ? { month: "long", day: "numeric" } : { year: "numeric", month: "long", day: "numeric" })
+                          : <span className="text-slate-400 italic">{t("settings.birthdayEmpty")}</span>}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setEditingBirthday(true)}
+                        className="p-0.5 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                        title={t("settings.editBirthday")}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Personal channel — user adds it manually to profile (not automatic) */}
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
+                    {t("settings.personalChannel")}
+                  </label>
+                  {u.personal_channel ? (
+                    <div className="space-y-1">
+                      <div className="flex items-start gap-2 flex-wrap">
+                        <Link
+                          to={`/channel/${u.personal_channel.id}`}
+                          className="text-sm text-blue-600 hover:underline truncate"
+                        >
+                          {u.personal_channel.title}
+                          {u.personal_channel.title_icon && <span className="ml-1 shrink-0" aria-hidden>{u.personal_channel.title_icon}</span>}
+                          {u.personal_channel.username && <span className="text-slate-500 ml-1">@{u.personal_channel.username}</span>}
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setSaving(true);
+                            try {
+                              const res = await authApi.updateMe({ personal_channel_id: null });
+                              setUser(res.data);
+                              setSaveMsg(t("common.saved"));
+                              setTimeout(() => setSaveMsg(""), 2000);
+                            } catch {
+                              setSaveMsg(t("common.saveError"));
+                            } finally {
+                              setSaving(false);
+                            }
+                          }}
+                          className="text-xs text-slate-500 hover:text-slate-700 underline"
+                        >
+                          {t("settings.removeChannelFromProfile")}
+                        </button>
+                      </div>
+                      {u.personal_channel.description && (
+                        <p className="text-xs text-slate-500 line-clamp-2">{u.personal_channel.description}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-slate-500">{t("settings.noChannelInProfile")}</p>
+                      {myChannels.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {myChannels.map((ch) => (
+                            <button
+                              key={ch.id}
+                              type="button"
+                              onClick={async () => {
+                                setSaving(true);
+                                try {
+                                  const res = await authApi.updateMe({ personal_channel_id: ch.id });
+                                  setUser(res.data);
+                                  setSaveMsg(t("common.saved"));
+                                  setTimeout(() => setSaveMsg(""), 2000);
+                                } catch {
+                                  setSaveMsg(t("common.saveError"));
+                                } finally {
+                                  setSaving(false);
+                                }
+                              }}
+                              className="text-sm text-blue-600 hover:underline font-medium"
+                            >
+                              {ch.title}{ch.username ? ` @${ch.username}` : ""}
+                            </button>
+                          ))}
+                          <span className="text-slate-400">·</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateChannelModal(true)}
+                            className="text-sm text-slate-500 hover:underline"
+                          >
+                            {t("settings.createChannel")}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateChannelModal(true)}
+                          className="text-sm text-blue-600 hover:underline font-medium"
+                        >
+                          {t("settings.createChannel")}
+                        </button>
+                        
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Telegram */}
+                {u.telegram_username && (
+                  <div className="mt-4 pt-3 border-t border-slate-100">
+                    <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide mb-0.5">
+                      Telegram
+                    </label>
+                    <span className="text-slate-800 text-sm">@{u.telegram_username}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Referral program */}
+            {u.referral_code && (
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mt-4">
+                <div className="p-5 space-y-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-800 mb-1">{t("settings.referral")}</h2>
+                    <p className="text-sm text-slate-500">{t("settings.referralDesc")}</p>
+                  </div>
+                  <div className={`flex gap-2 items-center rounded-xl bg-slate-50 border border-slate-200 overflow-hidden ${referralShake ? "animate-username-shake" : ""}`}>
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/auth?ref=${u.referral_code}`}
+                      className="flex-1 min-w-0 px-4 py-3 text-sm text-slate-700 bg-transparent truncate"
+                    />
+                    <button
+                      onClick={handleCopyReferral}
+                      className="px-4 py-3 bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors shrink-0"
+                    >
+                      {copied ? t("common.copied") : t("common.copy")}
+                    </button>
+                  </div>
+                  <ReferralProgressBar progress={referralProgress} t={t} lang={lang} />
+                </div>
+              </div>
+            )}
+            </>
+            )}
+
+              {section === "chats" && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navChatSettings")}</h2>
+              </div>
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.messageTextScale")}
+                  </label>
+                  <MessageScaleSlider />
+                </div>
+
+                {/* Message alignment */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.messageAlignment")}
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMessageAlignment("left")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        messageAlignment === "left" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {t("settings.messageAlignmentLeft")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMessageAlignment("right")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        messageAlignment === "right" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {t("settings.messageAlignmentRight")}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Language */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.language")}
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLanguage("en")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        language === "en" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLanguage("ru")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        language === "ru" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      Russian
+                    </button>
+                  </div>
+                </div>
+
+                {/* Theme */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.theme")}
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTheme("light")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        theme === "light" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {t("settings.themeLight")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTheme("dark")}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        theme === "dark" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {t("settings.themeDark")}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sounds */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.sounds")}
+                  </label>
+                  <SoundsSection />
+                </div>
+              </div>
+            </div>
+              )}
+
+              {section === "privacy" && u && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navPrivacy")}</h2>
+              </div>
+              <div className="p-5 space-y-4">
+                {!sub?.is_valid ? (
+                  <div className="py-6 text-center">
+                    <p className="text-slate-600 mb-4">{t("settings.privacyPremiumOnly")}</p>
+                    <button type="button" onClick={() => { setSection("premium"); if (isMobile) setMobileShowContent(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                      {t("settings.goToPremium")}
+                    </button>
+                  </div>
+                ) : (
+                <>
+                {saveMsg && (
+                  <p className={`text-sm ${saveMsg === t("common.saved") ? "text-green-600" : "text-red-500"}`}>{saveMsg}</p>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.privacy")}
+                  </label>
+                  <div className="space-y-4">
+                    {([
+                      {
+                        key: "show_last_seen",
+                        label: t("settings.showLastSeen"),
+                        hint: t("settings.showLastSeenHint"),
+                        value: (u.show_last_seen === true || u.show_last_seen === "everyone") ? "everyone" : (String(u.show_last_seen) === "contacts" ? "contacts" : "nobody"),
+                        options: ["everyone", "nobody", "contacts"],
+                        field: "show_last_seen" as const,
+                      },
+                      {
+                        key: "show_phone",
+                        label: t("settings.showPhone"),
+                        hint: t("settings.showPhoneHint"),
+                        value: (u.show_phone === true || u.show_phone === "everyone") ? "everyone" : (String(u.show_phone) === "contacts" ? "contacts" : "nobody"),
+                        options: ["everyone", "nobody", "contacts"],
+                        field: "show_phone" as const,
+                      },
+                      {
+                        key: "dm_privacy",
+                        label: t("settings.dmPrivacy"),
+                        hint: t("settings.dmPrivacyHint"),
+                        value: (u.dm_privacy === "everyone" || u.dm_privacy === "contacts") ? (u.dm_privacy as "everyone" | "contacts") : "nobody",
+                        options: ["everyone", "nobody", "contacts"],
+                        field: "dm_privacy" as const,
+                      },
+                      {
+                        key: "add_to_group_privacy",
+                        label: t("settings.groupPrivacy"),
+                        hint: t("settings.groupPrivacyHint"),
+                        value: (u.add_to_group_privacy === "everyone" || u.add_to_group_privacy === "contacts") ? (u.add_to_group_privacy as "everyone" | "contacts") : "nobody",
+                        options: ["everyone", "nobody", "contacts"],
+                        field: "add_to_group_privacy" as const,
+                      },
+                    ] as const).map(({ key, label, hint, value, field }) => (
+                      <div key={key} className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-slate-800">{label}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+                        </div>
+                        <select
+                          value={value}
+                          onChange={async (e) => {
+                            const val = e.target.value as "everyone" | "nobody" | "contacts";
+                            const payload: Partial<typeof user> = {};
+                            if (field === "show_last_seen" || field === "show_phone") {
+                              (payload as Record<string, unknown>)[field] = val;
+                            } else {
+                              (payload as Record<string, unknown>)[field] = val;
+                            }
+                            try {
+                              const res = await authApi.updateMe(payload);
+                              setUser(res.data);
+                              setSaveMsg("");
+                            } catch (e: unknown) {
+                              const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+                              setSaveMsg(msg || t("common.saveError"));
+                              setTimeout(() => setSaveMsg(""), 5000);
+                            }
+                          }}
+                          className="shrink-0 w-36 py-2 px-3 text-sm border rounded-2xl backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                          style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+                        >
+                          <option value="everyone">{t("common.everyone")}</option>
+                          <option value="nobody">{t("common.nobody")}</option>
+                          <option value="contacts">{t("common.contacts")}</option>
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                </>
+                )}
+              </div>
+            </div>
+              )}
+
+              {section === "devices" && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navDevices")}</h2>
+              </div>
+              <div className="p-5 space-y-6">
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrLoginModal(true)}
+                    className="mb-3 flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                    </svg>
+                    {t("settings.qrLogin")}
+                  </button>
+                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                    {t("settings.activeSessions")}
+                  </label>
+                  <SessionsSection />
+                </div>
+              </div>
+            </div>
+              )}
+
+              {section === "folders" && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-lg font-semibold text-slate-800">{t("settings.navFolders")}</h2>
+              </div>
+              <div className="p-5">
+                {!sub?.is_valid ? (
+                  <div className="py-6 text-center">
+                    <p className="text-slate-600 mb-4">{t("settings.foldersPremiumOnly")}</p>
+                    <button type="button" onClick={() => { setSection("premium"); if (isMobile) setMobileShowContent(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                      {t("settings.goToPremium")}
+                    </button>
+                  </div>
+                ) : (
+                  <FoldersSection t={t} onFoldersUpdated={onFoldersUpdated} hasSubscription={true} />
+                )}
+              </div>
+            </div>
+              )}
+
+              {section === "premium" && (
+            <div className="space-y-6" ref={subscriptionPlansRef}>
+              {/* Subscription: status + buy/gift */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-2">
+                  <h2 className="text-lg font-semibold text-slate-800">{t("settings.subscription")}</h2>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowSubscriptionMenu((v) => !v)}
+                      className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label={t("settings.paymentMethods")}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                      </svg>
+                    </button>
+                    {showSubscriptionMenu && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowSubscriptionMenu(false)} aria-hidden />
+                        <div className="absolute right-0 top-full mt-1 py-1 w-48 bg-white rounded-lg border border-slate-200 shadow-lg z-20">
+                          <button
+                            type="button"
+                            onClick={() => { setShowSubscriptionMenu(false); setShowPaymentMethodsModal(true); }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-slate-800 hover:bg-slate-50"
+                          >
+                            {t("settings.paymentMethods")}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="p-5 space-y-4">
+                  {sub && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600">{t("settings.status")}</span>
+                        <span className={`text-sm font-medium ${sub.is_valid ? "text-green-600" : "text-red-500"}`}>
+                          {getStatusLabel(sub.status || "", lang)}
+                        </span>
+                      </div>
+                      {sub.current_period_end && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-600">{t("settings.validUntil")}</span>
+                          <span className="text-sm text-slate-800">
+                            {new Date(sub.current_period_end).toLocaleDateString(getLocale(lang))}
+                          </span>
+                        </div>
+                      )}
+                      {sub.is_referral_trial && (
+                        <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">
+                          {t("settings.referralTrial")}
+                        </p>
+                      )}
+                    </>
+                  )}
+
+                  {/* Buy or gift */}
+                  <SubscriptionPlansBlock
+                    plans={plans}
+                    subLoading={subLoading}
+                    onSubscribe={handleSubscribe}
+                    paymentError={paymentError}
+                    t={t}
+                    lang={lang}
+                  />
+                </div>
+              </div>
+
+            </div>
+              )}
+    </>
+  );
+  };
+
+  const content = (
+    <div className={embed ? "flex h-full overflow-hidden" : "flex flex-col min-h-screen ui-surface-0"}>
+        {showAvatarModal && user && (
+          <AvatarManagerModal
+            avatars={user.avatars ?? []}
+            onClose={() => setShowAvatarModal(false)}
+            onUpdated={() => {}}
+            onUserUpdate={handleAvatarModalUpdated}
+          />
+        )}
+        {showCreateChannelModal && (
+          <CreateChannelModal
+            isOpen={showCreateChannelModal}
+            onClose={() => setShowCreateChannelModal(false)}
+            onCreated={() => { handleChannelCreated(); setShowCreateChannelModal(false); }}
+          />
+        )}
+        {showQrLoginModal && (
+          <QrLoginModal isOpen={showQrLoginModal} onClose={() => setShowQrLoginModal(false)} />
+        )}
+        <PaymentMethodsModal
+          isOpen={showPaymentMethodsModal}
+          onClose={() => setShowPaymentMethodsModal(false)}
+          onAddCard={() => subscriptionPlansRef.current?.scrollIntoView({ behavior: "smooth" })}
+        />
+        <SupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} />
+        {loading && (
+          <div className="flex items-center justify-center flex-1 p-8">
+            <p className="text-slate-500">{t("common.loading")}</p>
+          </div>
+        )}
+
+        {errorToast && (
+          <div
+            role="alert"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-3 bg-red-600 text-white text-sm rounded-lg shadow-lg max-w-md"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="flex-1 min-w-0">{errorToast}</span>
+            {error && (
+              <button
+                type="button"
+                onClick={() => { setErrorToast(""); setError(""); loadProfile(); }}
+                className="shrink-0 px-3 py-1.5 rounded-md bg-white/20 hover:bg-white/30 font-medium"
+              >
+                {t("common.retry")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setErrorToast("")}
+              className="shrink-0 p-1 rounded hover:bg-white/20"
+              aria-label={t("common.close")}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
+
+        {!loading && (user || error) && (
+          <div className={`flex flex-1 min-h-0 ${embed ? "" : "container mx-auto max-w-5xl"}`}>
+            {/* ===== Mobile: block list (step 1) ===== */}
+            {isMobile && !mobileShowContent && (
+              <div className="flex flex-col flex-1 min-w-0 w-full md:hidden ui-surface-1 overflow-y-auto">
+                <div className={`flex flex-col flex-1 min-h-0 ${embed ? "p-4" : "p-4 sm:p-6"}`}>
+                  <div
+                    className="-mx-4 sm:-mx-6 px-4 sm:px-6 sticky top-0 z-20 h-14 flex items-center border-b backdrop-blur"
+                    style={{ top: "env(safe-area-inset-top)", background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+                  >
+                    <h2 className="text-base font-semibold truncate" style={{ color: "var(--text-0)" }}>
+                      {t("settings.settingsTitle")}
+                    </h2>
+                  </div>
+                  <div className="h-4" />
+                  <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
+                  {user?.is_staff && (
+                    <div className="mt-6 pt-4 border-t border-slate-100">
+                      <Link
+                        to="/admin"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+                      >
+                        Админ-панель
+                      </Link>
+                    </div>
+                  )}
+                  <div className="mt-auto pt-6 border-t border-slate-100">
+                    <p className="px-4 py-2 text-xs text-slate-400">
+                      {t("settings.version")} {typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "—"}
+                    </p>
+                    <div className="flex flex-col gap-2 mt-1">
+                      <button
+                        onClick={() => setShowSupportModal(true)}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg text-left"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                        {t("support.menu")}
+                      </button>
+                      <button
+                        onClick={() => setShowLogoutConfirm(true)}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg text-left"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                        {t("common.logout")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ===== Mobile: section content with back (step 2) ===== */}
+            {isMobile && mobileShowContent && (
+              <div className="flex flex-col flex-1 min-w-0 w-full md:hidden overflow-hidden">
+                <div
+                  className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-14 flex items-center gap-3"
+                  style={{ top: "env(safe-area-inset-top)", background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setMobileShowContent(false)}
+                    className="flex items-center gap-1 -ml-1 p-2 rounded-xl hover:bg-slate-100/70 transition-colors"
+                    style={{ color: "var(--text-1)" }}
+                    aria-label={t("common.back")}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <span className="font-semibold truncate" style={{ color: "var(--text-0)" }}>{t(currentSectionLabel)}</span>
+                </div>
+                <main ref={mainContentRef} className={`flex-1 min-w-0 overflow-y-auto ${embed ? "p-4" : "p-4 sm:p-6"}`}>
+                  <div key={section} className="settings-section-fade-in">
+                    {renderSectionContent()}
+                  </div>
+                </main>
+              </div>
+            )}
+
+            {/* ===== Desktop: two columns ===== */}
+            <aside className={`hidden md:flex shrink-0 border-r ui-border-subtle ui-surface-1 flex-col ${embed ? "w-56 p-4" : "w-64 p-6"}`}>
+              <SettingsNav section={section} onSection={setSection} t={t} hasSubscription={sub?.is_valid === true} />
+              {user?.is_staff && (
+                <div className="mt-6 pt-4 border-t border-slate-100">
+                  <Link
+                    to="/admin"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+                  >
+                    Админ-панель
+                  </Link>
+                </div>
+              )}
+              <div className="mt-auto pt-6 border-t border-slate-100">
+                <p className="px-4 py-2 text-xs text-slate-400">
+                  {t("settings.version")} {typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "—"}
+                </p>
+                <div className="flex flex-col gap-2 mt-1">
+                  <button
+                    onClick={() => setShowSupportModal(true)}
+                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg text-left"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    {t("support.menu")}
+                  </button>
+                  <button
+                    onClick={() => setShowLogoutConfirm(true)}
+                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg text-left"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                    {t("common.logout")}
+                  </button>
+                </div>
+              </div>
+            </aside>
+
+            {/* ===== Desktop: Section content ===== */}
+            <main ref={mainContentRef} className={`hidden md:block flex-1 min-w-0 overflow-y-auto ui-surface-1 ${embed ? "p-4" : "p-6"}`}>
+              <div key={section} className="settings-section-fade-in">
+                {renderSectionContent()}
+              </div>
+            </main>
+          </div>
+        )}
+      <ConfirmModal
+        open={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        message={t("common.logoutConfirm")}
+        onConfirm={handleLogout}
+        variant="danger"
+        confirmText={t("common.logout")}
+      />
+    </div>
+  );
+
+  if (embed) return content;
+
+  return (
+    <div className="min-h-screen ui-surface-0">
+      <header
+        className="sticky top-0 z-30 border-b backdrop-blur"
+        style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+      >
+        <div className="container mx-auto px-4 h-14 flex justify-between items-center">
+          <Link to="/chats" className="text-lg font-semibold" style={{ color: "var(--text-0)" }}>
+            Личный кабинет
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link to="/chats" className="text-sm font-medium hover:underline" style={{ color: "var(--text-1)" }}>
+              Мои чаты
+            </Link>
+          </div>
+        </div>
+      </header>
+      <main>{content}</main>
+    </div>
+  );
+}

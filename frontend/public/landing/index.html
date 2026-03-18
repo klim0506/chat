@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Pingy для бизнеса — рабочие чаты</title>
+    <meta
+      name="description"
+      content="Чаты для рабочих задач: быстрый обмен большими файлами, защищённое шифрование и единая платформа оплаты аккаунтов сотрудников."
+    />
+
+    <meta property="og:title" content="Pingy для бизнеса — рабочие чаты" />
+    <meta
+      property="og:description"
+      content="Большие файлы, защищённое шифрование и единая оплата аккаунтов команды — в одном месте."
+    />
+    <meta property="og:type" content="website" />
+
+    <link rel="icon" type="image/png" href="/icons/icon-96x96.png" />
+    <link rel="stylesheet" href="./landing.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">К содержанию</a>
+
+    <header class="header" data-header>
+      <div class="container header__inner">
+        <a class="brand" href="#top" aria-label="На верх страницы">
+          <img class="brand__logo" src="/assets/logo.png" alt="Pingy" />
+        </a>
+
+        <nav class="nav" aria-label="Навигация">
+          <a class="nav__link" href="#features">Возможности</a>
+          <a class="nav__link" href="#cases">Сценарии</a>
+          <a class="nav__link" href="#pricing">Тарифы</a>
+          <a class="nav__link" href="#faq">FAQ</a>
+        </nav>
+
+        <div class="header__cta">
+          <a class="btn btn--ghost" href="https://web.pingychat.com/auth">Войти в Pingy</a>
+          <button
+            class="iconbtn"
+            type="button"
+            aria-label="Открыть меню"
+            aria-expanded="false"
+            data-menu-btn
+          >
+            <span class="iconbtn__bar"></span>
+            <span class="iconbtn__bar"></span>
+            <span class="iconbtn__bar"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="mobile" data-menu hidden>
+        <div class="container mobile__inner">
+          <a class="mobile__link" href="#features">Возможности</a>
+          <a class="mobile__link" href="#cases">Сценарии</a>
+          <a class="mobile__link" href="#pricing">Тарифы</a>
+          <a class="mobile__link" href="#faq">FAQ</a>
+          <a class="btn btn--primary mobile__btn" href="https://web.pingychat.com/auth">Начать</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="top" class="hero">
+        <div class="bg" aria-hidden="true">
+          <div class="bg__grid"></div>
+          <div class="bg__orb bg__orb--a"></div>
+          <div class="bg__orb bg__orb--b"></div>
+        </div>
+
+        <div class="container hero__inner">
+          <div class="hero__copy">
+            <p class="pill">
+              <span class="pill__dot" aria-hidden="true"></span>
+              Pingy для бизнеса · рабочие чаты для команд
+            </p>
+            <h1 class="h1">
+              Чаты для рабочих задач: большие файлы, шифрование и оплата команды
+            </h1>
+            <p class="lead">
+              Организуйте общение сотрудников в одном месте: быстро передавайте большие файлы, защищайте переписку и
+              оплачивайте аккаунты команды через единую платформу.
+            </p>
+            <div class="hero__actions">
+              <a class="btn btn--primary" href="https://web.pingychat.com/auth">Начать</a>
+              <a class="btn btn--soft" href="#features">Посмотреть возможности</a>
+            </div>
+            <p class="hero__downloads-label">Скачать приложения</p>
+            <div class="hero__downloads">
+              <a class="btn btn--download btn--desktop" href="https://web.pingychat.com/downloads/desktop">Десктоп (Windows, macOS, Linux)</a>
+              <a class="btn btn--download btn--android" href="https://web.pingychat.com/downloads/android">Android</a>
+              <a class="btn btn--ghost btn--small" href="https://web.pingychat.com/auth">Веб-версия</a>
+            </div>
+            <div class="hero__meta">
+              <div class="stat">
+                <div class="stat__num" data-counter="2">2</div>
+                <div class="stat__label">ГБ на файл</div>
+              </div>
+              <div class="stat">
+                <div class="stat__num">E2EE</div>
+                <div class="stat__label">защита переписки</div>
+              </div>
+              <div class="stat">
+                <div class="stat__num" data-counter="1">1</div>
+                <div class="stat__label">счёт для команды</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero__card" aria-label="Кратко о возможностях">
+            <div class="card">
+              <div class="card__top">
+                <span class="badge">Business</span>
+                <span class="muted">кратко и по делу</span>
+              </div>
+              <div class="card__body">
+                <div class="kpis">
+                  <div class="kpi">
+                    <div class="kpi__label">Файлы</div>
+                    <div class="kpi__value">до 2 ГБ</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="kpi__label">Шифрование</div>
+                    <div class="kpi__value">E2EE</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="kpi__label">Оплата</div>
+                    <div class="kpi__value">единый счёт</div>
+                  </div>
+                </div>
+
+                <div class="timeline">
+                  <div class="timeline__item">
+                    <div class="timeline__dot" aria-hidden="true"></div>
+                    <div class="timeline__text">
+                      <div class="timeline__title">Быстрый обмен файлами</div>
+                      <div class="timeline__desc">Большие документы, архивы и медиа — без компромиссов.</div>
+                    </div>
+                  </div>
+                  <div class="timeline__item">
+                    <div class="timeline__dot" aria-hidden="true"></div>
+                    <div class="timeline__text">
+                      <div class="timeline__title">Защищённая переписка</div>
+                      <div class="timeline__desc">Сквозное шифрование и контроль доступа.</div>
+                    </div>
+                  </div>
+                  <div class="timeline__item">
+                    <div class="timeline__dot" aria-hidden="true"></div>
+                    <div class="timeline__text">
+                      <div class="timeline__title">Оплата аккаунтов команды</div>
+                      <div class="timeline__desc">Один платёж — и сотрудники в одном пространстве.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="card__bottom">
+                <a class="link" href="#faq">Частые вопросы</a>
+                <a class="btn btn--tiny btn--ghost" href="https://web.pingychat.com/auth">Войти</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="logos" aria-label="Кому подойдёт">
+        <div class="container logos__inner">
+          <div class="logos__label">Подходит для:</div>
+          <div class="logos__row" role="list">
+            <div class="logo" role="listitem">Проектных команд</div>
+            <div class="logo" role="listitem">Продаж</div>
+            <div class="logo" role="listitem">Поддержки</div>
+            <div class="logo" role="listitem">Операционного блока</div>
+            <div class="logo" role="listitem">HR и найма</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section__head">
+            <h2 class="h2">Один инструмент для рабочих чатов</h2>
+            <p class="sub">
+              Переписка, файлы и управление командой — в одном месте. Быстро подключайте сотрудников и держите рабочие
+              процессы в порядке.
+            </p>
+          </div>
+
+          <div class="bento">
+            <article class="bento__item bento__item--wide">
+              <h3 class="h3">Большие файлы без боли</h3>
+              <p class="muted">
+                Передавайте документы, архивы и медиа — быстро и удобно. История обсуждений и файлов остаётся в чате.
+              </p>
+              <ul class="ticks">
+                <li>До 2 ГБ на файл</li>
+                <li>Поиск и история</li>
+                <li>Удобно для рабочих задач</li>
+              </ul>
+            </article>
+
+            <article class="bento__item">
+              <h3 class="h3">Защищённое шифрование</h3>
+              <p class="muted">Сквозное шифрование и минимизация рисков утечек в рабочих переписках.</p>
+            </article>
+
+            <article class="bento__item">
+              <h3 class="h3">Роли и доступы</h3>
+              <p class="muted">Контроль участников, приглашения и доступы — чтобы рабочие чаты оставались рабочими.</p>
+            </article>
+
+            <article class="bento__item">
+              <h3 class="h3">Единая оплата сотрудников</h3>
+              <p class="muted">Удобно оплачивать аккаунты команды централизованно: единый счёт и понятная структура.</p>
+            </article>
+
+            <article class="bento__item">
+              <h3 class="h3">Стабильная работа</h3>
+              <p class="muted">Чаты остаются доступными, когда нужно быстро договориться и отправить файл “прямо сейчас”.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="cases" class="section section--alt">
+        <div class="container">
+          <div class="section__head">
+            <h2 class="h2">Сценарии для бизнеса</h2>
+            <p class="sub">Примеры того, как команды используют рабочие чаты в повседневных задачах.</p>
+          </div>
+
+          <div class="cards">
+            <article class="case">
+              <div class="case__top">
+                <span class="tag">Проекты</span>
+                <span class="muted">согласования</span>
+              </div>
+              <h3 class="h3">Согласование материалов и документов</h3>
+              <p class="muted">Один чат на задачу: обсуждение + файлы + решения — всё в истории.</p>
+              <div class="case__kpis">
+                <div class="mini">
+                  <div class="mini__num">−30%</div>
+                  <div class="mini__lbl">времени на правки</div>
+                </div>
+                <div class="mini">
+                  <div class="mini__num">+1</div>
+                  <div class="mini__lbl">единый контекст</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="case">
+              <div class="case__top">
+                <span class="tag">Поддержка</span>
+                <span class="muted">оперативность</span>
+              </div>
+              <h3 class="h3">Быстрые разборы инцидентов</h3>
+              <p class="muted">
+                Переписка, логи и файлы — в одном потоке. Минимум пересылок, максимум скорости реакции.
+              </p>
+              <div class="case__kpis">
+                <div class="mini">
+                  <div class="mini__num">−20%</div>
+                  <div class="mini__lbl">времени до ответа</div>
+                </div>
+                <div class="mini">
+                  <div class="mini__num">до 2 ГБ</div>
+                  <div class="mini__lbl">файлы в чате</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="case">
+              <div class="case__top">
+                <span class="tag">Команда</span>
+                <span class="muted">управление</span>
+              </div>
+              <h3 class="h3">Централизованная оплата аккаунтов</h3>
+              <p class="muted">Оплачивайте доступ сотрудникам централизованно и держите контроль над рабочей средой.</p>
+              <div class="case__kpis">
+                <div class="mini">
+                  <div class="mini__num">1</div>
+                  <div class="mini__lbl">счёт для команды</div>
+                </div>
+                <div class="mini">
+                  <div class="mini__num">+0</div>
+                  <div class="mini__lbl">хаоса с оплатой</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="pricing" class="section">
+        <div class="container">
+          <div class="section__head">
+            <h2 class="h2">Тарифы для команд</h2>
+            <p class="sub">Выберите формат, который подходит вашему размеру и процессам.</p>
+          </div>
+
+          <div class="pricing">
+            <article class="price">
+              <div class="price__head">
+                <h3 class="h3">Команда</h3>
+                <p class="muted">Для небольших групп</p>
+              </div>
+              <div class="price__value">
+                <span class="price__num">299</span>
+                <span class="price__cur">₽ / пользователь</span>
+              </div>
+              <ul class="ticks">
+                <li>Личные и групповые чаты</li>
+                <li>Файлы до 2 ГБ</li>
+                <li>Базовые настройки команды</li>
+              </ul>
+              <a class="btn btn--soft btn--block" href="https://web.pingychat.com/auth">Подключить</a>
+            </article>
+
+            <article class="price price--popular" aria-label="Самый популярный тариф">
+              <div class="price__ribbon">Популярный</div>
+              <div class="price__head">
+                <h3 class="h3">Бизнес</h3>
+                <p class="muted">Оптимально для отдела/компании</p>
+              </div>
+              <div class="price__value">
+                <span class="price__num">599</span>
+                <span class="price__cur">₽ / пользователь</span>
+              </div>
+              <ul class="ticks">
+                <li>Расширенное управление доступом</li>
+                <li>Единая оплата аккаунтов команды</li>
+                <li>Приоритетная поддержка</li>
+              </ul>
+              <a class="btn btn--primary btn--block" href="https://web.pingychat.com/auth">Начать</a>
+            </article>
+
+            <article class="price">
+              <div class="price__head">
+                <h3 class="h3">Enterprise</h3>
+                <p class="muted">Когда нужна интеграция и SLA</p>
+              </div>
+              <div class="price__value">
+                <span class="price__num">—</span>
+                <span class="price__cur">по запросу</span>
+              </div>
+              <ul class="ticks">
+                <li>Индивидуальные условия</li>
+                <li>Согласование безопасности</li>
+                <li>Выделенный контакт</li>
+              </ul>
+              <a class="btn btn--soft btn--block" href="mailto:sales@pingychat.com">Запросить демо</a>
+            </article>
+          </div>
+
+          <p class="fineprint">
+            Напишите нам, если нужен пилот, согласование безопасности или индивидуальные условия для компании.
+          </p>
+        </div>
+      </section>
+
+      <section id="faq" class="section section--alt">
+        <div class="container">
+          <div class="section__head">
+            <h2 class="h2">FAQ</h2>
+            <p class="sub">Короткие ответы на частые вопросы команд.</p>
+          </div>
+
+          <div class="faq" data-accordion>
+            <details class="faq__item">
+              <summary class="faq__q">Какой максимальный размер файла?</summary>
+              <div class="faq__a">До 2 ГБ на файл — удобно для документов, архивов и медиа в рабочих чатах.</div>
+            </details>
+            <details class="faq__item">
+              <summary class="faq__q">Как защищается переписка?</summary>
+              <div class="faq__a">Используем защищённое шифрование, чтобы снизить риск доступа посторонних к сообщениям.</div>
+            </details>
+            <details class="faq__item">
+              <summary class="faq__q">Можно ли оплачивать аккаунты сотрудников централизованно?</summary>
+              <div class="faq__a">Да, для команд доступна единая платформа оплаты: один счёт и понятная структура по пользователям.</div>
+            </details>
+            <details class="faq__item">
+              <summary class="faq__q">Как начать?</summary>
+              <div class="faq__a">Перейдите в приложение, зарегистрируйтесь и создайте чат под рабочую задачу.</div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="container cta__inner">
+          <div class="cta__copy">
+            <h2 class="h2">Готовы перевести команду в рабочие чаты?</h2>
+            <p class="sub">Начните с одного чата на задачу — и постепенно объедините рабочие процессы в Pingy.</p>
+          </div>
+          <div class="cta__actions">
+            <a class="btn btn--primary" href="https://web.pingychat.com/auth">Войти в Pingy</a>
+            <a class="btn btn--ghost" href="#top">Наверх</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <div class="footer__left">
+          <div class="brand brand--small">
+            <img class="brand__logo" src="/assets/logo.png" alt="Pingy" />
+          </div>
+          <div class="muted">© <span data-year></span> Все права защищены</div>
+        </div>
+        <div class="footer__right">
+          <a class="footer__link" href="https://web.pingychat.com/downloads/desktop">Десктоп</a>
+          <a class="footer__link" href="https://web.pingychat.com/downloads/android">Android</a>
+          <a class="footer__link" href="https://web.pingychat.com/wiki">Wiki</a>
+          <a class="footer__link" href="https://web.pingychat.com/wiki/security">Безопасность</a>
+          <a class="footer__link" href="mailto:support@pingychat.com">support@pingychat.com</a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./landing.js" type="module"></script>
+  </body>
+</html>

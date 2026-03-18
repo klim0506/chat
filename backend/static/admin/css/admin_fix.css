@@ -1,0 +1,16 @@
+/**
+ * Fix Django admin: SVG symbols for theme toggle are inside .base-svgs with
+ * display:none. In some browsers <use xlink:href="#icon-*"> then fails and
+ * renders black squares. Hide the sprite without display:none so references work.
+ */
+.base-svgs {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}

@@ -1,0 +1,8 @@
+{
+  "name": "pingychat-dev",
+  "private": true,
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File ./scripts/dev.ps1",
+    "dev:frontend": "cd frontend && npm run dev"
+  }
+}

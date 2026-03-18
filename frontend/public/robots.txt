@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /chats
+Disallow: /chat/
+Disallow: /admin
+
+Sitemap: https://pingychat.com/sitemap.xml

@@ -1,0 +1,36 @@
+# ─── Stage 1: build ──────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+# Production env vars are baked in at build time.
+# VITE_API_URL should be empty so the app uses relative URLs (/api, /ws)
+# which nginx will proxy to the backend.
+ARG VITE_API_URL=""
+ARG VITE_WS_URL=""
+ARG VITE_PWA_INSTALL_ENABLED="false"
+ARG VITE_ALPHA_BANNER_ENABLED="false"
+ARG VITE_WEB_APP_URL=""
+
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WS_URL=$VITE_WS_URL
+ENV VITE_PWA_INSTALL_ENABLED=$VITE_PWA_INSTALL_ENABLED
+ENV VITE_ALPHA_BANNER_ENABLED=$VITE_ALPHA_BANNER_ENABLED
+ENV VITE_WEB_APP_URL=$VITE_WEB_APP_URL
+
+RUN npm run build:prod
+
+# ─── Stage 2: serve via lightweight image ────────────────────────────
+FROM alpine:3.19
+WORKDIR /app
+
+# Just copy the built files — nginx will serve them via a shared volume
+COPY --from=builder /app/dist ./dist
+
+# Nothing to run — this image is only used for its /app/dist contents.
+# docker-compose copies them into the nginx volume.
+CMD ["echo", "Frontend build complete — files in /app/dist"]

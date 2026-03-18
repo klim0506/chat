@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+backend/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# Env and secrets (keep .env.example)
+.env
+.env.local
+backend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Build and cache
+frontend/dist/
+release-*/
+android/app/build/
+android/build/
+android/.gradle/
+frontend/.asset-opt-cache.json
+*.tsbuildinfo
+.cache/
+
+# DB and runtime
+*.sqlite3
+backend/celerybeat-schedule*
+backend/staticfiles/
+backend/media/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Tests and reports
+frontend/playwright-report/
+frontend/test-results/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+npm-debug.log*

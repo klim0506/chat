@@ -1,0 +1,4 @@
+# Optional: restrict Django admin by IP. Include this inside a location /admin/ block
+# that proxy_passes to the backend. Replace 1.2.3.4 with your trusted IP(s).
+# allow 1.2.3.4;
+# deny all;

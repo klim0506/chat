@@ -1,0 +1,388 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; margin: 0; }
+html {
+  touch-action: manipulation;
+  /* 100% = browser default (16px), so zoom/text scaling scales all rem-based text */
+  font-size: 100%;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+body {
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Не задаём глобальный отступ сверху: sticky/fixed хедеры должны управлять safe-area точечно. */
+  padding-top: 0;
+  /* На mobile web (особенно Android Chrome) safe-area-inset-bottom может давать "пустоту" снизу.
+     Safe-area лучше применять точечно к фиксированным барам, а не ко всему body. */
+  padding-bottom: 0;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Form elements: keep consistent & readable */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  line-height: inherit;
+}
+
+/* ================================================================
+   Design tokens (light/dark)
+   - Framework-agnostic variables + a few helper classes
+   ================================================================ */
+:root {
+  /* Surfaces */
+  --surface-0: #f6f8fc; /* app background */
+  --surface-1: #ffffff; /* panels */
+  --surface-2: rgba(255, 255, 255, 0.72); /* glass */
+
+  /* Typography (rem so browser zoom scales text) */
+  --ui-fs-body: 0.9375rem;   /* 15px at 16px root */
+  --ui-lh-body: 1.35;
+  --ui-fs-title: 0.875rem;   /* 14px */
+  --ui-lh-title: 1.25;
+  --ui-fs-assist: 0.8125rem; /* 13px */
+  --ui-lh-assist: 1.25;
+
+  /* Text */
+  --text-0: #0f172a;
+  --text-1: #334155;
+  --text-2: #64748b;
+
+  /* Borders & shadows */
+  --border-subtle: rgba(148, 163, 184, 0.42);
+  --border-strong: rgba(148, 163, 184, 0.62);
+  --shadow-1: 0 10px 26px rgba(15, 23, 42, 0.08);
+  --shadow-2: 0 18px 48px rgba(15, 23, 42, 0.14);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(148, 163, 184, 0.35);
+  --glass-blur: 14px;
+
+  /* Chat background pipeline */
+  --chat-bg-image-opacity: 1;
+  --chat-bg-filter: saturate(0.95) contrast(0.96) brightness(1.03);
+  --chat-bg-overlay: rgba(255, 255, 255, 0.62);
+  --chat-bg-vignette: radial-gradient(120% 110% at 50% 15%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.64) 52%, rgba(255,255,255,0.82) 100%);
+  /* Lightweight vector default (no image request) */
+  --chat-bg-vector-default: linear-gradient(165deg, #e8ecf2 0%, #dce4ee 35%, #e2e8f0 70%, #f1f5f9 100%);
+
+  /* Rounding */
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+}
+
+:root[data-theme="dark"] {
+  --surface-0: #0b1220;
+  --surface-1: #0f172a;
+  --surface-2: rgba(15, 23, 42, 0.70);
+
+  --text-0: #e6eefc;
+  --text-1: #c7d6ef;
+  --text-2: #94a8c9;
+
+  --border-subtle: rgba(60, 78, 108, 0.55);
+  --border-strong: rgba(60, 78, 108, 0.75);
+  --shadow-1: 0 14px 34px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 26px 64px rgba(0, 0, 0, 0.45);
+
+  --glass-bg: rgba(11, 18, 32, 0.56);
+  --glass-border: rgba(60, 78, 108, 0.55);
+
+  --chat-bg-filter: saturate(0.88) contrast(0.92) brightness(0.84);
+  --chat-bg-overlay: rgba(11, 18, 32, 0.62);
+  --chat-bg-vignette: radial-gradient(120% 110% at 50% 15%, rgba(11,18,32,0.10) 0%, rgba(11,18,32,0.58) 54%, rgba(11,18,32,0.80) 100%);
+  --chat-bg-vector-default: linear-gradient(165deg, #0f172a 0%, #1e293b 40%, #0f172a 70%, #0b1220 100%);
+}
+
+/* Token helpers (use in JSX to avoid fighting Tailwind overrides) */
+.ui-surface-0 { background: var(--surface-0); color: var(--text-0); }
+.ui-surface-1 { background: var(--surface-1); color: var(--text-0); }
+.ui-glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--text-0);
+}
+.ui-border-subtle { border-color: var(--border-subtle) !important; }
+.ui-shadow-1 { box-shadow: var(--shadow-1); }
+.ui-shadow-2 { box-shadow: var(--shadow-2); }
+
+/* Typography helpers */
+.ui-text-body { font-size: var(--ui-fs-body) !important; line-height: var(--ui-lh-body) !important; }
+.ui-text-title { font-size: var(--ui-fs-title) !important; line-height: var(--ui-lh-title) !important; }
+.ui-text-assist { font-size: var(--ui-fs-assist) !important; line-height: var(--ui-lh-assist) !important; }
+
+/* Chat/channel panel: full dynamic viewport height on mobile */
+.messenger-chat-panel {
+  /* Let flex layout control the height.
+     On Android, 100dvh + virtual keyboard can create a "white gap" because the visual viewport shrinks. */
+  height: 100%;
+  max-height: 100%;
+  padding-top: env(safe-area-inset-top);
+}
+@media (min-width: 768px) {
+  .messenger-chat-panel {
+    height: auto;
+    max-height: none;
+  }
+}
+
+:root[data-theme="dark"] body {
+  background: var(--surface-0);
+  color: var(--text-0);
+}
+
+:root[data-theme="dark"] .bg-white {
+  background-color: #0f172a !important;
+}
+
+:root[data-theme="dark"] .bg-white\/85,
+:root[data-theme="dark"] .bg-white\/90,
+:root[data-theme="dark"] .bg-white\/95,
+:root[data-theme="dark"] .bg-white\/70 {
+  background-color: rgba(15, 23, 42, 0.86) !important;
+}
+
+:root[data-theme="dark"] .bg-slate-50\/70,
+:root[data-theme="dark"] .bg-slate-50\/80 {
+  background-color: rgba(11, 18, 32, 0.72) !important;
+}
+
+:root[data-theme="dark"] .bg-blue-50\/70,
+:root[data-theme="dark"] .bg-blue-50\/80 {
+  background-color: rgba(30, 58, 138, 0.22) !important;
+}
+
+:root[data-theme="dark"] .bg-amber-50\/70,
+:root[data-theme="dark"] .bg-amber-50\/80 {
+  background-color: rgba(120, 53, 15, 0.22) !important;
+}
+
+:root[data-theme="dark"] .bg-slate-50 {
+  background-color: #0b1220 !important;
+}
+
+:root[data-theme="dark"] .bg-slate-100 {
+  background-color: #162133 !important;
+}
+
+:root[data-theme="dark"] .border-slate-100,
+:root[data-theme="dark"] .border-slate-200,
+:root[data-theme="dark"] .border-slate-300 {
+  border-color: #273449 !important;
+}
+
+:root[data-theme="dark"] .border-slate-200\/70,
+:root[data-theme="dark"] .border-slate-200\/80,
+:root[data-theme="dark"] .border-slate-200\/60 {
+  border-color: rgba(39, 52, 73, 0.75) !important;
+}
+
+:root[data-theme="dark"] .text-slate-900,
+:root[data-theme="dark"] .text-slate-800,
+:root[data-theme="dark"] .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+:root[data-theme="dark"] .text-slate-600,
+:root[data-theme="dark"] .text-slate-500,
+:root[data-theme="dark"] .text-slate-400 {
+  color: #9fb0c9 !important;
+}
+
+/* Landing animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.animate-fade-up {
+  animation: fade-up 0.6s ease-out forwards;
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+.gradient-bg {
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}
+
+/* Анимация стикеров */
+@keyframes sticker-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.05); }
+}
+@keyframes sticker-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(0,0,0,0.1)); }
+  50% { filter: drop-shadow(0 0 6px rgba(255,200,100,0.4)); }
+}
+.sticker-float {
+  animation: sticker-float 2.5s ease-in-out infinite;
+}
+.sticker-glow {
+  animation: sticker-glow 2s ease-in-out infinite;
+}
+.sticker-picker::-webkit-scrollbar {
+  height: 4px;
+}
+.sticker-picker::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* Скрыть ползунок, прокрутка вниз/вверх остаётся (колёсико, тач) */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Контейнер списка сообщений в чате: явно разрешаем вертикальный скролл (тач и колёсико) */
+.chat-messages-scroll {
+  touch-action: pan-y;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Сообщения: перенос длинных строк без пробелов (URL, вставки), чтобы не обрезались */
+.markdown-message {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.markdown-message a {
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+/* Лёгкая вибрация «вы уже здесь» при клике по юзернейму в текущем чате */
+@keyframes username-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+.animate-username-shake {
+  animation: username-shake 0.4s ease-in-out;
+}
+
+/* Быстрое плавное появление реакций у сообщения */
+@keyframes reactions-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-reactions-appear {
+  animation: reactions-appear 0.22s ease-out forwards;
+}
+
+/* Swipe-to-reply: GPU acceleration */
+.swipe-message {
+  will-change: transform;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .swipe-message {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+@keyframes swipe-bounce-back {
+  0%   { transform: translateX(var(--swipe-from, 60px)); }
+  45%  { transform: translateX(-8px); }
+  75%  { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+
+.swipe-bounce {
+  animation: swipe-bounce-back 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes msg-highlight-flash {
+  0%   { background-color: transparent; }
+  15%  { background-color: rgba(59, 130, 246, 0.4); }
+  100% { background-color: transparent; }
+}
+
+.msg-highlight-flash {
+  animation: msg-highlight-flash 3s ease-out;
+  border-radius: 1rem;
+}
+
+/* Настройки: плавное появление контента при смене раздела */
+@keyframes settings-section-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.settings-section-fade-in {
+  animation: settings-section-fade 0.2s ease-out forwards;
+}
+
+/* Мессенджер: плавное появление правой панели (чат / канал / приветствие) при переключении */
+.messenger-panel-fade-in {
+  animation: settings-section-fade 0.22s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+/* Плавное появление нового сообщения в чате (при отправке / получении) — быстрее и мягче */
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.message-enter {
+  animation: message-enter 0.2s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+/* Context menu: bottom sheet on mobile */
+@media (max-width: 767px) {
+  .context-menu-bottom-sheet {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    min-width: unset !important;
+    max-height: 65vh !important;
+    border-radius: 1rem 1rem 0 0;
+    border-top: 1px solid #e2e8f0;
+  }
+}
