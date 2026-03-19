@@ -45,6 +45,7 @@ import { REACTIONS } from "../lib/reaction-animations";
 import { switchLayout } from "../lib/layout-switcher";
 import { filterEmojiByPrefix } from "../data/emoji-shortcodes";
 import { useTranslation, formatLastSeenI18n, formatDateLabelI18n, formatMembersCount, getLocale, getWeekdays, t as tI18n } from "../lib/i18n";
+import { getChatMessageLayoutMeta } from "../lib/chat-layout";
 /* Default chat background: vector gradient (no image request) or custom background_url */
 
 /** Reaction emojis (from reaction-animations, matches backend) */
@@ -57,7 +58,6 @@ const MESSAGE_MAX_LENGTH = 4096;
 const VIRTUALIZATION_THRESHOLD = 120;
 const VIRTUAL_ROW_ESTIMATE = 92;
 const VIRTUAL_OVERSCAN = 10;
-const GROUP_TIME_MS = 5 * 60 * 1000;
 const CHANNEL_COMMENTS_PAGE_SIZE = 200;
 
 type VoiceInfoKind = "voice" | "circle";
@@ -208,14 +208,6 @@ type SpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
    Helpers
    ================================================================ */
 
-/** Check whether two ISO dates fall on the same calendar day in the local timezone */
-function isSameDay(isoA: string | undefined, isoB: string | undefined): boolean {
-  if (!isoA || !isoB) return false;
-  const a = new Date(isoA);
-  const b = new Date(isoB);
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
 /** Format date for dividers: "Today", "Yesterday", or "February 15 [2025]" */
 function formatDateLabel(iso: string | undefined, lang: "en" | "ru"): string {
   return formatDateLabelI18n(iso, lang);
@@ -273,13 +265,6 @@ function getSenderId(msg: Message): string {
   if ((msg as { sender_id?: string }).sender_id) return (msg as { sender_id?: string }).sender_id!;
   if (msg.sender && typeof msg.sender === "object" && "id" in msg.sender) return (msg.sender as User).id;
   return "";
-}
-
-/** Unique key for grouping messages by sender. For Telegram import (sender_display_name), each display name = separate sender. */
-function getSenderKey(msg: Message): string {
-  const dn = (msg as { sender_display_name?: string }).sender_display_name;
-  if (dn) return `dn:${dn}`;
-  return getSenderId(msg) || "?";
 }
 
 function getSenderName(msg: Message): string {
@@ -4061,7 +4046,7 @@ export default function ChatPage({
   /* ---------- Loading: show full-page only when no conversation (invalid route). Otherwise show shell and load messages in place. ---------- */
   if (!conversationId || !token) {
     return (
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-50 w-full">
+      <div className="chat-thread-shell flex-1 min-h-0 flex items-center justify-center w-full">
         <p className="text-slate-500">{t("common.loading")}</p>
       </div>
     );
@@ -4087,7 +4072,7 @@ export default function ChatPage({
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 w-full bg-slate-50 overflow-hidden">
+    <div className="chat-thread-shell flex flex-col flex-1 min-h-0 w-full overflow-hidden">
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
       {/* Single image viewer modal — dimmed overlay + centered image */}
@@ -4259,12 +4244,9 @@ export default function ChatPage({
 
         {/* Header — sticky on mobile so it stays visible when keyboard opens */}
       <header
-        className="sticky z-30 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
+        className="chat-topbar-surface sticky z-30 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
         style={{
           top: "env(safe-area-inset-top)",
-          background: "var(--glass-bg)",
-          borderColor: "var(--border-subtle)",
-          boxShadow: "var(--shadow-1)",
         }}
       >
           {selectionMode ? (
@@ -4347,35 +4329,37 @@ export default function ChatPage({
                   </svg>
                 )}
               </h1>
-              <p className="text-sm text-slate-600">
-                {isCommentsView ? (
-                  `${visiblePostComments.length}${displayChat?.title ? ` - ${displayChat.title}` : ""}`
-                ) : (<>
-                {displayChat?.is_personal && displayChat.other_member ? (
-                  typing ? (
-                    <span className="text-slate-400 italic">{typing} {t("chat.typing")}</span>
+              {(!displayChat?.is_favorites || isCommentsView) && (
+                <p className="text-sm text-slate-600">
+                  {isCommentsView ? (
+                    `${visiblePostComments.length}${displayChat?.title ? ` - ${displayChat.title}` : ""}`
+                  ) : (<>
+                  {displayChat?.is_personal && displayChat.other_member ? (
+                    typing ? (
+                      <span className="text-slate-400 italic">{typing} {t("chat.typing")}</span>
+                    ) : (
+                      <>
+                        {displayChat.is_secret && <span>{t("secretChat.title")}</span>}
+                        {onlineStatus[displayChat.other_member.id]?.is_online ? (
+                          <span className={displayChat.is_secret ? " text-green-500 ml-1" : " text-green-500"}>{displayChat.is_secret ? " · " : ""}{t("chat.online")}</span>
+                        ) : onlineStatus[displayChat.other_member.id]?.last_seen_display ? (
+                          <span className={displayChat.is_secret ? " ml-1" : ""}>{displayChat.is_secret ? " · " : ""}{formatLastSeen(onlineStatus[displayChat.other_member.id].last_seen_display, lang)}</span>
+                        ) : null}
+                      </>
+                    )
                   ) : (
-                    <>
-                      {displayChat.is_secret && <span>{t("secretChat.title")}</span>}
-                      {onlineStatus[displayChat.other_member.id]?.is_online ? (
-                        <span className={displayChat.is_secret ? " text-green-500 ml-1" : " text-green-500"}>{displayChat.is_secret ? " · " : ""}{t("chat.online")}</span>
-                      ) : onlineStatus[displayChat.other_member.id]?.last_seen_display ? (
-                        <span className={displayChat.is_secret ? " ml-1" : ""}>{displayChat.is_secret ? " · " : ""}{formatLastSeen(onlineStatus[displayChat.other_member.id].last_seen_display, lang)}</span>
-                      ) : null}
-                    </>
-                  )
-                ) : (
-                  (() => {
-                    const onlineCount = members.filter((m) => onlineStatus[m.user.id]?.is_online && m.user.id !== myUserId).length + (onlineStatus[myUserId]?.is_online ? 1 : 0);
-                    // Prefer live members list (active only). Fallback to chat.members_count for shell/loading.
-                    const totalMembers = activeMembers.length > 0 ? activeMembers.length : (displayChat?.members_count ?? 0);
-                    const membersLabel = formatMembersCount(totalMembers, lang);
-                    const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} ${t("chat.online")}` : "";
-                    return membersLabel + onlineLabel;
-                  })()
-                )}
-                </>)}
-              </p>
+                    (() => {
+                      const onlineCount = members.filter((m) => onlineStatus[m.user.id]?.is_online && m.user.id !== myUserId).length + (onlineStatus[myUserId]?.is_online ? 1 : 0);
+                      // Prefer live members list (active only). Fallback to chat.members_count for shell/loading.
+                      const totalMembers = activeMembers.length > 0 ? activeMembers.length : (displayChat?.members_count ?? 0);
+                      const membersLabel = formatMembersCount(totalMembers, lang);
+                      const onlineLabel = onlineCount > 0 ? ` · ${onlineCount} ${t("chat.online")}` : "";
+                      return membersLabel + onlineLabel;
+                    })()
+                  )}
+                  </>)}
+                </p>
+              )}
             </button>
           </div>
           {!isCommentsView && (
@@ -4486,8 +4470,7 @@ export default function ChatPage({
 
           return (
           <div
-            className="shrink-0 border-b backdrop-blur z-20"
-            style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+            className="chat-topbar-surface shrink-0 border-b backdrop-blur z-20"
           >
               <button
                 type="button"
@@ -4554,7 +4537,7 @@ export default function ChatPage({
           <div className="absolute inset-0 pointer-events-none z-0" aria-hidden style={{ backgroundImage: "var(--chat-bg-vignette)" }} />
           <div
             ref={setMessagesScrollRef}
-            className="chat-messages-scroll flex-1 min-h-0 p-2 pb-3 sm:pt-3 sm:px-3 scrollbar-hide relative z-10"
+            className="chat-thread-canvas chat-messages-scroll flex-1 min-h-0 p-2.5 pb-3 sm:pt-3 sm:px-3.5 scrollbar-hide relative z-10"
             onContextMenu={(e) => e.preventDefault()}
             onScroll={handleMessagesScroll}
           >
@@ -4593,29 +4576,19 @@ export default function ChatPage({
               ) : (
                 <div className="flex flex-col pb-2">
                   {postComments.map((msg, index) => {
-                    const prevMsg = postComments[index - 1];
-                    const nextMsg = postComments[index + 1];
-                    const sameNextSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
-                    const nextGap = nextMsg
-                      ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
-                      : Infinity;
-                    const showAvatar = !nextMsg || !sameNextSender || nextGap >= GROUP_TIME_MS;
-                    const isLastInGroup = showAvatar && !!prevMsg && getSenderKey(prevMsg) === getSenderKey(msg);
-                    const isFirstInGroup = !prevMsg || getSenderKey(prevMsg) !== getSenderKey(msg) ||
-                      new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
-                    const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
+                    const layout = getChatMessageLayoutMeta(postComments, index);
                     const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
                     return (
-                      <div key={msg.id} className={`${isFirstInGroup ? "mt-3" : "mt-2"}`}>
-                        {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
+                      <div key={msg.id} className={layout.rowGapClass}>
+                        {layout.showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         <MessageBubble
                           message={msg}
                           isMine={isMine}
                           chatId={conversationId}
                           textScale={textScale}
-                          showAvatar={showAvatar}
-                          isLastInGroup={isLastInGroup}
-                          showSenderName={isFirstInGroup}
+                          showAvatar={layout.showAvatar}
+                          isLastInGroup={layout.isLastInGroup}
+                          showSenderName={layout.isFirstInGroup}
                           onMessageUpdated={handleCommentUpdated}
                           onMessageDeleted={handleCommentDeleted}
                           onUpdateMessageContent={handleUpdateCommentContent}
@@ -4745,17 +4718,7 @@ export default function ChatPage({
                     const isMine = channelId
                       ? ((msg as Message & { authorId?: string }).authorId === myUserId)
                       : ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId);
-                    const nextMsg = messages[i + 1];
-                    const sameSender = nextMsg && getSenderKey(msg) === getSenderKey(nextMsg);
-                    const timeGap = nextMsg
-                      ? new Date(nextMsg.created_at).getTime() - new Date(msg.created_at).getTime()
-                      : Infinity;
-                    const showAvatar = !nextMsg || !sameSender || timeGap >= GROUP_TIME_MS;
-                    const prevMsg = messages[i - 1];
-                    const isLastInGroup = showAvatar && !!prevMsg && getSenderKey(prevMsg) === getSenderKey(msg);
-                    const isFirstInGroup = !prevMsg || getSenderKey(prevMsg) !== getSenderKey(msg) ||
-                      new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() >= GROUP_TIME_MS;
-                    const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, msg.created_at);
+                    const layout = getChatMessageLayoutMeta(messages, i);
                     const msgTime = msg.created_at ? new Date(msg.created_at).getTime() : 0;
                     const isNewMessage = msgTime > 0 && Date.now() - msgTime < 2800;
                     const commentsCount = msg.comments_count ?? 0;
@@ -4779,9 +4742,9 @@ export default function ChatPage({
                             setVirtualMeasureTick((v) => v + 1);
                           }
                         }}
-                        className={`bubbles-group ${isFirstInGroup ? "mt-3" : "mt-2"} transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
+                        className={`bubbles-group ${layout.rowGapClass} transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
                       >
-                        {showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
+                        {layout.showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         {showUnreadLine && i === firstUnreadIndex && (
                           <div data-unread-line className="flex items-center gap-3 py-1.5">
                             <span className="flex-1 h-px bg-slate-300" aria-hidden />
@@ -4819,9 +4782,9 @@ export default function ChatPage({
                             xhr.onerror = () => setDownloadProgressByMessageId((prev) => { const n = { ...prev }; delete n[messageId]; return n; });
                             xhr.send();
                           }}
-                          showAvatar={showAvatar}
-                          isLastInGroup={isLastInGroup}
-                          showSenderName={isFirstInGroup && !!chat && !chat.is_personal && !chat.is_favorites}
+                          showAvatar={layout.showAvatar}
+                          isLastInGroup={layout.isLastInGroup}
+                          showSenderName={layout.isFirstInGroup && !!chat && !chat.is_personal && !chat.is_favorites}
                           chatId={conversationId!}
                           channelId={channelId ?? undefined}
                           textScale={textScale}
@@ -4861,7 +4824,7 @@ export default function ChatPage({
                           }}
                           data-message-id={msg.id}
                           className="w-full shrink-0"
-                          style={{ height: showAvatar ? 5 : 0 }}
+                          style={{ height: layout.sentinelHeight }}
                           aria-hidden
                         />
                       </div>
@@ -4988,7 +4951,7 @@ export default function ChatPage({
 
         {/* Selection action bar */}
         {!isCommentsView && selectionMode && selectedMessageIds.size > 0 && (
-          <div className="border-t border-slate-200 bg-white px-4 py-3 flex items-center justify-center gap-3">
+          <div className="chat-topbar-surface border-t px-4 py-3 flex items-center justify-center gap-3">
             <button
               type="button"
               onClick={handleBulkDelete}
@@ -5011,8 +4974,7 @@ export default function ChatPage({
         {/* Input bar — visible as soon as we're on a chat (conversationId) so layout doesn't jerk when chat loads */}
         {conversationId && (isCommentsView ? (
           <div
-            className="shrink-0 relative border-t backdrop-blur"
-            style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "0 -12px 28px rgba(15,23,42,0.10)" }}
+            className="chat-composer-surface shrink-0 relative border-t backdrop-blur"
           >
             {commentsError && <div className="px-4 pt-3 text-sm text-red-600">{commentsError}</div>}
             {replyToComment && (
@@ -5100,8 +5062,7 @@ export default function ChatPage({
           </div>
         ) : (
           <div
-            className="shrink-0 relative border-t backdrop-blur"
-            style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "0 -12px 28px rgba(15,23,42,0.10)" }}
+            className="chat-composer-surface shrink-0 relative border-t backdrop-blur"
           >
             {channelId && !canPostToChannel ? (
               <div className="px-4 py-3 text-center text-slate-500 text-sm">{t("channelPage.onlyAuthorCanPost")}</div>
@@ -5661,11 +5622,11 @@ export default function ChatPage({
           />
           <aside
             className={`
-              fixed inset-0 z-50 bg-white/90 backdrop-blur flex flex-col overflow-y-auto
+              fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] backdrop-blur
               md:static md:inset-auto md:z-auto md:w-80 md:border-l md:border-slate-200/70 md:shrink-0
             `}
           >
-            <div className="relative z-10 p-3 border-b border-slate-200/70 flex items-center gap-2 shrink-0 bg-white/80 backdrop-blur">
+            <div className="relative z-10 flex h-16 shrink-0 items-center gap-2 border-b border-slate-200/70 bg-white/88 px-3 backdrop-blur">
               <button
                 type="button"
                 onClick={() => setShowInfo(false)}
@@ -5850,8 +5811,8 @@ export default function ChatPage({
                     );
                   })()}
               </div>
-              <h2 className="text-lg font-semibold text-slate-800 truncate flex-1 text-center min-w-0">{t("chat.aboutChat")}</h2>
-              <button type="button" onClick={() => setShowInfo(false)} className="text-slate-400 hover:text-slate-600 p-1 shrink-0">&#10005;</button>
+              <h2 className="min-w-0 flex-1 truncate text-center text-[1.05rem] font-semibold text-slate-800">{t("chat.aboutChat")}</h2>
+              <button type="button" onClick={() => setShowInfo(false)} className="shrink-0 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100/80 hover:text-slate-600">&#10005;</button>
             </div>
 
             {/* ===== User profile view ===== */}
@@ -5898,9 +5859,9 @@ export default function ChatPage({
                 return m.msg_type === "file" || (m.file && typeof m.file === "object");
               }).length;
               return (
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto px-3 py-3">
                   {/* Back to chat info */}
-                  <div className="px-3 pt-2 pb-1">
+                  <div className="mb-3 rounded-2xl border border-slate-200/80 bg-white/88 px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
                     <button
                       type="button"
                       onClick={() => setInfoUserId(null)}
@@ -5912,7 +5873,7 @@ export default function ChatPage({
                   </div>
 
                   {/* Avatar + name */}
-                  <div className="flex flex-col items-center px-4 pb-4">
+                  <div className="flex flex-col items-center rounded-[28px] border border-slate-200/80 bg-white/90 px-4 pb-4 pt-4 shadow-[0_18px_38px_rgba(15,23,42,0.05)]">
                     <div className="relative">
                       {avatarUrl ? (
                         <button
@@ -6022,8 +5983,8 @@ export default function ChatPage({
                       const currentContact = contacts.find((c) => c.contact_user.id === profileUser.id);
                       const isEditing = editingContactId === profileUser.id;
                       return (
-                        <div className="w-full mt-4">
-                          <div className="w-full rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div className="mt-4 w-full">
+                          <div className="w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white/92 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
                             {currentContact ? (
                               <>
                                 {isEditing ? (
@@ -6174,8 +6135,8 @@ export default function ChatPage({
                     })()}
 
                     {/* Media / Files shortcuts (Telegram-like) */}
-                    <div className="w-full mt-4">
-                      <div className="w-full rounded-xl border border-slate-200 overflow-hidden bg-white">
+                    <div className="mt-4 w-full">
+                      <div className="w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white/92 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
                         <button
                           type="button"
                           onClick={() => { setInfoUserId(null); setMediaLinksFilesTab("media"); }}
@@ -6213,7 +6174,7 @@ export default function ChatPage({
                   </div>
 
                   {/* Actions */}
-                  <div className="px-4 pb-4 space-y-2">
+                  <div className="px-1 pb-1 pt-4 space-y-2">
                     {!isMe && onOpenDmWithUserId && (
                       <button
                         type="button"
@@ -6239,7 +6200,8 @@ export default function ChatPage({
             )}
 
             {/* Avatar */}
-            <div className="flex flex-col items-center mb-3">
+            <div className="mx-3 mb-3 rounded-[28px] border border-slate-200/80 bg-white/90 px-5 pb-5 pt-4 shadow-[0_18px_38px_rgba(15,23,42,0.05)]">
+              <div className="flex flex-col items-center">
               <div className="relative group">
                 {chat.is_favorites ? (
                   <div className="w-20 h-20 rounded-full bg-blue-500 flex items-center justify-center">
@@ -6388,11 +6350,13 @@ export default function ChatPage({
                   </div>
                 );
               })()}
+              </div>
             </div>
 
             {/* Быстрые действия — только для личного чата: одна строка, равные квадраты */}
             {chat.is_personal && chat.other_member && (
-              <div className="grid grid-cols-3 gap-2 px-4 mb-3 max-w-[240px] mx-auto">
+              <div className="mx-3 mb-3 rounded-[24px] border border-slate-200/80 bg-white/90 p-3 shadow-[0_14px_28px_rgba(15,23,42,0.04)]">
+              <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto">
                 <button
                   type="button"
                   onClick={() => setShowInfo(false)}
@@ -6450,10 +6414,11 @@ export default function ChatPage({
                   <span className="text-[0.625rem] font-medium leading-tight truncate w-full px-0.5 text-center">{t("chat.share")}</span>
                 </button>
               </div>
+              </div>
             )}
 
             {!chat.is_personal && !chat.is_favorites && (
-            <div className="mb-3 px-5">
+            <div className="mx-3 mb-3 rounded-[24px] border border-slate-200/80 bg-white/90 px-5 py-4 shadow-[0_14px_28px_rgba(15,23,42,0.04)]">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-slate-400 uppercase tracking-wide">Описание</span>
                   {chat.owner?.id === myUserId && !editingDescription && (
@@ -6875,7 +6840,7 @@ function getFileIconType(mime: string, fileName: string): FileIconType {
 }
 
 const FileTypeIconBox = memo(function FileTypeIconBox({ type, isMine }: { type: FileIconType; isMine: boolean }) {
-  const bg = isMine ? "bg-blue-200/90" : "bg-slate-200/90";
+  const bg = isMine ? "bg-blue-200/80 text-blue-700" : "bg-slate-200/90 text-slate-600";
   const iconClass = "w-5 h-5 shrink-0";
   const icons: Record<FileIconType, React.ReactNode> = {
     document: (
@@ -6904,13 +6869,85 @@ const FileTypeIconBox = memo(function FileTypeIconBox({ type, isMine }: { type: 
     ),
   };
   return (
-    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${bg}`} aria-hidden>
+    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${bg}`} aria-hidden>
       {icons[type]}
     </div>
   );
 });
 
 /** File name: if it fits half the screen — show in full without wrapping; otherwise start + "....." + last 5 chars + extension */
+function parseSharedContactMessage(content: string): { name: string; href: string; label: string } | null {
+  const match = content.trim().match(/^👤\s+(.+?)\s+—\s+(https?:\/\/\S+)$/);
+  if (!match) return null;
+  try {
+    const href = match[2];
+    const url = new URL(href);
+    const label = url.searchParams.get("write") || url.pathname.replace(/^\/+/, "") || href;
+    return { name: match[1].trim(), href, label };
+  } catch {
+    return null;
+  }
+}
+
+function TelegramInfoCard({
+  leading,
+  title,
+  subtitle,
+  isMine,
+  href,
+  onClick,
+  disabled = false,
+  titleNode,
+}: {
+  leading: React.ReactNode;
+  title?: string;
+  subtitle?: string;
+  isMine: boolean;
+  href?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  titleNode?: React.ReactNode;
+}) {
+  const className = `chat-entity-card ${isMine ? "chat-entity-card--mine" : "chat-entity-card--other"} ${disabled ? "opacity-75" : "cursor-pointer hover:-translate-y-px"} transition-[transform,box-shadow,border-color,background-color] duration-150 ease-out`;
+  const content = (
+    <>
+      <div className="shrink-0">{leading}</div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-slate-800">
+          {titleNode ?? title}
+        </div>
+        {subtitle ? (
+          <div className="mt-0.5 truncate text-[0.6875rem] text-slate-500">
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={`flex min-w-[220px] max-w-full items-center gap-3 rounded-[20px] px-3 py-2.5 text-left ${className}`}>
+        {content}
+      </a>
+    );
+  }
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} disabled={disabled} className={`flex min-w-[220px] max-w-full items-center gap-3 rounded-[20px] px-3 py-2.5 text-left ${className}`}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={`flex min-w-[220px] max-w-full items-center gap-3 rounded-[20px] px-3 py-2.5 ${className}`}>
+      {content}
+    </div>
+  );
+}
+
 function FileNameDisplay({ fileName, className = "" }: { fileName: string; className?: string }) {
   const measureRef = useRef<HTMLSpanElement>(null);
   const [display, setDisplay] = useState<{ text: string; full: boolean }>({ text: fileName, full: true });
@@ -6942,7 +6979,7 @@ function FileNameDisplay({ fileName, className = "" }: { fileName: string; class
       <span ref={measureRef} aria-hidden className="absolute text-sm whitespace-nowrap" style={{ left: -9999, visibility: "hidden" }}>
         {fileName}
       </span>
-      <span className={`underline text-sm whitespace-nowrap overflow-hidden text-ellipsis block ${className}`} title={display.full ? undefined : fileName}>
+      <span className={`text-sm whitespace-nowrap overflow-hidden text-ellipsis block ${className}`} title={display.full ? undefined : fileName}>
         {display.text}
       </span>
     </span>
@@ -7522,7 +7559,9 @@ const MessageBubble = memo(function MessageBubble({
   const isPoll = message.msg_type === "poll" && message.poll_data;
   const senderName = getSenderName(message);
   const content = message.content || t("common.fileMsg");
-  const isShortText = !isFile && !content.includes("\n") && content.length <= 40;
+  const sharedContact = !isFile ? parseSharedContactMessage(content) : null;
+  const isSharedContact = !!sharedContact;
+  const isShortText = !isFile && !isSharedContact && !content.includes("\n") && content.length <= 40;
   const isEmojiOnly = !isFile && !content.includes("\n") && isOnlyEmoji(content);
   const reactions = message.reactions ?? {};
   const myReactions: string[] = message.my_reactions ?? [];
@@ -7638,6 +7677,11 @@ const MessageBubble = memo(function MessageBubble({
   const hasReactions = Object.keys(reactions).length > 0;
   const reactionEntries = Object.entries(reactions).filter(([, c]) => c > 0);
   const hasCommentsFooter = typeof commentsCount === "number" && commentsCount >= 0 && !!onOpenComments;
+  const fileCardSubtitle = uploadProgress || downloadProgress
+    ? `${(uploadProgress ? (uploadProgress.loaded / 1024 / 1024).toFixed(1) : (downloadProgress!.loaded / 1024 / 1024).toFixed(1))} / ${(uploadProgress ? (uploadProgress.total / 1024 / 1024).toFixed(1) : (downloadProgress!.total / 1024 / 1024).toFixed(1))} ${t("chat.progressMB")}`
+    : (isAudio ? t("common.voice") : t("common.fileMsg"));
+  const bubbleSurfaceClass = isMine ? "chat-bubble-surface chat-bubble-surface--mine" : "chat-bubble-surface chat-bubble-surface--other";
+  const commentsFooterSurfaceClass = isMine ? "chat-bubble-footer chat-bubble-footer--mine" : "chat-bubble-footer chat-bubble-footer--other";
 
   const reactionCount = reactionEntries.length;
   const allowReactionWrap = reactionCount >= 5;
@@ -7890,7 +7934,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
         <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${isLastInGroup ? "relative overflow-visible" : ""}`} style={optimalBubbleWidth != null && !hasCommentsFooter ? { maxWidth: optimalBubbleWidth } : undefined}>
-        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${message.edited_at && !hasCommentsFooter ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? "overflow-hidden bg-white border border-slate-200" : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 ${isMine ? "bg-blue-100 text-slate-800" : "bg-white border border-slate-200 text-slate-800"}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
+        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${message.edited_at && !hasCommentsFooter ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? `overflow-hidden ${bubbleSurfaceClass}` : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 text-slate-800 ${bubbleSurfaceClass}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
           {/* Имя отправителя — внутри пузырька, тот же размер что и текст сообщения */}
           {showSenderName ? (
             <div className={`mb-0.5 w-full min-w-0 ${isImageBubble || isSticker ? "px-3 pt-2 pb-1" : ""}`}>
@@ -8097,6 +8141,78 @@ const MessageBubble = memo(function MessageBubble({
                 </div>
               </div>
             </div>
+          ) : isSharedContact && sharedContact ? (
+            <div className="min-w-0 max-w-full">
+              <TelegramInfoCard
+                isMine={isMine}
+                href={sharedContact.href}
+                leading={
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-2xl text-lg ${isMine ? "bg-blue-200/80 text-blue-700" : "bg-slate-200/90 text-slate-600"}`}>
+                    {sharedContact.name.trim().charAt(0).toUpperCase() || "👤"}
+                  </div>
+                }
+                title={sharedContact.name}
+                subtitle={`@${sharedContact.label}`}
+              />
+              <div className="mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
+              </div>
+            </div>
+          ) : uploadProgress && message.msg_type === "audio" ? (
+            <div className="min-w-0 max-w-full">
+              <TelegramInfoCard
+                isMine={isMine}
+                leading={<FileTypeIconBox type="audio" isMine={isMine} />}
+                title={fileName || content || t("common.voice")}
+                subtitle={fileCardSubtitle}
+                onClick={onCancelUpload ? () => onCancelUpload(message.id) : undefined}
+                disabled={!onCancelUpload}
+              />
+              <div className="mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
+              </div>
+            </div>
+          ) : uploadProgress && isFile && message.msg_type !== "audio" && message.msg_type !== "video_circle" ? (
+            <div className="min-w-0 max-w-full">
+              <TelegramInfoCard
+                isMine={isMine}
+                leading={<FileTypeIconBox type={getFileIconType(fileMime, fileName || content || "")} isMine={isMine} />}
+                titleNode={<FileNameDisplay fileName={fileName || content || t("common.fileMsg")} />}
+                subtitle={fileCardSubtitle}
+                onClick={onCancelUpload ? () => onCancelUpload(message.id) : undefined}
+                disabled={!onCancelUpload}
+              />
+              <div className="mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
+              </div>
+            </div>
+          ) : isFile && !isAudio && !isVideo && !isImageBubble && !uploadProgress && onDownloadWithProgress && !isMine ? (
+            <div className="min-w-0 max-w-full">
+              <TelegramInfoCard
+                isMine={isMine}
+                leading={<FileTypeIconBox type={getFileIconType(fileMime, fileName || "")} isMine={isMine} />}
+                titleNode={<FileNameDisplay fileName={fileName || t("common.fileMsg")} />}
+                subtitle={fileCardSubtitle}
+                onClick={() => onDownloadWithProgress(message.id, fileUrl, fileName || content || "file")}
+                disabled={!!downloadProgress}
+              />
+              <div className="mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
+              </div>
+            </div>
+          ) : isFile && !isAudio && !isVideo && !isImageBubble && !uploadProgress ? (
+            <div className="min-w-0 max-w-full">
+              <TelegramInfoCard
+                isMine={isMine}
+                leading={<FileTypeIconBox type={getFileIconType(fileMime, fileName || "")} isMine={isMine} />}
+                titleNode={<FileNameDisplay fileName={fileName || t("common.fileMsg")} />}
+                subtitle={fileCardSubtitle}
+                href={fileUrl}
+              />
+              <div className="mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start">
+                {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
+              </div>
+            </div>
           ) : isFile && (message.file || uploadProgress) ? (
             <div className="min-w-0 max-w-full">
               {(uploadProgress || downloadProgress) && !(uploadProgress && message.msg_type === "audio") && !(uploadProgress && message.msg_type === "video_circle") && (
@@ -8232,8 +8348,8 @@ const MessageBubble = memo(function MessageBubble({
               onClick={onOpenComments}
               className={`group block w-full min-w-0 cursor-pointer text-left box-border ${isLastInGroup ? "!rounded-bl-[4px]" : ""} ${
                 isImageBubble || isSticker
-                  ? `mt-0 border-t px-3 py-2 rounded-b-2xl hover:bg-blue-500 hover:text-white transition-colors ${isMine ? "border-blue-200/80 bg-blue-100 text-slate-800" : "border-slate-200 bg-white text-slate-800"}`
-                  : `mt-2 border-t px-3 py-2 rounded-b-2xl hover:bg-blue-500 hover:text-white transition-colors ${isMine ? "border-blue-200/80 bg-blue-100 text-slate-800" : "border-slate-200/80 bg-white text-slate-800"}`
+                  ? `mt-0 border-t px-3 py-2 rounded-b-2xl transition-colors ${commentsFooterSurfaceClass}`
+                  : `mt-2 border-t px-3 py-2 rounded-b-2xl transition-colors ${commentsFooterSurfaceClass}`
               }`}
               title={t("channelComments.openDiscussion")}
             >
