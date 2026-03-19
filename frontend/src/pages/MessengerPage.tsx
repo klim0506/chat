@@ -24,6 +24,7 @@ import { usePreferencesStore } from "../store/preferences";
 import type { AppLanguage } from "../store/preferences";
 import { MediaImage } from "../components/MediaImage";
 import { buildUserInfoHref } from "../lib/user-info-link";
+import { buildSearchSnippet, scoreChannelForSearch, scoreChatForSearch, scoreGlobalSearchResult } from "../lib/search";
 
 /** Compact time for chat list: today = "14:30", yesterday = "Вчера", older = "12 мар" */
 function formatLastMessageTime(iso: string | undefined | null, lang: AppLanguage): string {
@@ -57,6 +58,7 @@ function formatMessagePreview(msg: { msg_type?: string; content?: string; file?:
 const ARCHIVE_FOLDER_ID = "__archive__";
 const PERSONAL_FOLDER_ID = "__personal__";
 const UNREAD_FOLDER_ID = "__unread__";
+const WELCOME_ANIMATION_SRC = "/assets/welcome.mp4";
 
 const FOLDER_NAME_MAX_LEN = 14;
 
@@ -106,6 +108,65 @@ function getActivityTimeMs(iso: string | null | undefined): number {
   if (!iso) return 0;
   const ts = new Date(iso).getTime();
   return Number.isFinite(ts) ? ts : 0;
+}
+
+function WelcomeAnimationButton() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const playCountRef = useRef(0);
+
+  const replay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    playCountRef.current = 0;
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    playCountRef.current += 1;
+    if (playCountRef.current < 2) {
+      video.currentTime = 0;
+      void video.play().catch(() => {});
+    }
+  }, []);
+
+  return (
+    <button
+      type="button"
+      onClick={replay}
+      className="mx-auto mb-6 inline-flex min-h-[10.08rem] min-w-[10.08rem] items-center justify-center transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 sm:min-h-[11.52rem] sm:min-w-[11.52rem]"
+      aria-label="Replay welcome animation"
+    >
+      <video
+        ref={videoRef}
+        src={WELCOME_ANIMATION_SRC}
+        autoPlay
+        muted
+        playsInline
+        preload="auto"
+        onEnded={handleEnded}
+        className="block max-h-[10.08rem] w-auto max-w-[10.08rem] object-contain sm:max-h-[11.52rem] sm:max-w-[11.52rem]"
+      />
+    </button>
+  );
+}
+
+function highlightMatch(text: string, query: string): ReactNode {
+  const source = String(text || "");
+  const needle = String(query || "").trim();
+  if (!source || !needle) return source;
+  const index = source.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+  if (index < 0) return source;
+  const end = index + needle.length;
+  return (
+    <>
+      {source.slice(0, index)}
+      <mark className="rounded bg-amber-100 px-0.5 text-inherit">{source.slice(index, end)}</mark>
+      {source.slice(end)}
+    </>
+  );
 }
 
 type SidebarConversationItem =
@@ -243,10 +304,10 @@ export default function MessengerPage() {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
       const w = localStorage.getItem("sidebarWidth");
-      const n = w ? Number(w) : 320;
-      return Number.isFinite(n) ? Math.min(520, Math.max(220, n)) : 320;
+      const n = w ? Number(w) : 380;
+      return Number.isFinite(n) ? Math.min(620, Math.max(280, n)) : 380;
     } catch {
-      return 320;
+      return 380;
     }
   });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -283,23 +344,12 @@ export default function MessengerPage() {
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const createMenuPopoverRef = useRef<HTMLDivElement>(null);
-  const [inviteFriendsCopied, setInviteFriendsCopied] = useState(false);
-  const [expandedOnboardingBlock, setExpandedOnboardingBlock] = useState<"invite" | "create" | null>(null);
-  const [referralLink, setReferralLink] = useState(window.location.origin);
   const MAX_PINNED = 5;
   const lastSyncedPinnedRef = useRef<string[]>([]);
 
   useEffect(() => {
     tRef.current = t;
   }, [t]);
-
-  // Fetch referral code for invite links
-  useEffect(() => {
-    authApi.me().then((r) => {
-      const code = r.data.referral_code;
-      if (code) setReferralLink(`${window.location.origin}/auth?ref=${code}`);
-    }).catch(() => {});
-  }, []);
 
   // Toast: link copied on chat creation (group — invite link, DM — chat link)
   useEffect(() => {
@@ -736,11 +786,11 @@ export default function MessengerPage() {
     }
   }, [selectedFolderId, showFolderArchive, showFolderPersonal, showFolderUnread]);
 
-  const openChat = (chatId: string) => {
+  const openChat = (chatId: string, state?: { targetMessageId?: string }) => {
     setActiveChatId(chatId);
     setActiveChannelId(null);
     storeSetUnread(chatId, 0);
-    navigate(`/chat/${chatId}`, { replace: true });
+    navigate(`/chat/${chatId}`, { replace: true, state });
   };
 
   const closeChat = () => {
@@ -827,27 +877,36 @@ export default function MessengerPage() {
   }
 
   const q = searchQuery.trim().toLowerCase();
-  const filteredChats = q
-    ? baseChats.filter((c) => {
-        const title = (c.title || "").toLowerCase();
-        const otherName = (c.is_personal && c.other_member)
-          ? (c.other_member.display_name || c.other_member.phone || (c.other_member as { username?: string }).username || "").toLowerCase()
-          : "";
-        const otherUsername = (c.is_personal && c.other_member && (c.other_member as { username?: string }).username)
-          ? String((c.other_member as { username?: string }).username || "").toLowerCase()
-          : "";
-        return title.includes(q) || otherName.includes(q) || otherUsername.includes(q);
-      })
-    : baseChats;
-
   const baseChannels = selectedFolderId ? [] : channels;
-  const filteredChannels = q
-    ? baseChannels.filter((c) => {
-        const title = (c.title || "").toLowerCase();
-        const username = (c.username || "").toLowerCase();
-        return title.includes(q) || username.includes(q);
-      })
-    : baseChannels;
+  const rankedChats = useMemo(() => {
+    if (!q) return baseChats.map((chat) => ({ chat, score: 0 }));
+    return baseChats
+      .map((chat) => ({
+        chat,
+        score: scoreChatForSearch(q, chat, getActivityTimeMs(chat.last_message_at || chat.created_at)),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return getActivityTimeMs(b.chat.last_message_at || b.chat.created_at) - getActivityTimeMs(a.chat.last_message_at || a.chat.created_at);
+      });
+  }, [baseChats, q]);
+  const filteredChats = useMemo(() => rankedChats.map((entry) => entry.chat), [rankedChats]);
+
+  const rankedChannels = useMemo(() => {
+    if (!q) return baseChannels.map((channel) => ({ channel, score: 0 }));
+    return baseChannels
+      .map((channel) => ({
+        channel,
+        score: scoreChannelForSearch(q, channel, getActivityTimeMs(channel.last_post_at || channel.created_at)),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return getActivityTimeMs(b.channel.last_post_at || b.channel.created_at) - getActivityTimeMs(a.channel.last_post_at || a.channel.created_at);
+      });
+  }, [baseChannels, q]);
+  const filteredChannels = useMemo(() => rankedChannels.map((entry) => entry.channel), [rankedChannels]);
   const sidebarItems = useMemo<SidebarConversationItem[]>(() => {
     const items: SidebarConversationItem[] = [
       ...filteredChats.map((chat) => ({
@@ -882,7 +941,7 @@ export default function MessengerPage() {
     const startW = sidebarWidth;
     const onMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
-      setSidebarWidth(Math.min(520, Math.max(220, startW + dx)));
+      setSidebarWidth(Math.min(620, Math.max(280, startW + dx)));
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -1026,7 +1085,10 @@ export default function MessengerPage() {
       setMsgSearchLoading(true);
       chatsApi
         .globalSearch(q, { limit: 20 })
-        .then((res) => setMsgSearchResults(res.data.results || []))
+        .then((res) => {
+          const ranked = [...(res.data.results || [])].sort((a, b) => scoreGlobalSearchResult(q, b) - scoreGlobalSearchResult(q, a));
+          setMsgSearchResults(ranked);
+        })
         .catch(() => setMsgSearchResults([]))
         .finally(() => setMsgSearchLoading(false));
     }, 400);
@@ -1382,14 +1444,14 @@ export default function MessengerPage() {
 
       {/* ═══════ Left sidebar — column-left (Telegram: chatlist-container + folders) ═══════ */}
       <aside
-        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} messenger-sidebar-surface flex-row border-r ui-border-subtle shrink-0 relative overflow-hidden`}
-        style={{ width: sidebarWidth, minWidth: 220 }}
+        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} messenger-sidebar-surface messenger-divider-vertical flex-row border-r shrink-0 relative overflow-hidden`}
+        style={{ width: sidebarWidth, minWidth: 280 }}
         id="column-left"
       >
         {/* Tab panel (left layout): standard folders + user folders — hidden when <xl, top tabs shown instead */}
         {folderLayout === "left" && hasFolderTabs && isFolderLeftWider && (
         <nav
-          className="messenger-folder-rail flex w-24 shrink-0 flex-col gap-2 border-r border-slate-200/70 bg-white/30 px-2 py-3 backdrop-blur-xl"
+          className="messenger-folder-rail messenger-divider-vertical flex w-24 shrink-0 flex-col gap-2 border-r bg-white/30 px-2 py-3 backdrop-blur-xl"
           aria-label={t("messenger.chats")}
         >
           <button
@@ -1517,14 +1579,14 @@ export default function MessengerPage() {
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
         {/* Sidebar header (Telegram: sidebar-header) */}
         <div
-          className="sidebar-header messenger-sidebar-header sticky top-0 z-20 flex h-16 items-center border-b px-4 backdrop-blur-xl"
+          className="sidebar-header messenger-sidebar-header messenger-divider-horizontal sticky top-0 z-20 flex h-16 items-center border-b px-4 backdrop-blur-xl"
         >
           <div className="flex w-full min-w-0 items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-11 shrink-0 items-center justify-center">
-                <img src="/app-icon-header.png" alt="Pingy" className="h-8 w-auto object-contain object-center" />
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-14 shrink-0 items-center justify-center">
+                  <img src="/app-icon-header.png" alt="Pingy" className="h-11 w-auto object-contain object-center" />
+                </div>
               </div>
-            </div>
             <div className="flex items-center gap-2">
               <div className="relative" ref={createMenuRef}>
                 <button
@@ -1630,7 +1692,7 @@ export default function MessengerPage() {
                       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3c0 .89.2 1.73.57 2.49A7 7 0 0 0 18.5 12c.76.37 1.6.57 2.5.57z"/>
                       </svg>
-                      {t(theme === "dark" ? "messenger.dayTheme" : "messenger.nightTheme")}
+                      {t(theme === "dark" ? "messenger.nightTheme" : "messenger.dayTheme")}
                     </button>
                     <button
                       type="button"
@@ -1654,7 +1716,7 @@ export default function MessengerPage() {
 
         {/* Unified search: chats + users by username */}
         {showSidebarSearch && (
-          <div className="border-b px-4 py-3 ui-border-subtle">
+          <div className="messenger-divider-horizontal border-b px-4 py-3">
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -1664,15 +1726,36 @@ export default function MessengerPage() {
                 placeholder={t("messenger.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                spellCheck={false}
                 className="messenger-search-shell ui-text-assist w-full rounded-2xl py-3 pl-10 pr-4 text-slate-800 placeholder:text-slate-400 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100"
               />
             </div>
+            {q.length > 0 && (
+              <div className="mt-2 flex items-center justify-between gap-2 px-1">
+                <p className="text-[0.6875rem] text-slate-500">
+                  {filteredChats.length + filteredChannels.length} {t("messenger.chats").toLowerCase()} • {userSearchResults.length} {t("messenger.users").toLowerCase()} • {msgSearchResults.length} {t("common.message").toLowerCase()}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setUserSearchResults([]);
+                    setMsgSearchResults([]);
+                  }}
+                  className="text-[0.6875rem] font-medium text-slate-500 transition-colors hover:text-slate-700"
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              </div>
+            )}
           </div>
         )}
 
         {/* Folder tabs: when top layout — scrollable row of buttons with icon + label */}
         {hasFolderTabs && (folderLayout === "top" || (folderLayout === "left" && !isFolderLeftWider)) && (
-          <div className="flex h-16 shrink-0 items-center gap-2 overflow-x-auto scrollbar-hide border-b px-4 ui-border-subtle">
+          <div className="messenger-divider-horizontal flex h-16 shrink-0 items-center gap-2 overflow-x-auto scrollbar-hide border-b px-4">
             {(() => {
               const short = (s: string) => (s.length > 8 ? `${s.slice(0, 8)}…` : s);
               return (
@@ -1846,109 +1929,6 @@ export default function MessengerPage() {
             </div>
           )}
 
-          {!needsSub && !loading && !chatListLoading && !error && !chatListError && chats.length === 0 && channels.length === 0 && q.length === 0 && (
-            <div className="p-5">
-              <div className="mx-auto max-w-sm rounded-[28px] border border-slate-200/80 bg-white/80 p-6 text-center shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
-              <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                </svg>
-              </div>
-              <h2 className="text-slate-700 font-medium mb-1">{t("messenger.noChatsYet")}</h2>
-              <p className="text-slate-500 text-sm mb-4 max-w-[240px] mx-auto">
-                {t("messenger.noChatsDesc")}
-              </p>
-              <div className="flex flex-col gap-2 mb-3">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const res = await chatsApi.getFavorites();
-                      const fav = res.data;
-                      if (fav) {
-                        storeUpsertChat(fav);
-                        openChat(fav.id);
-                      }
-                    } catch {
-                      setError(t("messenger.openChatError"));
-                      setTimeout(() => setError(""), 5000);
-                    }
-                  }}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                  {t("chat.favoritesTitle")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateMenu(true)}
-                  className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                  {t("messenger.createFirst")}
-                </button>
-              </div>
-              <p className="text-slate-400 text-xs mt-3">
-                {t("messenger.haveInvite")}{" "}
-                <button type="button" onClick={() => setShowJoinByLinkModal(true)} className="text-blue-600 hover:underline">{t("messenger.joinChat")}</button>
-              </p>
-              <div className="mt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (expandedOnboardingBlock !== "invite" && navigator.clipboard?.writeText) {
-                      navigator.clipboard.writeText(referralLink).then(() => {
-                        setInviteFriendsCopied(true);
-                        setTimeout(() => setInviteFriendsCopied(false), 2000);
-                      });
-                    }
-                    setExpandedOnboardingBlock((v) => (v === "invite" ? null : "invite"));
-                  }}
-                  className="inline-flex items-center gap-1.5 text-xs text-purple-600 hover:underline"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                  {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${expandedOnboardingBlock === "invite" ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div className={`overflow-hidden transition-all duration-200 ease-out ${expandedOnboardingBlock === "invite" ? "max-h-32 opacity-100 mt-2" : "max-h-0 opacity-0"}`}>
-                  <div className="mx-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-                    <div className="flex items-center bg-slate-50 rounded-lg px-2.5 py-1.5 min-w-0 flex-1">
-                      <span className="text-[0.6875rem] text-slate-500 truncate select-all">{referralLink}</span>
-                    </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (navigator.clipboard?.writeText) {
-                            navigator.clipboard.writeText(referralLink).then(() => {
-                              setInviteFriendsCopied(true);
-                              setTimeout(() => setInviteFriendsCopied(false), 2000);
-                            });
-                          }
-                        }}
-                        className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-purple-50 text-purple-700 text-[0.6875rem] font-medium hover:bg-purple-100 transition-colors whitespace-nowrap shrink-0"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
-                      </button>
-                      {typeof navigator.share === "function" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
-                          }}
-                          className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-[0.6875rem] font-medium hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                          {t("messenger.inviteShare")}
-                        </button>
-                      )}
-                  </div>
-                </div>
-                  </div>
-              </div>
-            </div>
-          )}
-
           {!needsSub && !loading && !chatListLoading && (sidebarItems.length > 0 || q.length > 0 || archivedCount > 0 || selectedFolderId) && (
             <>
               {false && (
@@ -1991,7 +1971,7 @@ export default function MessengerPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span className={`flex items-center gap-1 truncate text-[0.9375rem] font-medium ${isActive ? "text-blue-700" : "text-slate-700"}`}>
-                                {ch.title}
+                                {highlightMatch(ch.title, q)}
                                 {ch.title_icon && <span className="shrink-0" aria-hidden>{ch.title_icon}</span>}
                               </span>
                             </div>
@@ -2054,7 +2034,7 @@ export default function MessengerPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex min-w-0 items-center justify-between gap-2">
                                 <span className={`flex items-center gap-1 truncate text-[0.9375rem] font-medium ${isActive ? "text-blue-700" : "text-slate-700"}`}>
-                                  {ch.title}
+                                  {highlightMatch(ch.title, q)}
                                   {ch.title_icon && <span className="shrink-0" aria-hidden>{ch.title_icon}</span>}
                                 </span>
                                 {channelTime && (
@@ -2096,7 +2076,7 @@ export default function MessengerPage() {
                             e.stopPropagation();
                             setChatContextMenu({ x: e.clientX, y: e.clientY, chat });
                           }}
-                          className={`chat-list-row flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
+                          className={`chat-list-row flex w-full items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
                               isActive
                                 ? "messenger-list-row-active"
                                 : "messenger-list-row"
@@ -2105,10 +2085,10 @@ export default function MessengerPage() {
                           {/* Avatar left, then content (subtitle row + title row) */}
                           <div className="chat-list-row-avatar relative shrink-0">
                             {chat.is_favorites ? (
-                              <div className={`dialog-avatar flex h-10 w-10 items-center justify-center rounded-full ${
+                              <div className={`dialog-avatar flex h-12 w-12 items-center justify-center rounded-full ${
                                 isActive ? "bg-blue-600" : "bg-blue-500"
                               }`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                               </div>
                             ) : (() => {
                               const rawUrl = chat.is_personal && chat.other_member
@@ -2123,11 +2103,11 @@ export default function MessengerPage() {
                                   <MediaImage
                                     source={src}
                                     alt=""
-                                    className="dialog-avatar avatar-photo h-10 w-10 rounded-full object-cover"
+                                    className="dialog-avatar avatar-photo h-12 w-12 rounded-full object-cover"
                                     loading="lazy"
                                     decoding="async"
                                   />
-                                  <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
+                                  <div style={{ display: "none" }} className={`flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold ${
                                     isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                   }`}>
                                     {chat.is_personal && chat.other_member
@@ -2136,7 +2116,7 @@ export default function MessengerPage() {
                                   </div>
                                 </>
                               ) : (
-                                <div className={`dialog-avatar flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
+                                <div className={`dialog-avatar flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold ${
                                   isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
                                 }`}>
                                   {chat.is_personal && chat.other_member
@@ -2157,30 +2137,30 @@ export default function MessengerPage() {
                               ) : avatarContent;
                             })()}
                             {chat.is_personal && chat.other_member?.is_online && (
-                              <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-green-500 shadow-sm" />
+                              <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white bg-green-500 shadow-sm" />
                             )}
                           </div>
                           <div className="chat-list-row-content flex flex-1 min-w-0 flex-col">
                             {/* Row 1: title + icons, time / checkmarks */}
                             <div className="chat-list-row-title row-title-row flex min-w-0 items-center justify-between gap-2">
-                              <div className="flex min-w-0 items-center gap-1.5">
+                              <div className="flex min-w-0 items-center gap-2">
                                 {isPinned && (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
                                     <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
                                   </svg>
                                 )}
-                                <span className={`peer-title flex items-center gap-1 truncate text-[0.9375rem] font-medium ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
-                                  {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title}
+                                <span className={`peer-title flex items-center gap-1.5 truncate text-[1rem] font-semibold ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
+                                  {highlightMatch(chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title, q)}
                                   {chat.title_icon && <span className="shrink-0" aria-hidden>{chat.title_icon}</span>}
                                   {chat.is_secret && (
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
                                       <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                                     </svg>
                                   )}
                                 </span>
                                 {chat.is_muted && (
-                                  <span className="messenger-muted-chip inline-flex h-4.5 w-5 shrink-0 items-center justify-center rounded text-slate-400" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                                  <span className="messenger-muted-chip inline-flex h-5 w-6 shrink-0 items-center justify-center rounded text-slate-400" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
                                   </span>
                                 )}
                                 {(chat.pending_join_requests_count ?? 0) > 0 && (
@@ -2190,7 +2170,7 @@ export default function MessengerPage() {
                                 )}
                               </div>
                               {(chat.last_message_at || chat.created_at) && (
-                                <span className="message-time inline-flex shrink-0 items-center gap-1 text-[0.625rem] tabular-nums text-slate-400">
+                                <span className="message-time inline-flex shrink-0 items-center gap-1 text-[0.6875rem] tabular-nums text-slate-400">
                                   {chat.last_message_is_mine && (
                                     <ChatListCheckmarks status={chat.last_message_read_status ?? "delivered"} />
                                   )}
@@ -2199,8 +2179,8 @@ export default function MessengerPage() {
                               )}
                             </div>
                             {/* Row 2: preview / typing + unread badge */}
-                            <div className="chat-list-row-subtitle flex min-w-0 items-center justify-between gap-2 mt-0.5">
-                              <span className="text-slate-500 text-xs truncate min-w-0">
+                            <div className="chat-list-row-subtitle mt-1 flex min-w-0 items-center justify-between gap-2.5">
+                              <span className="min-w-0 truncate text-[0.8125rem] text-slate-500">
                                 {typingByChat[chat.id] && chat.id !== activeChatId
                                   ? `${typingByChat[chat.id]} ${t("chat.typing")}`
                                   : (chat.last_message_preview || (chat.is_personal
@@ -2209,11 +2189,11 @@ export default function MessengerPage() {
                               </span>
                               {unread > 0 && (
                                 chat.manually_unread && unread <= 1 ? (
-                                  <span className={`dialog-subtitle-badge inline-block w-3 h-3 shrink-0 rounded-full ${
+                                  <span className={`dialog-subtitle-badge inline-block h-3.5 w-3.5 shrink-0 rounded-full ${
                                     chat.is_muted ? "bg-slate-400" : "bg-blue-600"
                                   }`} />
                                 ) : (
-                                  <span className={`dialog-subtitle-badge inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[0.625rem] font-bold text-white ${
+                                  <span className={`dialog-subtitle-badge inline-flex min-w-[20px] shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[0.6875rem] font-bold text-white ${
                                     chat.is_muted ? "bg-slate-400" : "bg-blue-600"
                                   }`}>
                                     {unreadStr}
@@ -2237,7 +2217,7 @@ export default function MessengerPage() {
                 <p className="text-slate-500 text-sm py-3 px-4">{t("messenger.unreadEmpty")}</p>
               ) : null}
               {q.length >= 2 && (
-                <div className="border-t border-slate-200">
+                <div className="messenger-divider-horizontal border-t">
                   <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("messenger.users")}</p>
                   {userSearchLoading ? (
                     <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.searching")}</p>
@@ -2273,9 +2253,9 @@ export default function MessengerPage() {
                             )}
                           </Link>
                           <div className="flex-1 min-w-0">
-                            <span className="font-medium text-slate-800 text-sm truncate block">@{u.username}</span>
+                            <span className="font-medium text-slate-800 text-sm truncate block">{highlightMatch(`@${u.username}`, q)}</span>
                             {u.display_name && u.display_name !== u.username && (
-                              <span className="text-xs text-slate-500 truncate block">{u.display_name}</span>
+                              <span className="text-xs text-slate-500 truncate block">{highlightMatch(u.display_name, q)}</span>
                             )}
                           </div>
                           <button
@@ -2292,7 +2272,7 @@ export default function MessengerPage() {
                 </div>
               )}
               {q.length >= 2 && (
-                <div className="border-t border-slate-200">
+                <div className="messenger-divider-horizontal border-t">
                   <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("search.globalPlaceholder")}</p>
                   {msgSearchLoading ? (
                     <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.searching")}</p>
@@ -2304,17 +2284,21 @@ export default function MessengerPage() {
                         <li key={r.id}>
                           <button
                             type="button"
-                            onClick={() => { openChat(r.chat_id); setSearchQuery(""); setMsgSearchResults([]); }}
+                            onClick={() => {
+                              openChat(r.chat_id, { targetMessageId: r.id });
+                              setSearchQuery("");
+                              setMsgSearchResults([]);
+                            }}
                             className="w-full text-left flex items-start gap-3 px-4 py-2 hover:bg-slate-50 transition-colors"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400 mt-0.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-baseline gap-1">
-                                <span className="text-xs font-medium text-slate-700 truncate">{r.sender_name}</span>
+                                <span className="text-xs font-medium text-slate-700 truncate">{highlightMatch(r.sender_name, q)}</span>
                                 <span className="text-[0.625rem] text-slate-400 shrink-0">{new Date(r.created_at).toLocaleDateString()}</span>
                               </div>
-                              <p className="text-xs text-slate-500 truncate">{r.content}</p>
-                              <p className="text-[0.625rem] text-blue-500 truncate mt-0.5">{r.chat_title}</p>
+                              <p className="text-xs text-slate-500 line-clamp-2">{highlightMatch(buildSearchSnippet(r.content, q), q)}</p>
+                              <p className="text-[0.625rem] text-blue-500 truncate mt-0.5">{highlightMatch(r.chat_title, q)}</p>
                             </div>
                           </button>
                         </li>
@@ -2350,7 +2334,7 @@ export default function MessengerPage() {
           <div key="settings" className="flex flex-col flex-1 min-h-0 overflow-hidden messenger-panel-fade-in">
             {!(isMobile && settingsMobileInSubSection) && (
               <header
-                className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
+                className="messenger-divider-horizontal sticky top-0 z-20 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
                 style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
               >
                 <button
@@ -2452,53 +2436,19 @@ export default function MessengerPage() {
         ) : (
           <div key="welcome" className="messenger-main-backdrop flex-1 min-h-0 flex items-center justify-center p-6 messenger-panel-fade-in">
           {(() => {
-            const favChat = chats.find((chat) => chat.is_favorites) ?? null;
-            const favChatId = favChat?.id ?? null;
             const welcomeCopy = lang === "ru"
               ? {
                   existingTitle: "Выберите чат",
-                  existingDesc: "Откройте диалог слева или начните новый разговор.",
-                  firstTitle: "Начните с первого чата",
-                  firstDesc: "Создайте группу или канал, вступите по ссылке или используйте Избранное для заметок и файлов.",
-                  inviteHint: "Приглашение можно отправить позже — ссылка уже готова.",
+                  existingDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
+                  firstTitle: "Рады вас видеть",
+                  firstDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
                 }
               : {
                   existingTitle: "Choose a chat",
                   existingDesc: "Open a conversation from the left or start a new one.",
-                  firstTitle: "Start with your first chat",
-                  firstDesc: "Create a group or channel, join via invite link, or use Favorites for notes and files.",
-                  inviteHint: "You can invite friends later, the referral link is already ready.",
+                  firstTitle: "Nice to see you",
+                  firstDesc: "Open a conversation from the left or start a new one.",
                 };
-
-            const openFavorites = () => {
-              if (favChatId) {
-                openChat(favChatId);
-                return;
-              }
-              chatsApi.getFavorites()
-                .then((res) => {
-                  const fav = res.data;
-                  if (fav) {
-                    storeUpsertChat(fav);
-                    openChat(fav.id);
-                  }
-                })
-                .catch((err: { response?: { data?: { detail?: string } } }) => {
-                  const detail = err?.response?.data?.detail;
-                  const msg = typeof detail === "string" ? detail : t("messenger.openChatError");
-                  setError(msg);
-                  setTimeout(() => setError(""), 5000);
-                });
-            };
-
-            const copyReferral = () => {
-              if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(referralLink).then(() => {
-                  setInviteFriendsCopied(true);
-                  setTimeout(() => setInviteFriendsCopied(false), 2000);
-                });
-              }
-            };
 
             if (hasRegularChats) {
               return (
@@ -2506,10 +2456,8 @@ export default function MessengerPage() {
                   <div className="hidden mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                     {lang === "ru" ? "Открытые чаты" : "Open chats"}
                   </div>
-                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-2xl">
-                    <span aria-hidden>👋</span>
-                  </div>
-                  <h2 className="mb-2 text-2xl font-semibold text-slate-800">{lang === "ru" ? "Рады вас видеть" : "Nice to see you"}</h2>
+                  <WelcomeAnimationButton />
+                  <h2 className="mb-2 text-2xl font-semibold text-slate-800">{lang === "ru" ? "Добро пожаловать в Pingy!" : "Nice to see you"}</h2>
                   <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.existingDesc}</p>
                   <div className="hidden mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
                     <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
@@ -2521,18 +2469,11 @@ export default function MessengerPage() {
                       <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Создайте группу, канал или перейдите в Избранное." : "Create a group, a channel, or open Favorites."}</p>
                     </div>
                   </div>
-                  <div className="messenger-empty-subcard mx-auto mb-6 max-w-md rounded-2xl px-4 py-4 text-left">
-                    <p className="text-sm leading-6 text-slate-700">
-                      {lang === "ru"
-                        ? "Чтобы начать общение, создайте группу или найдите пользователя в поиске."
-                        : "To start chatting, create a group or find a user in search."}
-                    </p>
-                  </div>
-                  <div className="grid w-full max-w-[15rem] grid-cols-1 gap-3 mx-auto">
+                  <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => setShowCreateChatModal(true)}
-                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
+                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                       {t("createMenu.createGroup")}
@@ -2540,7 +2481,7 @@ export default function MessengerPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreateChannelModal(true)}
-                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
+                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
                       {t("createMenu.createChannel")}
@@ -2549,106 +2490,27 @@ export default function MessengerPage() {
                 </div>
               );
             }
-
             return (
-              <div className="messenger-empty-card max-w-md rounded-[32px] p-7 text-center">
-                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
-                  <span className="text-2xl">👋</span>
-                </div>
-                <h2 className="text-2xl font-semibold text-slate-800 mb-2">{welcomeCopy.firstTitle}</h2>
-                <p className="text-sm text-slate-500 mb-6 leading-6">{welcomeCopy.firstDesc}</p>
-                <div className="flex flex-col gap-3">
-                  <div className="messenger-empty-subcard w-full rounded-[24px] p-4 text-left">
-                    <div className="mb-3 flex items-start gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800">
-                          {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.welcomeInviteFriends")}
-                        </p>
-                        <p className="text-xs leading-5 text-slate-400">{welcomeCopy.inviteHint}</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="messenger-soft-action min-w-0 flex-1 rounded-2xl px-3 py-2 text-xs text-slate-500">
-                        <span className="block truncate select-all">{referralLink}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={copyReferral}
-                        className="messenger-soft-action inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-medium text-purple-700 transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
-                      </button>
-                      {typeof navigator.share === "function" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
-                          }}
-                          className="messenger-soft-action inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-medium text-blue-700 transition-colors"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                          {t("messenger.inviteShare")}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateChatModal(true)}
-                      className="messenger-soft-action flex items-center gap-3 rounded-[24px] px-4 py-4 text-left transition-colors"
-                    >
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-100 text-sky-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800">{t("createMenu.createGroup")}</p>
-                        <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateChannelModal(true)}
-                      className="messenger-soft-action flex items-center gap-3 rounded-[24px] px-4 py-4 text-left transition-colors"
-                    >
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-blue-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800">{t("createMenu.createChannel")}</p>
-                        <p className="text-xs text-slate-400">{t("messenger.welcomeCreateGroupDesc")}</p>
-                      </div>
-                    </button>
-                  </div>
+              <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
+                <WelcomeAnimationButton />
+                <h2 className="mb-2 text-2xl font-semibold text-slate-800">{welcomeCopy.firstTitle}</h2>
+                <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.firstDesc}</p>
+                <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
-                    onClick={() => setShowJoinByLinkModal(true)}
-                    className="messenger-soft-action flex items-center gap-3 w-full rounded-[24px] px-4 py-4 text-left transition-colors"
+                    onClick={() => setShowCreateChatModal(true)}
+                    className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
                   >
-                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800">{t("messenger.joinChat")}</p>
-                      <p className="text-xs text-slate-400">{t("messenger.noChatsDesc")}</p>
-                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    {t("createMenu.createGroup")}
                   </button>
                   <button
                     type="button"
-                    onClick={openFavorites}
-                    className="messenger-soft-action flex items-center gap-3 w-full rounded-xl px-4 py-3.5 text-left transition-all group"
+                    onClick={() => setShowCreateChannelModal(true)}
+                    className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
                   >
-                    <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-200 transition-colors">
-                      <span className="text-lg">⭐</span>
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800">{t("messenger.welcomeFavorites")}</p>
-                      <p className="text-xs text-slate-400">{t("messenger.welcomeFavoritesDesc")}</p>
-                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                    {t("createMenu.createChannel")}
                   </button>
                 </div>
               </div>
@@ -2684,3 +2546,4 @@ export default function MessengerPage() {
     </div>
   );
 }
+
