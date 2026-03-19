@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { TELEGRAM_EMOJI_CATEGORIES } from "../data/telegram-emojis";
-import { EmojiGlyph } from "./EmojiGlyph";
+import { EmojiCategoryList } from "./EmojiCategoryList";
 
 interface EmojiPickerPopoverProps {
   value: string;
@@ -58,50 +58,35 @@ export function EmojiPickerPopover({ value, onChange, children, className = "", 
     (
       <div
         ref={popoverRef}
-        className="fixed z-[200] max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+        className="ui-popover-surface fixed z-[200] rounded-xl"
         style={{ top: position.top, left: position.left, width: 320 }}
       >
-        <div className="space-y-3">
-          <section>
-            <div className="mb-1 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400">
-              Options
-            </div>
-            <div className="grid grid-cols-8 gap-1">
-              <button
-                type="button"
-                onClick={() => { onChange(""); setOpen(false); }}
-                title={emptyLabel}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-colors ${
-                  !value ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                -
-              </button>
-            </div>
-          </section>
-          {TELEGRAM_EMOJI_CATEGORIES.map((category) => (
-            <section key={category.id}>
-              <div className="sticky top-0 z-[1] mb-1 bg-white/95 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400 backdrop-blur">
-                {category.label}
+        <EmojiCategoryList
+          categories={TELEGRAM_EMOJI_CATEGORIES}
+          onSelectEmoji={(emoji) => { onChange(emoji); setOpen(false); }}
+          selectedEmoji={value}
+          height={26 * 16}
+          buttonSize={36}
+          leadingContent={
+            <section className="mb-3">
+              <div className="mb-1 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                Options
               </div>
               <div className="grid grid-cols-8 gap-1">
-                {category.items.map((item) => (
-                  <button
-                    key={item.src}
-                    type="button"
-                    onClick={() => { onChange(item.emoji); setOpen(false); }}
-                    title={item.emoji}
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                      value === item.emoji ? "bg-blue-100 ring-1 ring-blue-300" : "bg-slate-100 hover:bg-slate-200"
-                    }`}
-                  >
-                    <EmojiGlyph emoji={item.emoji} size={22} />
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => { onChange(""); setOpen(false); }}
+                  title={emptyLabel}
+                  className={`ui-picker-tile flex h-9 w-9 items-center justify-center rounded-lg text-lg ${
+                    !value ? "ui-picker-tile-active" : ""
+                  }`}
+                >
+                  -
+                </button>
               </div>
             </section>
-          ))}
-        </div>
+          }
+        />
       </div>
     );
 

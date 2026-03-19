@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
-import { authApi, chatsApi, channelsApi, foldersApi, paymentsApi, userDisplayName, type Chat, type Channel, type ChatFolder, type UserSearchResult, type GlobalSearchResult } from "../api/client";
+import { authApi, chatsApi, channelsApi, foldersApi, paymentsApi, userDisplayName, normalizeMediaPayload, type Chat, type Channel, type ChatFolder, type UserSearchResult, type GlobalSearchResult } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
 import { useUploadProgressStore } from "../store/uploadProgress";
 import { useMessagesStore, normalizeMessage } from "../store/messages";
 import { getAvatarInitials } from "../lib/avatar-initials";
-import { toSameOriginMediaUrl, getAvatarUrlBySize } from "../lib/media-url";
+import { getAvatarUrlBySize } from "../lib/media-url";
 import { showMessageNotification } from "../lib/notifications";
 import { playSound } from "../lib/sounds";
 import ChatPage from "./ChatPage";
@@ -22,6 +22,8 @@ import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components
 import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
 import { usePreferencesStore } from "../store/preferences";
 import type { AppLanguage } from "../store/preferences";
+import { MediaImage } from "../components/MediaImage";
+import { buildUserInfoHref } from "../lib/user-info-link";
 
 /** Compact time for chat list: today = "14:30", yesterday = "Вчера", older = "12 мар" */
 function formatLastMessageTime(iso: string | undefined | null, lang: AppLanguage): string {
@@ -334,20 +336,34 @@ export default function MessengerPage() {
     if (location.pathname !== "/chats" || !location.search) return;
     const params = new URLSearchParams(location.search);
     const writeUsername = params.get("write");
-    if (!writeUsername?.trim()) return;
+    const writeUserId = params.get("write_id");
+    const shouldOpenProfile = params.get("profile") === "1";
+    if (!writeUsername?.trim() && !writeUserId?.trim()) return;
     params.delete("write");
+    params.delete("write_id");
+    params.delete("profile");
     const remaining = params.toString();
     navigate(remaining ? `${location.pathname}?${remaining}` : location.pathname, { replace: true });
-    authApi.searchUsers(writeUsername.trim())
+    const openDmForUser = (userId: string) =>
+      chatsApi.getOrCreateDm(userId).then((dmRes) => {
+        const chat = dmRes.data;
+        storeUpsertChat(chat);
+        navigate(`/chat/${chat.id}`, {
+          replace: true,
+          state: shouldOpenProfile ? { openInfoUserId: userId } : undefined,
+        });
+      });
+    const userIdCandidate = writeUserId?.trim();
+    if (userIdCandidate) {
+      openDmForUser(userIdCandidate).catch(() => {});
+      return;
+    }
+    authApi.searchUsers(writeUsername!.trim())
       .then((res) => {
-        const exact = (res.data.results || []).find((u) => (u.username || "").toLowerCase() === writeUsername.trim().toLowerCase());
+        const exact = (res.data.results || []).find((u) => (u.username || "").toLowerCase() === writeUsername!.trim().toLowerCase());
         const user = exact || (res.data.results || [])[0];
         if (!user) return;
-        return chatsApi.getOrCreateDm(user.id).then((dmRes) => {
-          const chat = dmRes.data;
-          storeUpsertChat(chat);
-          openChat(chat.id);
-        });
+        return openDmForUser(user.id);
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -542,7 +558,7 @@ export default function MessengerPage() {
       const raw = data.message as Record<string, unknown> | undefined;
       // Upsert message into store immediately (with file/files) so it appears when opening the chat
       if (raw && typeof raw.id === "string") {
-        let msgRaw = { ...raw };
+        let msgRaw = normalizeMediaPayload({ ...raw });
         if (!msgRaw.sender && msgRaw.sender_id) {
           msgRaw = {
             ...msgRaw,
@@ -786,6 +802,9 @@ export default function MessengerPage() {
     return compareSidebarItems(aItem, bItem);
   }), [chats, compareSidebarItems, t]);
 
+  const allChatsUnreadCount = chats
+    .filter((c) => !c.is_archived)
+    .reduce((sum, chat) => sum + Math.max(0, chat.unread_count || 0), 0);
   const archivedCount = chats.filter((c) => c.is_archived && (c.unread_count || 0) > 0).length;
   const unreadCount = chats.filter((c) => !c.is_archived && (c.unread_count || 0) > 0).length;
   const personalCount = chats.filter((c) => !c.is_archived && !!c.is_personal && (c.unread_count || 0) > 0).length;
@@ -855,8 +874,8 @@ export default function MessengerPage() {
   const showSidebarSearch = hasRegularChats || channels.length > 0 || archivedCount > 0 || !!selectedFolderId || q.length > 0;
   const showRightPanel = rightPanelOpen || chats.length === 0 || (!rightPanelOpen && onlyFavoritesChat);
   const folderTabBaseClass = "border text-center transition-[background-color,box-shadow,border-color,color,transform] duration-150 ease-out";
-  const folderTabActiveClass = "border-sky-200 bg-white/90 text-slate-900 shadow-[0_8px_18px_rgba(15,23,42,0.05)]";
-  const folderTabInactiveClass = "border-transparent text-slate-600 hover:bg-white/75 hover:text-slate-800";
+  const folderTabActiveClass = "messenger-list-row-active text-slate-900";
+  const folderTabInactiveClass = "messenger-list-row text-slate-600 hover:text-slate-800";
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -1363,14 +1382,14 @@ export default function MessengerPage() {
 
       {/* ═══════ Left sidebar — column-left (Telegram: chatlist-container + folders) ═══════ */}
       <aside
-        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} app-shell-backdrop flex-row border-r ui-border-subtle ui-surface-1 shrink-0 relative overflow-hidden`}
+        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} messenger-sidebar-surface flex-row border-r ui-border-subtle shrink-0 relative overflow-hidden`}
         style={{ width: sidebarWidth, minWidth: 220 }}
         id="column-left"
       >
         {/* Tab panel (left layout): standard folders + user folders — hidden when <xl, top tabs shown instead */}
         {folderLayout === "left" && hasFolderTabs && isFolderLeftWider && (
         <nav
-          className="flex w-24 shrink-0 flex-col gap-2 border-r border-slate-200/70 bg-white/62 px-2 py-3 backdrop-blur-xl"
+          className="messenger-folder-rail flex w-24 shrink-0 flex-col gap-2 border-r border-slate-200/70 bg-white/30 px-2 py-3 backdrop-blur-xl"
           aria-label={t("messenger.chats")}
         >
           <button
@@ -1378,10 +1397,15 @@ export default function MessengerPage() {
             onClick={() => setSelectedFolderId(null)}
             className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === null ? folderTabActiveClass : folderTabInactiveClass}`}
           >
-            <span className="flex items-center justify-center w-11 h-11 shrink-0">
+            <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
+              {allChatsUnreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[0.625rem] font-semibold flex items-center justify-center">
+                  {allChatsUnreadCount > 99 ? "99+" : allChatsUnreadCount}
+                </span>
+              )}
             </span>
             <FolderTabLabel className="ui-text-title">
               {t("messenger.chats")}
@@ -1493,8 +1517,7 @@ export default function MessengerPage() {
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
         {/* Sidebar header (Telegram: sidebar-header) */}
         <div
-          className="sidebar-header sticky top-0 z-20 flex h-16 items-center border-b px-4 backdrop-blur-xl"
-          style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+          className="sidebar-header messenger-sidebar-header sticky top-0 z-20 flex h-16 items-center border-b px-4 backdrop-blur-xl"
         >
           <div className="flex w-full min-w-0 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -1520,7 +1543,7 @@ export default function MessengerPage() {
                     portalRef={createMenuPopoverRef}
                     align="right"
                     minWidth={168}
-                    className="rounded-2xl border border-slate-200 bg-white/95 py-1.5 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur animate-in fade-in slide-in-from-top-1"
+                    className="ui-popover-surface rounded-2xl py-1.5 animate-in fade-in slide-in-from-top-1"
                   >
                     <button
                       type="button"
@@ -1567,7 +1590,7 @@ export default function MessengerPage() {
                     portalRef={menuPopoverRef}
                     align="right"
                     minWidth={220}
-                    className="rounded-2xl border border-slate-200 bg-white/95 py-1.5 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur animate-in fade-in slide-in-from-top-1"
+                    className="ui-popover-surface overflow-hidden rounded-2xl py-1.5 animate-in fade-in slide-in-from-top-1"
                   >
                     <button
                       type="button"
@@ -1641,7 +1664,7 @@ export default function MessengerPage() {
                 placeholder={t("messenger.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="ui-text-assist w-full rounded-2xl border border-slate-200/80 bg-white/80 py-3 pl-10 pr-4 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] placeholder:text-slate-400 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100"
+                className="messenger-search-shell ui-text-assist w-full rounded-2xl py-3 pl-10 pr-4 text-slate-800 placeholder:text-slate-400 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100"
               />
             </div>
           </div>
@@ -1664,10 +1687,15 @@ export default function MessengerPage() {
                 !selectedFolderId ? folderTabActiveClass : folderTabInactiveClass
               }`}
             >
-              <span className="flex items-center justify-center w-6 h-6 shrink-0">
+              <span className="relative flex items-center justify-center w-6 h-6 shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
+                {allChatsUnreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1 text-[0.625rem] font-semibold text-white">
+                    {allChatsUnreadCount > 99 ? "99+" : allChatsUnreadCount}
+                  </span>
+                )}
               </span>
               <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("messenger.chats"))}</span>
             </button>
@@ -1941,13 +1969,12 @@ export default function MessengerPage() {
                           <div className="relative shrink-0">
                             {ch.avatar_url ? (
                               <>
-                                <img
-                                  src={toSameOriginMediaUrl(getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")) || ""}
+                                <MediaImage
+                                  source={getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")}
                                   alt=""
                                   className="h-10 w-10 rounded-full object-cover"
                                   loading="lazy"
                                   decoding="async"
-                                  onError={(e) => { e.currentTarget.style.display = "none"; const fb = e.currentTarget.nextElementSibling as HTMLElement; if (fb) fb.style.display = ""; }}
                                 />
                                 <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
                                   {getAvatarInitials(ch.title || "К")}
@@ -1999,19 +2026,18 @@ export default function MessengerPage() {
                             type="button"
                             onClick={() => openChannel(ch.id)}
                             className={`flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
-                              isActive ? "border-sky-200 bg-white/90 shadow-[0_8px_18px_rgba(15,23,42,0.05)]" : "border-transparent hover:bg-white/75"
+                              isActive ? "messenger-list-row-active" : "messenger-list-row"
                             }`}
                           >
                             <div className="relative shrink-0">
                               {ch.avatar_url ? (
                                 <>
-                                  <img
-                                    src={toSameOriginMediaUrl(getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")) || ""}
+                                  <MediaImage
+                                    source={getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")}
                                     alt=""
                                     className="h-10 w-10 rounded-full object-cover"
                                     loading="lazy"
                                     decoding="async"
-                                    onError={(e) => { e.currentTarget.style.display = "none"; const fb = e.currentTarget.nextElementSibling as HTMLElement; if (fb) fb.style.display = ""; }}
                                   />
                                   <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
                                     {getAvatarInitials(ch.title || "Ðš")}
@@ -2026,21 +2052,21 @@ export default function MessengerPage() {
                               )}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex min-w-0 items-center justify-between gap-2">
                                 <span className={`flex items-center gap-1 truncate text-[0.9375rem] font-medium ${isActive ? "text-blue-700" : "text-slate-700"}`}>
                                   {ch.title}
                                   {ch.title_icon && <span className="shrink-0" aria-hidden>{ch.title_icon}</span>}
-                                </span>
-                              </div>
-                              <div className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
-                                <span className="text-slate-500 text-xs truncate min-w-0">
-                                  {channelSubtitle}
                                 </span>
                                 {channelTime && (
                                   <span className="shrink-0 text-[0.625rem] tabular-nums text-slate-400">
                                     {channelTime}
                                   </span>
                                 )}
+                              </div>
+                              <div className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
+                                <span className="text-slate-500 text-xs truncate min-w-0">
+                                  {channelSubtitle}
+                                </span>
                               </div>
                             </div>
                           </button>
@@ -2055,8 +2081,16 @@ export default function MessengerPage() {
                     const isPinned = pinnedOrder.has(chat.id);
                     return (
                       <li key={`chat-${chat.id}`}>
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => openChat(chat.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openChat(chat.id);
+                            }
+                          }}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -2064,8 +2098,8 @@ export default function MessengerPage() {
                           }}
                           className={`chat-list-row flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,box-shadow,border-color,transform] duration-150 ease-out ${
                               isActive
-                                ? "border-sky-200 bg-white/90 shadow-[0_8px_18px_rgba(15,23,42,0.05)]"
-                                : "border-transparent hover:bg-white/75"
+                                ? "messenger-list-row-active"
+                                : "messenger-list-row"
                           } active:scale-[0.997]`}
                         >
                           {/* Avatar left, then content (subtitle row + title row) */}
@@ -2082,17 +2116,16 @@ export default function MessengerPage() {
                                 : chat.avatar_url;
                               const urlSmall = chat.is_personal && chat.other_member ? chat.other_member.avatar_url_small : chat.avatar_url_small;
                               const urlMedium = chat.is_personal && chat.other_member ? chat.other_member.avatar_url_medium : chat.avatar_url_medium;
-                              const src = rawUrl ? (toSameOriginMediaUrl(getAvatarUrlBySize(rawUrl, urlSmall, urlMedium, "medium")) ?? "") : "";
+                              const src = rawUrl ? (getAvatarUrlBySize(rawUrl, urlSmall, urlMedium, "medium") ?? "") : "";
                               const showImg = Boolean(src);
-                              return showImg ? (
+                              const avatarContent = showImg ? (
                                 <>
-                                  <img
-                                    src={src}
+                                  <MediaImage
+                                    source={src}
                                     alt=""
                                     className="dialog-avatar avatar-photo h-10 w-10 rounded-full object-cover"
                                     loading="lazy"
                                     decoding="async"
-                                    onError={(e) => { const img = e.currentTarget; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement; if (fallback) fallback.style.display = ""; }}
                                   />
                                   <div style={{ display: "none" }} className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
                                     isActive ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"
@@ -2111,14 +2144,62 @@ export default function MessengerPage() {
                                     : getAvatarInitials(chat.title || "Ч")}
                                 </div>
                               );
+                              return chat.is_personal && chat.other_member ? (
+                                <Link
+                                  to={buildUserInfoHref(chat.other_member)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="block rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:ring-offset-2 focus:ring-offset-white/70"
+                                  aria-label={userDisplayName(chat.other_member)}
+                                  title={t("chat.personInfo")}
+                                >
+                                  {avatarContent}
+                                </Link>
+                              ) : avatarContent;
                             })()}
                             {chat.is_personal && chat.other_member?.is_online && (
                               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-green-500 shadow-sm" />
                             )}
                           </div>
                           <div className="chat-list-row-content flex flex-1 min-w-0 flex-col">
-                            {/* Row 1: preview / typing + unread badge (dialog-subtitle) */}
-                            <div className="chat-list-row-subtitle flex min-w-0 items-center justify-between gap-2">
+                            {/* Row 1: title + icons, time / checkmarks */}
+                            <div className="chat-list-row-title row-title-row flex min-w-0 items-center justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                {isPinned && (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
+                                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
+                                  </svg>
+                                )}
+                                <span className={`peer-title flex items-center gap-1 truncate text-[0.9375rem] font-medium ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
+                                  {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title}
+                                  {chat.title_icon && <span className="shrink-0" aria-hidden>{chat.title_icon}</span>}
+                                  {chat.is_secret && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
+                                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                    </svg>
+                                  )}
+                                </span>
+                                {chat.is_muted && (
+                                  <span className="messenger-muted-chip inline-flex h-4.5 w-5 shrink-0 items-center justify-center rounded text-slate-400" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                                  </span>
+                                )}
+                                {(chat.pending_join_requests_count ?? 0) > 0 && (
+                                  <span className="shrink-0 text-[0.625rem] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded" title={t("chat.pendingRequests")}>
+                                    {t("chat.pendingRequests")}: {chat.pending_join_requests_count}
+                                  </span>
+                                )}
+                              </div>
+                              {(chat.last_message_at || chat.created_at) && (
+                                <span className="message-time inline-flex shrink-0 items-center gap-1 text-[0.625rem] tabular-nums text-slate-400">
+                                  {chat.last_message_is_mine && (
+                                    <ChatListCheckmarks status={chat.last_message_read_status ?? "delivered"} />
+                                  )}
+                                  {formatLastMessageTime((chat.last_message_at || chat.created_at) ?? undefined, lang)}
+                                </span>
+                              )}
+                            </div>
+                            {/* Row 2: preview / typing + unread badge */}
+                            <div className="chat-list-row-subtitle flex min-w-0 items-center justify-between gap-2 mt-0.5">
                               <span className="text-slate-500 text-xs truncate min-w-0">
                                 {typingByChat[chat.id] && chat.id !== activeChatId
                                   ? `${typingByChat[chat.id]} ${t("chat.typing")}`
@@ -2140,45 +2221,8 @@ export default function MessengerPage() {
                                 )
                               )}
                             </div>
-                            {/* Row 2: title + icons, time / checkmarks (row-title-row) */}
-                            <div className="chat-list-row-title row-title-row flex min-w-0 items-center justify-between gap-2 mt-0.5">
-                              <div className="flex min-w-0 items-center gap-1.5">
-                                {isPinned && (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 shrink-0" aria-label={t("messenger.pinned")}>
-                                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
-                                  </svg>
-                                )}
-                                <span className={`peer-title flex items-center gap-1 truncate text-[0.9375rem] font-medium ${unread > 0 ? "text-slate-900" : "text-slate-700"}`}>
-                                  {chat.is_favorites ? t("chat.favoritesTitle") : chat.is_personal && chat.other_member ? userDisplayName(chat.other_member) : chat.title}
-                                  {chat.title_icon && <span className="shrink-0" aria-hidden>{chat.title_icon}</span>}
-                                  {chat.is_secret && (
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-emerald-500" aria-hidden>
-                                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                                    </svg>
-                                  )}
-                                </span>
-                                {chat.is_muted && (
-                                  <span className="inline-flex h-4.5 w-5 shrink-0 items-center justify-center rounded bg-slate-100 text-slate-400" title={t("messenger.muted")} aria-label={t("messenger.muted")}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-                                  </span>
-                                )}
-                                {(chat.pending_join_requests_count ?? 0) > 0 && (
-                                  <span className="shrink-0 text-[0.625rem] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded" title={t("chat.pendingRequests")}>
-                                    {t("chat.pendingRequests")}: {chat.pending_join_requests_count}
-                                  </span>
-                                )}
-                              </div>
-                              {(chat.last_message_at || chat.created_at) && (
-                                <span className="message-time inline-flex shrink-0 items-center gap-1 text-[0.625rem] tabular-nums text-slate-400">
-                                  {chat.last_message_is_mine && (
-                                    <ChatListCheckmarks status={chat.last_message_read_status ?? "delivered"} />
-                                  )}
-                                  {formatLastMessageTime((chat.last_message_at || chat.created_at) ?? undefined, lang)}
-                                </span>
-                              )}
-                            </div>
                           </div>
-                        </button>
+                        </div>
                       </li>
                     );
                   })}
@@ -2203,25 +2247,31 @@ export default function MessengerPage() {
                     <ul className="py-1">
                       {userSearchResults.map((u) => (
                         <li key={u.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50">
-                          {u.avatar_url ? (
-                            <>
-                              <img
-                                src={toSameOriginMediaUrl(getAvatarUrlBySize(u.avatar_url, undefined, undefined, "medium")) || ""}
-                                alt=""
-                                className="w-12 h-12 rounded-full object-cover shrink-0"
-                                loading="lazy"
-                                decoding="async"
-                                onError={(e) => { e.currentTarget.style.display = "none"; const fb = e.currentTarget.nextElementSibling as HTMLElement; if (fb) fb.style.display = ""; }}
-                              />
-                              <div style={{ display: "none" }} className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
+                          <Link
+                            to={buildUserInfoHref(u)}
+                            className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:ring-offset-2 focus:ring-offset-white"
+                            aria-label={u.display_name || u.username || u.id}
+                            title={t("chat.personInfo")}
+                          >
+                            {u.avatar_url ? (
+                              <>
+                                <MediaImage
+                                  source={getAvatarUrlBySize(u.avatar_url, undefined, undefined, "medium")}
+                                  alt=""
+                                  className="w-12 h-12 rounded-full object-cover shrink-0"
+                                  loading="lazy"
+                                  decoding="async"
+                                />
+                                <div style={{ display: "none" }} className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
+                                  {getAvatarInitials(u.display_name || u.username || "?")}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
                                 {getAvatarInitials(u.display_name || u.username || "?")}
                               </div>
-                            </>
-                          ) : (
-                            <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
-                              {getAvatarInitials(u.display_name || u.username || "?")}
-                            </div>
-                          )}
+                            )}
+                          </Link>
                           <div className="flex-1 min-w-0">
                             <span className="font-medium text-slate-800 text-sm truncate block">@{u.username}</span>
                             {u.display_name && u.display_name !== u.username && (
@@ -2452,13 +2502,16 @@ export default function MessengerPage() {
 
             if (hasRegularChats) {
               return (
-                <div className="max-w-lg rounded-[32px] border border-slate-200/80 bg-white/72 p-7 text-center shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
-                  <div className="mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
+                  <div className="hidden mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                     {lang === "ru" ? "Открытые чаты" : "Open chats"}
                   </div>
-                  <h2 className="mb-2 text-xl font-semibold text-slate-800">{welcomeCopy.existingTitle}</h2>
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-2xl">
+                    <span aria-hidden>👋</span>
+                  </div>
+                  <h2 className="mb-2 text-2xl font-semibold text-slate-800">{lang === "ru" ? "Рады вас видеть" : "Nice to see you"}</h2>
                   <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.existingDesc}</p>
-                  <div className="mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
+                  <div className="hidden mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
                     <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
                       <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Список слева" : "List on the left"}</p>
                       <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Откройте любой диалог одним нажатием." : "Open any conversation with one tap."}</p>
@@ -2468,11 +2521,18 @@ export default function MessengerPage() {
                       <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Создайте группу, канал или перейдите в Избранное." : "Create a group, a channel, or open Favorites."}</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center justify-center gap-3">
+                  <div className="messenger-empty-subcard mx-auto mb-6 max-w-md rounded-2xl px-4 py-4 text-left">
+                    <p className="text-sm leading-6 text-slate-700">
+                      {lang === "ru"
+                        ? "Чтобы начать общение, создайте группу или найдите пользователя в поиске."
+                        : "To start chatting, create a group or find a user in search."}
+                    </p>
+                  </div>
+                  <div className="grid w-full max-w-[15rem] grid-cols-1 gap-3 mx-auto">
                     <button
                       type="button"
                       onClick={() => setShowCreateChatModal(true)}
-                      className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
+                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                       {t("createMenu.createGroup")}
@@ -2480,18 +2540,10 @@ export default function MessengerPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreateChannelModal(true)}
-                      className="ui-accent-strong inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
+                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
                       {t("createMenu.createChannel")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openFavorites}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                    >
-                      <span className="text-base">★</span>
-                      {t("messenger.welcomeFavorites")}
                     </button>
                   </div>
                 </div>
@@ -2499,14 +2551,14 @@ export default function MessengerPage() {
             }
 
             return (
-              <div className="max-w-md rounded-[32px] border border-slate-200/80 bg-white/76 p-7 text-center shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+              <div className="messenger-empty-card max-w-md rounded-[32px] p-7 text-center">
                 <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
                   <span className="text-2xl">👋</span>
                 </div>
                 <h2 className="text-2xl font-semibold text-slate-800 mb-2">{welcomeCopy.firstTitle}</h2>
                 <p className="text-sm text-slate-500 mb-6 leading-6">{welcomeCopy.firstDesc}</p>
                 <div className="flex flex-col gap-3">
-                  <div className="w-full rounded-[24px] border border-slate-200 bg-slate-50/70 p-4 text-left">
+                  <div className="messenger-empty-subcard w-full rounded-[24px] p-4 text-left">
                     <div className="mb-3 flex items-start gap-3">
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700">
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
@@ -2519,13 +2571,13 @@ export default function MessengerPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                      <div className="messenger-soft-action min-w-0 flex-1 rounded-2xl px-3 py-2 text-xs text-slate-500">
                         <span className="block truncate select-all">{referralLink}</span>
                       </div>
                       <button
                         type="button"
                         onClick={copyReferral}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-purple-50 px-3 py-2 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
+                        className="messenger-soft-action inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-medium text-purple-700 transition-colors"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         {inviteFriendsCopied ? t("messenger.welcomeInviteCopied") : t("messenger.inviteCopyLink")}
@@ -2536,7 +2588,7 @@ export default function MessengerPage() {
                           onClick={() => {
                             navigator.share({ title: t("messenger.welcomeInviteFriends"), url: referralLink }).catch(() => {});
                           }}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                          className="messenger-soft-action inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-medium text-blue-700 transition-colors"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                           {t("messenger.inviteShare")}
@@ -2548,7 +2600,7 @@ export default function MessengerPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreateChatModal(true)}
-                      className="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/40"
+                      className="messenger-soft-action flex items-center gap-3 rounded-[24px] px-4 py-4 text-left transition-colors"
                     >
                       <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-100 text-sky-700">
                         <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -2561,7 +2613,7 @@ export default function MessengerPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreateChannelModal(true)}
-                      className="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-sky-200 hover:bg-sky-50/40"
+                      className="messenger-soft-action flex items-center gap-3 rounded-[24px] px-4 py-4 text-left transition-colors"
                     >
                       <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-blue-700">
                         <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
@@ -2575,7 +2627,7 @@ export default function MessengerPage() {
                   <button
                     type="button"
                     onClick={() => setShowJoinByLinkModal(true)}
-                    className="flex items-center gap-3 w-full rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"
+                    className="messenger-soft-action flex items-center gap-3 w-full rounded-[24px] px-4 py-4 text-left transition-colors"
                   >
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -2588,7 +2640,7 @@ export default function MessengerPage() {
                   <button
                     type="button"
                     onClick={openFavorites}
-                    className="flex items-center gap-3 w-full rounded-xl bg-white border border-slate-200 px-4 py-3.5 text-left hover:border-amber-300 hover:shadow-sm transition-all group"
+                    className="messenger-soft-action flex items-center gap-3 w-full rounded-xl px-4 py-3.5 text-left transition-all group"
                   >
                     <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-200 transition-colors">
                       <span className="text-lg">⭐</span>

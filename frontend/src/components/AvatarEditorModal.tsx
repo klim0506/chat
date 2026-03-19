@@ -310,11 +310,11 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
   const isCropActive = mode === "crop" && imageUrl && baseDataUrl;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60" onClick={onCancel}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+    <div className="ui-overlay fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="ui-modal-surface max-w-lg w-full overflow-hidden rounded-2xl flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-3 flex items-center justify-between border-b border-slate-200">
           <h3 className="font-semibold text-slate-800">Редактирование аватарки</h3>
-          <button type="button" onClick={onCancel} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" aria-label={t("avatar.close")}>
+          <button type="button" onClick={onCancel} className="ui-icon-button rounded-lg p-1.5" aria-label={t("avatar.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -322,12 +322,12 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
           </button>
         </div>
 
-        <div className="p-4 flex justify-center bg-slate-100">
+        <div className="ui-subtle-panel m-4 mb-0 flex justify-center rounded-2xl p-4">
           <canvas
             ref={canvasRef}
             width={CANVAS_SIZE}
             height={CANVAS_SIZE}
-            className="max-w-full h-auto rounded-xl border border-slate-200 bg-white touch-none"
+            className="ui-avatar-slot max-w-full h-auto rounded-xl touch-none"
             style={{ width: 320, height: 320, cursor: isCropActive ? "move" : mode === "draw" ? "crosshair" : "text" }}
             onMouseDown={isCropActive ? handleCropMouseDown : mode === "draw" ? handleDrawMouseDown : undefined}
             onMouseMove={isCropActive ? handleCropMouseMove : mode === "draw" ? handleDrawMouseMove : undefined}
@@ -345,7 +345,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
                 <button
                   type="button"
                   onClick={() => setMode("crop")}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium flex items-center gap-2 ${mode === "crop" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                  className={`ui-picker-tile flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium ${mode === "crop" ? "ui-picker-tile-active" : ""}`}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M6 13V6a1 1 0 0 1 1-1h7" />
@@ -354,7 +354,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
                   Обрезать
                 </button>
                 {imageLoaded && (
-                  <button type="button" onClick={applyCrop} className="px-3 py-2 rounded-xl text-sm font-medium bg-green-100 text-green-800 hover:bg-green-200">
+                  <button type="button" onClick={applyCrop} className="ui-picker-tile rounded-xl px-3 py-2 text-sm font-medium">
                     Применить обрезку
                   </button>
                 )}
@@ -363,7 +363,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
             <button
               type="button"
               onClick={() => setMode("draw")}
-              className={`px-3 py-2 rounded-xl text-sm font-medium flex items-center gap-2 ${mode === "draw" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+              className={`ui-picker-tile flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium ${mode === "draw" ? "ui-picker-tile-active" : ""}`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
@@ -373,7 +373,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
             <button
               type="button"
               onClick={() => setMode("text")}
-              className={`px-3 py-2 rounded-xl text-sm font-medium flex items-center gap-2 ${mode === "text" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+              className={`ui-picker-tile flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium ${mode === "text" ? "ui-picker-tile-active" : ""}`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 20h16" />
@@ -395,7 +395,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 Цвет:
-                <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} className="w-8 h-8 rounded border border-slate-300 cursor-pointer" />
+                <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} className="ui-picker-tile h-8 w-8 cursor-pointer rounded" />
               </label>
             </div>
           )}
@@ -404,11 +404,11 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 Цвет:
-                <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="w-8 h-8 rounded border border-slate-300 cursor-pointer" />
+                <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="ui-picker-tile h-8 w-8 cursor-pointer rounded" />
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 Размер:
-                <select value={textFontSize} onChange={(e) => setTextFontSize(Number(e.target.value))} className="border border-slate-300 rounded-lg px-2 py-1 text-sm">
+                <select value={textFontSize} onChange={(e) => setTextFontSize(Number(e.target.value))} className="ui-field-shell rounded-lg px-2 py-1 text-sm">
                   {[14, 18, 24, 32, 40].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
@@ -424,7 +424,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
                       updateText(editingTextId, { text: newTextValue });
                       setEditingTextId(null);
                     }}
-                    className="flex-1 min-w-0 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                    className="ui-field-shell flex-1 min-w-0 rounded-lg px-2 py-1.5 text-sm"
                     autoFocus
                   />
                   <button type="button" onClick={() => removeText(editingTextId)} className="text-red-600 text-sm">
@@ -440,7 +440,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
             <button type="button" onClick={handleExport} className="flex-1 py-3 px-4 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700">
               Сохранить аватарку
             </button>
-            <button type="button" onClick={onCancel} className="py-3 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50">
+            <button type="button" onClick={onCancel} className="ui-picker-tile rounded-xl px-4 py-3 text-slate-700">
               Отмена
             </button>
           </div>

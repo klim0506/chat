@@ -9,6 +9,46 @@ const clientType = (import.meta.env.VITE_CLIENT_TYPE as string) || "web";
 
 const API_TIMEOUT_MS = 12_000;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeMediaPayload<T>(value: T): T {
+  const visit = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map((item) => visit(item));
+    if (!isPlainObject(input)) return input;
+
+    const out: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(input)) out[key] = visit(raw);
+
+    const accessHandle = typeof out.access_handle === "string" ? out.access_handle : null;
+    const accessHandleSmall = typeof out.access_handle_small === "string" ? out.access_handle_small : null;
+    const accessHandleMedium = typeof out.access_handle_medium === "string" ? out.access_handle_medium : null;
+    const avatarHandle = typeof out.avatar_handle === "string" ? out.avatar_handle : null;
+    const avatarHandleSmall = typeof out.avatar_handle_small === "string" ? out.avatar_handle_small : null;
+    const avatarHandleMedium = typeof out.avatar_handle_medium === "string" ? out.avatar_handle_medium : null;
+    const backgroundHandle = typeof out.background_handle === "string" ? out.background_handle : null;
+    const senderAvatarHandle = typeof out.sender_avatar_handle === "string" ? out.sender_avatar_handle : null;
+    const senderAvatarHandleSmall = typeof out.sender_avatar_handle_small === "string" ? out.sender_avatar_handle_small : null;
+
+    if (accessHandle && out.url === undefined) out.url = accessHandle;
+    if (accessHandleSmall && out.url_small === undefined) out.url_small = accessHandleSmall;
+    if (accessHandleMedium && out.url_medium === undefined) out.url_medium = accessHandleMedium;
+    if (avatarHandle && out.avatar_url === undefined) out.avatar_url = avatarHandle;
+    if (avatarHandleSmall && out.avatar_url_small === undefined) out.avatar_url_small = avatarHandleSmall;
+    if (avatarHandleMedium && out.avatar_url_medium === undefined) out.avatar_url_medium = avatarHandleMedium;
+    if (backgroundHandle && out.background_url === undefined) out.background_url = backgroundHandle;
+    if (senderAvatarHandle && out.sender_avatar_url === undefined) out.sender_avatar_url = senderAvatarHandle;
+    if (senderAvatarHandleSmall && out.sender_avatar_url_small === undefined) out.sender_avatar_url_small = senderAvatarHandleSmall;
+
+    return out;
+  };
+
+  return visit(value) as T;
+}
+
+export { normalizeMediaPayload };
+
 export const api = axios.create({
   baseURL: baseURL ? `${baseURL}/api` : "/api",
   withCredentials: true,
@@ -30,7 +70,10 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    r.data = normalizeMediaPayload(r.data);
+    return r;
+  },
   async (error) => {
     const original = error.config;
     const isRefreshRequest = original?.url?.includes("/auth/refresh/");
@@ -170,8 +213,12 @@ export interface StarsBalance {
 export type UserSearchResult = Pick<User, "id" | "username" | "display_name" | "avatar_url">;
 
 export const authApi = {
-  sendCode: (phone: string) =>
-    api.post<{ detail: string; method?: string }>("/auth/send-code/", { phone }),
+  sendCode: (phone: string, method?: "sms" | "telegram", reuseExisting = false) =>
+    api.post<{ detail: string; method?: "sms" | "telegram" | "pingy" | "debug"; is_new?: boolean }>("/auth/send-code/", {
+      phone,
+      ...(method ? { method } : {}),
+      ...(reuseExisting ? { reuse_existing: true } : {}),
+    }),
   verifyCode: (phone: string, code: string, ref?: string, username?: string) =>
     api.post<{ access: string; refresh: string; user: User }>("/auth/verify-code/", {
       phone,
@@ -502,7 +549,7 @@ export interface ChatFolder {
 
 export const foldersApi = {
   list: () => api.get<ChatFolder[]>("/chats/folders/"),
-  create: (data: { name: string; emoji?: string; color?: string }) =>
+  create: (data: { name: string; emoji?: string; color?: string; chat_ids?: string[] }) =>
     api.post<ChatFolder>("/chats/folders/", data),
   update: (id: string, data: { name?: string; emoji?: string; color?: string; position?: number }) =>
     api.patch<ChatFolder>(`/chats/folders/${id}/`, data),

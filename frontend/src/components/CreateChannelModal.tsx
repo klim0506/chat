@@ -167,11 +167,11 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
     return (
       <>
         <div
-          className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
+          className="ui-overlay fixed inset-0 z-[150] flex items-center justify-center p-4 overflow-y-auto"
           onClick={() => onClose()}
         >
           <div
-            className="bg-white rounded-xl shadow-xl max-w-md w-full my-auto animate-in fade-in zoom-in-95 duration-150"
+            className="ui-modal-surface max-w-md w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-6 pt-5 pb-2">
@@ -179,7 +179,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
               <button
                 type="button"
                 onClick={() => { onCreated(createdChannel.id, createdChannel.inviteLink); onClose(); }}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                className="ui-icon-button rounded-lg p-1.5 transition-colors"
                 aria-label={t("common.close")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -191,7 +191,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
                 <button
                   type="button"
                   onClick={() => setShowImportModal(true)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium transition-colors"
+                  className="ui-picker-tile rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors"
                 >
                   {t("channelImport.title")}
                 </button>
@@ -220,11 +220,11 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
+      className="ui-overlay fixed inset-0 z-[150] flex items-center justify-center p-4 overflow-y-auto"
       onClick={(e) => { if (!loading && e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="bg-white rounded-xl shadow-xl max-w-md w-full my-auto animate-in fade-in zoom-in-95 duration-150"
+        className="ui-modal-surface max-w-md w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 pt-5 pb-2">
@@ -232,7 +232,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
             <h2 className="text-lg font-semibold text-slate-800">{t("createChannel.title")}</h2>
             <p className="text-slate-500 text-xs mt-0.5">{t("createChannel.afterCreateHint")}</p>
           </div>
-          <button type="button" onClick={onClose} disabled={loading} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50" aria-label={t("common.close")}>
+          <button type="button" onClick={onClose} disabled={loading} className="ui-icon-button rounded-lg p-1.5 transition-colors disabled:opacity-50" aria-label={t("common.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
@@ -253,7 +253,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
             <button
               type="button"
               onClick={() => avatarInputRef.current?.click()}
-              className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-slate-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+              className="ui-avatar-slot w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0 border-2 border-dashed hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
               title={t("createChat.addPhoto")}
             >
               {avatarPreview ? (
@@ -282,8 +282,8 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
                 >
                   <button
                     type="button"
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl border transition-colors shrink-0 ${
-                      watch("title_icon") ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-slate-100 border-slate-200 text-slate-500"
+                    className={`ui-picker-tile h-10 w-10 rounded-lg flex items-center justify-center text-xl shrink-0 ${
+                      watch("title_icon") ? "ui-picker-tile-active" : ""
                     }`}
                     title={t("createChat.titleIcon")}
                   >
@@ -349,7 +349,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
           {error && <p ref={apiErrorRef} className="text-red-500 text-sm" role="alert">{error}</p>}
 
           <div className="flex gap-2 justify-end pt-1">
-            <button type="button" onClick={onClose} disabled={loading} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">{t("common.cancel")}</button>
+            <button type="button" onClick={onClose} disabled={loading} className="ui-picker-tile rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
             <button type="submit" disabled={loading} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors">
               {loading ? t("createChannel.creating") : t("createChannel.create")}
             </button>

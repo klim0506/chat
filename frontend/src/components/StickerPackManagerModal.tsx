@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { stickersApi, filesApi, type StickerPack } from "../api/client";
 import { LottieSticker } from "./LottieSticker";
+import { MediaImage } from "./MediaImage";
 
 interface StickerPackManagerModalProps {
   isOpen: boolean;
@@ -376,7 +377,7 @@ export function StickerPackManagerModal({ isOpen, onClose, onPacksUpdated }: Sti
                             ((s.file?.mime_type || "").includes("application/json") ? (
                               <LottieSticker animationUrl={s.file.url} size={40} />
                             ) : (
-                              <img src={s.file.url} alt={s.label} className="w-10 h-10 object-contain" />
+                              <MediaImage source={s.file.url} alt={s.label} className="w-10 h-10 object-contain" />
                             ))}
                         </div>
                         <button

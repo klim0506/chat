@@ -82,6 +82,7 @@ def make_protected_media_url(
     base_url: str | None = None,
     *,
     size: str = "original",
+    expires_at: int | None = None,
 ) -> str | None:
     """
     Returns a full URL for protected media with a token.
@@ -99,7 +100,7 @@ def make_protected_media_url(
         # else fall back to original
     if not path or not _protected_media_file_exists(path):
         return None
-    token = make_protected_media_token(path)
+    token = make_protected_media_token(path, expires_at=expires_at)
     base = "/api/media/serve/"
     query = f"path={quote(path, safe='')}&t={token}"
     full_path = f"{base}?{query}"

@@ -8,6 +8,11 @@ from .models import (
     Channel, ChannelMember, ChannelPost, ChannelPostComment, ChannelPostReaction,
 )
 from apps.files.serializers import FileAttachmentSerializer
+from apps.files.access_handles import (
+    make_channel_avatar_handle,
+    make_chat_avatar_handle,
+    make_chat_background_handle,
+)
 from apps.users.serializers import UserSerializer
 from apps.payments.plan_limits import can_send_video_circle_today, can_create_non_anonymous_poll, RESTRICTION_CODE
 from .utils import generate_slug, make_verification_code
@@ -34,10 +39,10 @@ class ChatSerializer(serializers.ModelSerializer):
     is_expanded = serializers.SerializerMethodField()
     expanded_until = serializers.DateTimeField(read_only=True)
     effective_max_members = serializers.SerializerMethodField()
-    avatar_url = serializers.SerializerMethodField()
-    avatar_url_small = serializers.SerializerMethodField()
-    avatar_url_medium = serializers.SerializerMethodField()
-    background_url = serializers.SerializerMethodField()
+    avatar_handle = serializers.SerializerMethodField()
+    avatar_handle_small = serializers.SerializerMethodField()
+    avatar_handle_medium = serializers.SerializerMethodField()
+    background_handle = serializers.SerializerMethodField()
     other_member = serializers.SerializerMethodField()
     pinned_message = serializers.SerializerMethodField()
     pinned_messages = serializers.SerializerMethodField()
@@ -58,7 +63,7 @@ class ChatSerializer(serializers.ModelSerializer):
             "unread_count", "is_muted", "muted_until",
             "pin_order", "is_archived",
             "is_expanded", "expanded_until", "effective_max_members",
-            "avatar_url", "avatar_url_small", "avatar_url_medium", "background_url", "other_member",
+            "avatar_handle", "avatar_handle_small", "avatar_handle_medium", "background_handle", "other_member",
             "pinned_message", "pinned_messages", "max_pins", "my_pinned_messages",
             "last_message_preview", "last_message_is_mine", "last_message_read_status", "folder_ids", "pending_join_requests_count",
             "slow_mode_seconds",
@@ -176,37 +181,25 @@ class ChatSerializer(serializers.ModelSerializer):
             return annotated
         return obj.members.filter(status=ChatMember.Status.PENDING).count()
 
-    def get_avatar_url(self, obj):
+    def get_avatar_handle(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None)
+        return make_chat_avatar_handle(obj.id)
 
-    def get_avatar_url_small(self, obj):
+    def get_avatar_handle_small(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None, size="small")
+        return make_chat_avatar_handle(obj.id, size="small")
 
-    def get_avatar_url_medium(self, obj):
+    def get_avatar_handle_medium(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None, size="medium")
+        return make_chat_avatar_handle(obj.id, size="medium")
 
-    def get_background_url(self, obj):
+    def get_background_handle(self, obj):
         if not obj.background:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.background.name, request, base_url=base or None)
+        return make_chat_background_handle(obj.id)
 
     def get_other_member(self, obj):
         """For a personal chat (2 active members) — the other participant."""
@@ -715,9 +708,9 @@ class ChannelSerializer(serializers.ModelSerializer):
     members_count = serializers.SerializerMethodField()
     invite_link = serializers.SerializerMethodField()
     my_role = serializers.SerializerMethodField()
-    avatar_url = serializers.SerializerMethodField()
-    avatar_url_small = serializers.SerializerMethodField()
-    avatar_url_medium = serializers.SerializerMethodField()
+    avatar_handle = serializers.SerializerMethodField()
+    avatar_handle_small = serializers.SerializerMethodField()
+    avatar_handle_medium = serializers.SerializerMethodField()
     last_post_at = serializers.SerializerMethodField()
     last_post_preview = serializers.SerializerMethodField()
     username = serializers.CharField(required=False, allow_blank=False, allow_null=True, max_length=30)
@@ -732,7 +725,7 @@ class ChannelSerializer(serializers.ModelSerializer):
         model = Channel
         fields = (
             "id", "title", "title_icon", "description", "slug", "username", "is_public", "comments_enabled",
-            "owner", "members_count", "invite_link", "my_role", "avatar_url", "avatar_url_small", "avatar_url_medium",
+            "owner", "members_count", "invite_link", "my_role", "avatar_handle", "avatar_handle_small", "avatar_handle_medium",
             "is_active", "created_at", "last_post_at", "last_post_preview", "is_muted",
         )
 
@@ -764,29 +757,20 @@ class ChannelSerializer(serializers.ModelSerializer):
         m = self._get_membership(obj)
         return bool(getattr(m, "is_muted", False)) if m else False
 
-    def get_avatar_url(self, obj):
+    def get_avatar_handle(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None)
+        return make_channel_avatar_handle(obj.id)
 
-    def get_avatar_url_small(self, obj):
+    def get_avatar_handle_small(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None, size="small")
+        return make_channel_avatar_handle(obj.id, size="small")
 
-    def get_avatar_url_medium(self, obj):
+    def get_avatar_handle_medium(self, obj):
         if not obj.avatar:
             return None
-        from apps.files.protected_media import make_protected_media_url
-        request = self.context.get("request")
-        base = getattr(settings, "FRONTEND_URL", "") or (request.build_absolute_uri("/").rstrip("/") if request else "")
-        return make_protected_media_url(obj.avatar.name, request, base_url=base or None, size="medium")
+        return make_channel_avatar_handle(obj.id, size="medium")
 
     def get_last_post_at(self, obj):
         last_post = obj.posts.filter(is_deleted=False).order_by("-created_at").values_list("created_at", flat=True).first()

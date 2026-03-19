@@ -9,6 +9,10 @@ export interface TelegramEmojiCategory {
   items: TelegramEmojiItem[];
 }
 
+function normalizeTelegramEmojiSrc(src: string): string {
+  return src.startsWith("/telegram-emoji/") ? `/public${src}` : src;
+}
+
 export const TOP_REACTION_EMOJIS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F602}", "\u{1F970}", "\u{1F44F}", "\u{1F601}", "\u{1F914}", "\u{1F62D}", "\u{1F64F}", "\u{1F618}", "\u{1F44C}", "\u{1F60D}", "\u{1F389}", "\u{1F92F}"] as const;
 
 export const TELEGRAM_EMOJI_CATEGORIES: TelegramEmojiCategory[] = [
@@ -3835,5 +3839,7 @@ export const TELEGRAM_EMOJI_CATEGORIES: TelegramEmojiCategory[] = [
   },
 ];
 
-export const TELEGRAM_EMOJIS = TELEGRAM_EMOJI_CATEGORIES.flatMap((category) => category.items);
+export const TELEGRAM_EMOJIS = TELEGRAM_EMOJI_CATEGORIES.flatMap((category) =>
+  category.items.map((item) => ({ ...item, src: normalizeTelegramEmojiSrc(item.src) }))
+);
 export const TELEGRAM_EMOJI_SRC_BY_EMOJI = new Map(TELEGRAM_EMOJIS.map((item) => [item.emoji, item.src]));

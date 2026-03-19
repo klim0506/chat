@@ -24,6 +24,7 @@ def validate_username_format(value: str) -> str:
 class SendCodeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
     method = serializers.ChoiceField(choices=["sms", "telegram"], required=False)  # "sms" — SMS only, otherwise try Telegram first
+    reuse_existing = serializers.BooleanField(required=False, default=False)
 
 
 class VerifyCodeSerializer(serializers.Serializer):
@@ -33,9 +34,10 @@ class VerifyCodeSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    avatar_url = serializers.SerializerMethodField()
-    avatar_url_small = serializers.SerializerMethodField()
-    avatar_url_medium = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    avatar_handle = serializers.SerializerMethodField()
+    avatar_handle_small = serializers.SerializerMethodField()
+    avatar_handle_medium = serializers.SerializerMethodField()
     avatars = serializers.SerializerMethodField()
     is_online = serializers.SerializerMethodField()
     last_seen_display = serializers.SerializerMethodField()
@@ -49,7 +51,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "id", "short_id", "phone", "username", "telegram_username", "display_name", "bio", "status_emoji", "birthday", "birthday_hide_year", "local_display_name",
-            "avatar", "avatar_url", "avatar_url_small", "avatar_url_medium", "avatars", "referral_code", "stars",
+            "avatar", "avatar_handle", "avatar_handle_small", "avatar_handle_medium", "avatars", "referral_code", "stars",
             "is_online", "last_seen_display", "show_last_seen", "show_phone",
             "dm_privacy", "add_to_group_privacy", "is_staff",
             "personal_channel", "personal_channel_id",
@@ -193,15 +195,19 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Этот юзернейм уже занят.")
         return normalized
 
-    def get_avatar_url(self, obj):
+    def get_avatar_handle(self, obj):
         request = self.context.get("request")
         return obj.get_avatar_url(request)
 
-    def get_avatar_url_small(self, obj):
+    def get_avatar(self, obj):
+        request = self.context.get("request")
+        return obj.get_avatar_url(request)
+
+    def get_avatar_handle_small(self, obj):
         request = self.context.get("request")
         return obj.get_avatar_url(request, size="small")
 
-    def get_avatar_url_medium(self, obj):
+    def get_avatar_handle_medium(self, obj):
         request = self.context.get("request")
         return obj.get_avatar_url(request, size="medium")
 
@@ -212,20 +218,38 @@ class UserSerializer(serializers.ModelSerializer):
         for a in avatars:
             try:
                 if a.image:
-                    url = make_protected_media_url(a.image.name, request)
-                    url_small = make_protected_media_url(a.image.name, request, size="small")
-                    url_medium = make_protected_media_url(a.image.name, request, size="medium")
-                    if url:
-                        result.append({"id": a.id, "url": url, "url_small": url_small, "url_medium": url_medium, "order": a.order})
+                    from apps.files.access_handles import make_user_gallery_avatar_handle
+
+                    access_handle = make_user_gallery_avatar_handle(a.id)
+                    access_handle_small = make_user_gallery_avatar_handle(a.id, size="small")
+                    access_handle_medium = make_user_gallery_avatar_handle(a.id, size="medium")
+                    if access_handle:
+                        result.append(
+                            {
+                                "id": a.id,
+                                "access_handle": access_handle,
+                                "access_handle_small": access_handle_small,
+                                "access_handle_medium": access_handle_medium,
+                                "order": a.order,
+                            }
+                        )
             except (ValueError, OSError):
                 continue
         if not result and obj.avatar:
             try:
-                url = make_protected_media_url(obj.avatar.name, request)
-                url_small = make_protected_media_url(obj.avatar.name, request, size="small")
-                url_medium = make_protected_media_url(obj.avatar.name, request, size="medium")
-                if url:
-                    result.append({"id": "legacy", "url": url, "url_small": url_small, "url_medium": url_medium, "order": 0})
+                access_handle = obj.get_avatar_url(request)
+                access_handle_small = obj.get_avatar_url(request, size="small")
+                access_handle_medium = obj.get_avatar_url(request, size="medium")
+                if access_handle:
+                    result.append(
+                        {
+                            "id": "legacy",
+                            "access_handle": access_handle,
+                            "access_handle_small": access_handle_small,
+                            "access_handle_medium": access_handle_medium,
+                            "order": 0,
+                        }
+                    )
             except (ValueError, OSError):
                 pass
         return result

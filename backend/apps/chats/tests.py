@@ -296,7 +296,7 @@ class MultiImageAPITest(TestCase):
         self.assertEqual(len(img_msg["files"]), 2)
         for f in img_msg["files"]:
             self.assertIn("id", f)
-            self.assertIn("url", f)
+            self.assertIn("access_handle", f)
             self.assertIn("original_name", f)
             self.assertIn("mime_type", f)
 
@@ -365,7 +365,7 @@ class FileUploadAPITest(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
 
     def test_upload_file_success(self):
-        """File is uploaded and returns id, url, original_name."""
+        """File is uploaded and returns id, access_handle, original_name."""
         content = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 50 + b'\xff\xd9'
         f = SimpleUploadedFile("test.jpg", content, content_type="image/jpeg")
         res = self.client.post(
@@ -375,7 +375,7 @@ class FileUploadAPITest(TestCase):
         )
         self.assertEqual(res.status_code, 201)
         self.assertIn("id", res.data)
-        self.assertIn("url", res.data)
+        self.assertIn("access_handle", res.data)
         self.assertEqual(res.data["original_name"], "test.jpg")
         self.assertEqual(res.data["mime_type"], "image/jpeg")
 
@@ -385,7 +385,7 @@ class FileUploadAPITest(TestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_file_serve_with_valid_token(self):
-        """Access a file with a valid HMAC token."""
+        """Access a file using broker-issued signed URL."""
         content = b'\xff\xd8\xff\xe0' + b'\x00' * 50 + b'\xff\xd9'
         f = SimpleUploadedFile("serve.jpg", content, content_type="image/jpeg")
         upload_res = self.client.post(
@@ -393,8 +393,10 @@ class FileUploadAPITest(TestCase):
             {"file": f, "chat_id": str(self.chat.id)},
             format="multipart",
         )
-        file_url = upload_res.data["url"]
-        # URL of the form /api/files/<uuid>/?t=<token>
+        access_handle = upload_res.data["access_handle"]
+        broker_res = self.client.get("/api/media/access/", {"handle": access_handle})
+        self.assertEqual(broker_res.status_code, 200, broker_res.data)
+        file_url = broker_res.data["url"]
         serve_res = self.client.get(file_url)
         self.assertEqual(serve_res.status_code, 200)
 

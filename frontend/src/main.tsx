@@ -7,8 +7,27 @@ import { usePreferencesStore } from "./store/preferences";
 
 const faviconUrl = "/favicon.ico";
 
+function readPersistedDocumentPrefs() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem("preferences");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { state?: { theme?: unknown; language?: unknown } } | null;
+    const theme = parsed?.state?.theme === "dark" ? "dark" : parsed?.state?.theme === "light" ? "light" : null;
+    const language =
+      parsed?.state?.language === "ru" ? "ru" : parsed?.state?.language === "en" ? "en" : null;
+    if (!theme && !language) return null;
+    return { theme, language };
+  } catch {
+    return null;
+  }
+}
+
 function syncDocumentPrefs() {
-  const { theme, language } = usePreferencesStore.getState();
+  const { theme: storeTheme, language: storeLanguage } = usePreferencesStore.getState();
+  const persisted = readPersistedDocumentPrefs();
+  const theme = persisted?.theme ?? storeTheme;
+  const language = persisted?.language ?? storeLanguage;
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.setAttribute("lang", language);
   let favicon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
@@ -22,6 +41,9 @@ function syncDocumentPrefs() {
 
 syncDocumentPrefs();
 usePreferencesStore.subscribe(syncDocumentPrefs);
+usePreferencesStore.persist?.onFinishHydration?.(() => {
+  syncDocumentPrefs();
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

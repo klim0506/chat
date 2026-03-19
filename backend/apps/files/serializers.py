@@ -1,22 +1,17 @@
 from rest_framework import serializers
 from .models import FileAttachment
+from .access_handles import make_file_handle
 
 
 class FileAttachmentSerializer(serializers.ModelSerializer):
-    url = serializers.SerializerMethodField()
+    access_handle = serializers.SerializerMethodField()
 
     class Meta:
         model = FileAttachment
-        fields = ("id", "original_name", "mime_type", "size_bytes", "storage_type", "url", "created_at", "width_px", "height_px")
+        fields = ("id", "original_name", "mime_type", "size_bytes", "storage_type", "access_handle", "created_at", "width_px", "height_px")
         read_only_fields = ("id", "original_name", "mime_type", "size_bytes", "storage_type", "created_at", "width_px", "height_px")
 
-    def get_url(self, obj):
+    def get_access_handle(self, obj):
         if obj.external_url:
             return obj.external_url
-        from .views import make_file_token
-        token = make_file_token(str(obj.id))
-        path = f"/api/files/{obj.id}/?t={token}"
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(path)
-        return path
+        return make_file_handle(obj.id)

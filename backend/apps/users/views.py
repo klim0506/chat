@@ -25,6 +25,7 @@ from .services import (
     can_send_sms,
     send_sms,
     send_telegram_verification,
+    send_pingy_verification_message,
     incr_verify_attempts,
     notify_new_login,
     MAX_VERIFY_ATTEMPTS,
@@ -116,9 +117,14 @@ class SendCodeView(APIView):
         ser.is_valid(raise_exception=True)
         phone = _normalize_phone(ser.validated_data["phone"])
         method = ser.validated_data.get("method")  # sms|telegram (default: telegram first)
+        reuse_existing = ser.validated_data.get("reuse_existing", False)
 
         # Check if the phone is already registered (for referral banner on frontend)
         user_exists = User.objects.filter(phone=phone, username__isnull=False).exclude(username="").exists()
+        existing_user = User.objects.filter(phone=phone).first()
+        has_active_pingy_session = bool(
+            existing_user and UserSession.objects.filter(user=existing_user, is_active=True).exists()
+        )
 
         # Debug phones bypass rate limit
         if _is_debug_phone(phone):
@@ -131,13 +137,22 @@ class SendCodeView(APIView):
         if not can_send_sms(phone):
             return Response({"detail": "Следующий код можно запросить через минуту."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        code = generate_code(6)
+        code = get_otp(phone) if reuse_existing else None
+        if not code:
+            code = generate_code(6)
 
         if method == "sms":
             if send_sms(phone, f"Код для входа: {code}"):
                 set_otp_and_mark_sent(phone, code)
                 return Response({"detail": "Код отправлен по SMS.", "method": "sms", "is_new": not user_exists})
             return Response({"detail": "Не удалось отправить код. Попробуйте позже."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        if method != "telegram" and has_active_pingy_session and existing_user is not None:
+            if send_pingy_verification_message(existing_user, code):
+                set_otp_and_mark_sent(phone, code)
+                return Response(
+                    {"detail": "Код отправлен на другое устройство в Pingy.", "method": "pingy", "is_new": not user_exists}
+                )
 
         # Try Telegram Gateway first (official verification bot); on API error — 503, otherwise fallback to SMS
         tg_result, tg_error = send_telegram_verification(phone, code)
@@ -377,23 +392,23 @@ class MeAvatarsView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def get(self, request):
-        from apps.files.protected_media import make_protected_media_url
+        from apps.files.access_handles import make_user_avatar_handle, make_user_gallery_avatar_handle
 
         avatars = UserAvatar.objects.filter(user=request.user).order_by("order", "id")
         data = []
         for a in avatars:
             try:
                 if a.image:
-                    url = make_protected_media_url(a.image.name, request)
-                    if url:
-                        data.append({"id": a.id, "url": url, "order": a.order})
+                    access_handle = make_user_gallery_avatar_handle(a.id)
+                    if access_handle:
+                        data.append({"id": a.id, "access_handle": access_handle, "order": a.order})
             except (ValueError, OSError):
                 continue
         if request.user.avatar and not avatars.exists():
             try:
-                url = make_protected_media_url(request.user.avatar.name, request)
-                if url:
-                    data.append({"id": "legacy", "url": url, "order": 0})
+                access_handle = make_user_avatar_handle(request.user.id)
+                if access_handle:
+                    data.append({"id": "legacy", "access_handle": access_handle, "order": 0})
             except (ValueError, OSError):
                 pass
         return Response(data)
@@ -421,9 +436,10 @@ class MeAvatarsView(APIView):
         file_obj = compress_uploaded_image(file_obj, max_dim=AVATAR_MAX_DIM)
         obj = UserAvatar.objects.create(user=request.user, image=file_obj, order=max_order + 1)
         create_avatar_thumbnails(obj.image.name)
-        from apps.files.protected_media import make_protected_media_url
-        url = make_protected_media_url(obj.image.name, request) or ""
-        return Response({"id": obj.id, "url": url, "order": obj.order}, status=status.HTTP_201_CREATED)
+        from apps.files.access_handles import make_user_gallery_avatar_handle
+
+        access_handle = make_user_gallery_avatar_handle(obj.id)
+        return Response({"id": obj.id, "access_handle": access_handle, "order": obj.order}, status=status.HTTP_201_CREATED)
 
 
 class MeAvatarDetailView(APIView):
@@ -500,9 +516,9 @@ class UserSearchView(APIView):
                 "id": str(u.id),
                 "username": u.username,
                 "display_name": u.display_name or u.username or "",
-                "avatar_url": u.get_avatar_url(request),
-                "avatar_url_small": u.get_avatar_url(request, size="small"),
-                "avatar_url_medium": u.get_avatar_url(request, size="medium"),
+                "avatar_handle": u.get_avatar_url(request),
+                "avatar_handle_small": u.get_avatar_url(request, size="small"),
+                "avatar_handle_medium": u.get_avatar_url(request, size="medium"),
             }
             results.append(data)
         return Response({"results": results})
@@ -524,7 +540,7 @@ class ResolveUsernameView(APIView):
             "id": str(user.id),
             "username": user.username,
             "display_name": user.display_name or user.username or "",
-            "avatar_url": user.get_avatar_url(request) if hasattr(user, "get_avatar_url") else None,
+            "avatar_handle": user.get_avatar_url(request) if hasattr(user, "get_avatar_url") else None,
         })
 
 

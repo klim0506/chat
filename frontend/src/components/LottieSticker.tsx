@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import lottie, { type AnimationItem } from "lottie-web";
+import { useMediaAccess } from "../hooks/useMediaAccess";
 
 /**
  * Map of sticker paths → Lottie animation URLs.
@@ -28,19 +29,20 @@ interface LottieStickerProps {
 export function LottieSticker({ animationUrl, size, loop = true, className = "" }: LottieStickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<AnimationItem | null>(null);
+  const resolvedAnimationUrl = useMediaAccess(animationUrl);
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || !resolvedAnimationUrl) return;
     let cancelled = false;
 
-    const cached = dataCache.get(animationUrl);
-    const load = cached ? Promise.resolve(cached) : fetch(animationUrl).then((r) => r.json() as Promise<object>);
+    const cached = dataCache.get(resolvedAnimationUrl);
+    const load = cached ? Promise.resolve(cached) : fetch(resolvedAnimationUrl).then((r) => r.json() as Promise<object>);
 
     load
       .then((data) => {
         if (cancelled || !containerRef.current) return;
-        if (!cached) dataCache.set(animationUrl, data);
+        if (!cached) dataCache.set(resolvedAnimationUrl, data);
         animRef.current = lottie.loadAnimation({
           container: containerRef.current,
           renderer: "canvas",
@@ -56,7 +58,7 @@ export function LottieSticker({ animationUrl, size, loop = true, className = "" 
       animRef.current?.destroy();
       animRef.current = null;
     };
-  }, [animationUrl, loop]);
+  }, [resolvedAnimationUrl, loop]);
 
   return (
     <div

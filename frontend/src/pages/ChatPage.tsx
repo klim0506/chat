@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, memo, Fragment } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, channelPostCommentsApi, stickersApi, paymentsApi, userDisplayName } from "../api/client";
+import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, channelPostCommentsApi, stickersApi, paymentsApi, userDisplayName, normalizeMediaPayload } from "../api/client";
 import type { Chat, ChatMember, Channel, ChannelPost, ChannelPostComment, Message, ReplyMessage, User, UserSearchResult, ScheduledMessage as ScheduledMessageType, Contact } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { usePremiumModalStore } from "../store/premiumModal";
@@ -22,6 +22,7 @@ import { FilePreviewModal } from "../components/FilePreviewModal";
 import CreatePollModal from "../components/CreatePollModal";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { ProgressiveImage } from "../components/ProgressiveImage";
+import { MediaImage } from "../components/MediaImage";
 import { WsManager, buildWsUrl } from "../lib/ws-manager";
 import { broadcastMessageCreated } from "../lib/cross-tab-sync";
 import { db } from "../lib/db";
@@ -46,6 +47,9 @@ import { switchLayout } from "../lib/layout-switcher";
 import { filterEmojiByPrefix } from "../data/emoji-shortcodes";
 import { useTranslation, formatLastSeenI18n, formatDateLabelI18n, formatMembersCount, getLocale, getWeekdays, t as tI18n } from "../lib/i18n";
 import { getChatMessageLayoutMeta } from "../lib/chat-layout";
+import { buildUserInfoHref } from "../lib/user-info-link";
+import { useMediaAccess } from "../hooks/useMediaAccess";
+import { resolveMediaAccess } from "../lib/media-access";
 /* Default chat background: vector gradient (no image request) or custom background_url */
 
 /** Reaction emojis (from reaction-animations, matches backend) */
@@ -78,12 +82,13 @@ function VoiceInfoList({
 }) {
   const [durations, setDurations] = useState<Record<string, number>>({});
 
-  const resolveUrl = useCallback((msg: Message) => {
+  const resolveUrl = useCallback(async (msg: Message) => {
     const raw =
       msg.file && typeof msg.file === "object" && "url" in msg.file
         ? ((msg.file as { url?: string | null }).url || "")
         : "";
-    return toSameOriginMediaUrl(raw) || raw;
+    const accessible = await resolveMediaAccess(raw);
+    return toSameOriginMediaUrl(accessible) || accessible;
   }, []);
 
   useEffect(() => {
@@ -93,32 +98,36 @@ function VoiceInfoList({
     items.forEach(({ kind, msg }) => {
       if (!msg?.id) return;
       if (durations[msg.id] != null) return;
-      const url = resolveUrl(msg);
-      if (!url) return;
+      resolveUrl(msg)
+        .then((url) => {
+          if (cancelled || !url) return;
+          const el = kind === "circle" ? document.createElement("video") : new Audio();
+          el.preload = "metadata";
+          el.src = url;
+          pending.push(el);
 
-      const el = kind === "circle" ? document.createElement("video") : new Audio();
-      el.preload = "metadata";
-      el.src = url;
-      pending.push(el);
+          const onLoaded = () => {
+            if (cancelled) return;
+            const d = Number(el.duration);
+            setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: Number.isFinite(d) && d > 0 ? d : 0 }));
+          };
+          const onError = () => {
+            if (cancelled) return;
+            setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: 0 }));
+          };
 
-      const onLoaded = () => {
-        if (cancelled) return;
-        const d = Number(el.duration);
-        setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: Number.isFinite(d) && d > 0 ? d : 0 }));
-      };
-      const onError = () => {
-        if (cancelled) return;
-        setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: 0 }));
-      };
+          el.addEventListener("loadedmetadata", onLoaded);
+          el.addEventListener("error", onError);
 
-      el.addEventListener("loadedmetadata", onLoaded);
-      el.addEventListener("error", onError);
-
-      (el as unknown as { __voiceCleanup?: () => void }).__voiceCleanup = () => {
-        el.removeEventListener("loadedmetadata", onLoaded);
-        el.removeEventListener("error", onError);
-        try { el.src = ""; el.load(); } catch { /* ignore */ }
-      };
+          (el as unknown as { __voiceCleanup?: () => void }).__voiceCleanup = () => {
+            el.removeEventListener("loadedmetadata", onLoaded);
+            el.removeEventListener("error", onError);
+            try { el.src = ""; el.load(); } catch { /* ignore */ }
+          };
+        })
+        .catch(() => {
+          if (!cancelled) setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: 0 }));
+        });
     });
 
     return () => {
@@ -725,12 +734,14 @@ function InlineAutoplayVideo({
   className?: string;
   controls?: boolean;
 }) {
+  const resolvedUrl = useMediaAccess(src || null, { enabled: !!src });
+  const videoUrl = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "";
   const videoRef = useRef<HTMLVideoElement>(null);
   return (
     <div className="relative">
       <video
         ref={videoRef}
-        src={src}
+        src={videoUrl || undefined}
         className={className}
         preload="metadata"
         playsInline
@@ -893,6 +904,8 @@ export default function ChatPage({
   onNavigateToChat?: (chatId: string) => void;
 } = {}) {
   const { chatId: paramChatId, channelId: paramChannelId } = useParams<{ chatId?: string; channelId?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const chatId = propChatId || paramChatId;
   const channelId = propChannelId || paramChannelId;
   const conversationId = channelId || chatId;
@@ -912,6 +925,9 @@ export default function ChatPage({
     () => chat ?? (chatId ? placeholderChat : null) ?? (conversationId ? minimalChatStub(conversationId) : null),
     [chat, chatId, placeholderChat, conversationId],
   );
+  const shouldShowSenderNames = !!displayChat && !displayChat.is_personal && !displayChat.is_favorites;
+  const displayChatBackgroundUrl = useMediaAccess(displayChat?.background_url ?? null, { enabled: !!displayChat?.background_url });
+  const chatAvatarResolvedUrl = useMediaAccess(chat?.avatar_url ?? null, { enabled: !!chat?.avatar_url });
 
   const [members, setMembers] = useState<ChatMember[]>([]);
   const messages = useMessagesStore((s) => s.byChat[conversationId ?? ""] ?? []);
@@ -1247,6 +1263,14 @@ export default function ChatPage({
     if (!chat?.is_personal) setMediaLinksFilesTab("participants");
   }, [chat?.is_personal]);
 
+  useEffect(() => {
+    const openInfoUserId = (location.state as { openInfoUserId?: string } | null)?.openInfoUserId;
+    if (!openInfoUserId) return;
+    setInfoUserId(openInfoUserId);
+    setShowInfo(true);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   /** Voice mode: record file or AI transcription. Пока отключено переключение на AI-ввод (речь → текст), только запись аудио. */
@@ -1496,6 +1520,7 @@ export default function ChatPage({
   const [showMuteFlyout, setShowMuteFlyout] = useState(false);
   const [muteFlyoutPos, setMuteFlyoutPos] = useState<{ left: number; top: number } | null>(null);
   const [showAvatarFullscreen, setShowAvatarFullscreen] = useState<string | null>(null);
+  const fullscreenAvatarResolvedUrl = useMediaAccess(showAvatarFullscreen, { enabled: !!showAvatarFullscreen });
   /** ID of the user whose card is open in the right panel (on avatar click). null = show chat info */
   /* Video recording state */
   const [videoRecording, setVideoRecording] = useState(false);
@@ -1506,8 +1531,11 @@ export default function ChatPage({
   const [dropZone, setDropZone] = useState<"top" | "bottom" | null>(null);
   const dragCounterRef = useRef(0);
   const chatAreaRef = useRef<HTMLDivElement>(null);
+  const [chatAreaWidth, setChatAreaWidth] = useState(0);
+  const [chatAreaBounds, setChatAreaBounds] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const SWIPE_THRESHOLD_PX = 80;
+  const INFO_PANEL_WIDTH_PX = 320;
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesWrapperRef = useRef<HTMLDivElement>(null);
   const rowHeightsRef = useRef<Map<string, number>>(new Map());
@@ -2250,6 +2278,26 @@ export default function ChatPage({
     return () => observer.disconnect();
   }, []);
 
+  useLayoutEffect(() => {
+    const el = chatAreaRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setChatAreaWidth(rect.width);
+      setChatAreaBounds({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, []);
+
   useEffect(() => {
     const active = new Set(messages.map((m) => m.id));
     let changed = false;
@@ -2684,7 +2732,7 @@ export default function ChatPage({
     mgr.on("chat.message", async (data: unknown) => {
       const d = data as { message?: Record<string, unknown> };
       if (!d.message) return;
-      let raw = d.message;
+      let raw = normalizeMediaPayload(d.message);
       const isEncrypted = raw.is_encrypted === true;
       const encryptedKeys = (raw.encrypted_keys as Record<string, { type: number; body: string; identity_key?: string; ephemeral_key?: string; spk_id?: number; opk_id?: number }>) ?? {};
       if (isEncrypted && !(getSenderId(raw as unknown as Message) === myUserId)) {
@@ -2766,7 +2814,7 @@ export default function ChatPage({
     mgr.on("chat.message.updated", (data: unknown) => {
       const d = data as { message?: Record<string, unknown> };
       if (!d.message) return;
-      let raw = d.message;
+      let raw = normalizeMediaPayload(d.message);
       if (raw.is_deleted) {
         storeUpdateMessageRef.current(chatId, raw.id as string, { is_deleted: true });
       } else {
@@ -4061,6 +4109,7 @@ export default function ChatPage({
     },
   }));
   const pendingMembers = members.filter((m) => m.status === "pending");
+  const shouldReplaceChatWithInfo = showInfo && chatAreaWidth > 0 && chatAreaWidth < INFO_PANEL_WIDTH_PX * 2;
   const handleCopy = () => {
     if (!chat?.invite_link) return;
     copyToClipboard(normalizeInviteLink(chat.invite_link)).then(() => {
@@ -4176,7 +4225,7 @@ export default function ChatPage({
                 contacts.map((c) => (
                   <button key={c.id} type="button" onClick={() => handleShareContact(c)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 text-left transition-colors">
                     {c.contact_user.avatar_url || c.contact_user.avatar ? (
-                      <img src={c.contact_user.avatar_url || c.contact_user.avatar!} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                      <MediaImage source={c.contact_user.avatar_url || c.contact_user.avatar!} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-slate-200 shrink-0 flex items-center justify-center text-slate-600 font-medium">
                         {(c.local_name || c.contact_user.display_name || "?").charAt(0).toUpperCase()}
@@ -4277,14 +4326,17 @@ export default function ChatPage({
           <div className="flex-1 flex items-center gap-3 min-w-0">
             <div className="relative shrink-0">
               {displayChat?.is_personal && displayChat.other_member ? (
-                <button
-                  type="button"
-                  onClick={() => { setInfoUserId(displayChat.other_member!.id); setShowInfo(true); }}
+                <Link
+                  to={buildUserInfoHref(displayChat.other_member)}
                   className="block rounded-full overflow-hidden hover:opacity-95 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:ring-offset-2 focus:ring-offset-white/70"
                   title={t("chat.personInfo")}
                 >
                   {(displayChat.other_member?.avatar_url ?? displayChat.other_member?.avatar) ? (
-                    <img src={toSameOriginMediaUrl(getAvatarUrlBySize(displayChat.other_member!.avatar_url ?? displayChat.other_member!.avatar, displayChat.other_member!.avatar_url_small, displayChat.other_member!.avatar_url_medium, "small")) || ""} alt="" className="w-9 h-9 rounded-full object-cover" />
+                    <MediaImage
+                      source={getAvatarUrlBySize(displayChat.other_member!.avatar_url ?? displayChat.other_member!.avatar, displayChat.other_member!.avatar_url_small, displayChat.other_member!.avatar_url_medium, "small")}
+                      alt=""
+                      className="w-9 h-9 rounded-full object-cover"
+                    />
                   ) : (
                     <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
                       {getAvatarInitials(userDisplayName(displayChat.other_member))}
@@ -4293,13 +4345,17 @@ export default function ChatPage({
                   {onlineStatus[displayChat.other_member.id]?.is_online && (
                     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full shadow-sm" />
                   )}
-                </button>
+                </Link>
               ) : displayChat?.is_favorites ? (
                 <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 </div>
               ) : displayChat?.avatar_url ? (
-                <img src={toSameOriginMediaUrl(getAvatarUrlBySize(displayChat.avatar_url, displayChat.avatar_url_small, displayChat.avatar_url_medium, "small")) || ""} alt="" className="w-9 h-9 rounded-full object-cover" />
+                <MediaImage
+                  source={getAvatarUrlBySize(displayChat.avatar_url, displayChat.avatar_url_small, displayChat.avatar_url_medium, "small")}
+                  alt=""
+                  className="w-9 h-9 rounded-full object-cover"
+                />
               ) : (
                 <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
                   {getAvatarInitials(displayChat?.title || "Ч")}
@@ -4519,9 +4575,9 @@ export default function ChatPage({
             className="absolute inset-0 pointer-events-none z-0"
             aria-hidden
             style={
-              displayChat?.background_url
+              displayChatBackgroundUrl
                 ? {
-                    backgroundImage: `url(${toSameOriginMediaUrl(displayChat.background_url)})`,
+                    backgroundImage: `url(${toSameOriginMediaUrl(displayChatBackgroundUrl)})`,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                     opacity: "var(--chat-bg-image-opacity)",
@@ -4784,7 +4840,7 @@ export default function ChatPage({
                           }}
                           showAvatar={layout.showAvatar}
                           isLastInGroup={layout.isLastInGroup}
-                          showSenderName={layout.isFirstInGroup && !!chat && !chat.is_personal && !chat.is_favorites}
+                          showSenderName={layout.isFirstInGroup && shouldShowSenderNames}
                           chatId={conversationId!}
                           channelId={channelId ?? undefined}
                           textScale={textScale}
@@ -4837,8 +4893,8 @@ export default function ChatPage({
           ) : loadingMessages ? (
             <MessageListSkeleton />
           ) : (
-            <div className="flex-1 flex items-center justify-center min-h-[120px]">
-              <div className="max-w-sm rounded-2xl border border-slate-200/70 bg-white/82 px-5 py-4 text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur">
+            <div className="flex-1 flex items-center justify-center min-h-[96px] px-3">
+              <div className="max-w-[320px] rounded-2xl border border-slate-200/70 bg-white/82 px-4 py-3.5 text-center shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur">
                 {chat?.is_favorites ? (
                   <div className="flex flex-col items-center gap-2">
                     <div className="flex items-center gap-2">
@@ -4849,13 +4905,13 @@ export default function ChatPage({
                   </div>
                 ) : (
                   <>
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                    <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                       <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                       </svg>
                     </div>
-                    <p className="mb-2 text-base font-semibold text-slate-700">{t("chat.emptyChat")}</p>
-                    <p className="mx-auto max-w-xs text-sm leading-7 text-slate-500">{t("chat.emptyChatHint")}</p>
+                    <p className="mb-1.5 text-sm font-semibold text-slate-700">{t("chat.emptyChat")}</p>
+                    <p className="mx-auto max-w-[250px] text-xs leading-5 text-slate-500">{t("chat.emptyChatHint")}</p>
                   </>
                 )}
               </div>
@@ -5174,25 +5230,25 @@ export default function ChatPage({
                 </button>
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} multiple />
                 {showAttachMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 py-1 bg-white rounded-2xl border border-slate-200/70 shadow-xl min-w-[11rem] z-50">
-                    <button type="button" onClick={() => openFileInput(true)} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                  <div className="ui-popover-surface absolute bottom-full left-0 z-50 mb-2 min-w-[11rem] overflow-hidden rounded-2xl py-1">
+                    <button type="button" onClick={() => openFileInput(true)} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                       {t("chat.attachFile")}
                     </button>
-                    <button type="button" onClick={() => openFileInput(false)} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                    <button type="button" onClick={() => openFileInput(false)} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                       {t("chat.attachImage")}
                     </button>
-                    <button type="button" onClick={handleAttachLocation} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                    <button type="button" onClick={handleAttachLocation} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
                       {t("chat.attachLocation")}
                     </button>
-                    <button type="button" onClick={() => { setShowContactPickerModal(true); setShowAttachMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                    <button type="button" onClick={() => { setShowContactPickerModal(true); setShowAttachMenu(false); }} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                       {t("chat.attachContact")}
                     </button>
                     {!chat?.is_personal && !chat?.is_favorites && (
-                      <button type="button" onClick={() => { setShowCreatePollModal(true); setShowAttachMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                      <button type="button" onClick={() => { setShowCreatePollModal(true); setShowAttachMenu(false); }} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                         {t("chat.poll")}
                       </button>
@@ -5395,28 +5451,28 @@ export default function ChatPage({
           <>
             <div className="fixed inset-0 z-40" aria-hidden onClick={() => setFormatMenuPos(null)} />
             <div
-              className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[200px]"
+              className="ui-popover-surface fixed z-50 min-w-[220px] overflow-hidden rounded-2xl py-1"
               style={{ left, top }}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className="px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100">Форматирование</div>
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatBold(); }}>
+              <div className="border-b border-slate-100 px-3 py-2 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400">Форматирование</div>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleFormatBold(); }}>
                 <strong>Ж</strong> Жирный
               </button>
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatItalic(); }}>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleFormatItalic(); }}>
                 <em>К</em> Курсив
               </button>
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatStrike(); }}>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleFormatStrike(); }}>
                 <s>З</s> Зачёркнутый
               </button>
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatLink(); }}>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleFormatLink(); }}>
                 <span className="underline">Ссылка</span>
               </button>
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleFormatCopyable(); }}>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleFormatCopyable(); }}>
                 Копируемый при клике
               </button>
               <div className="border-t border-slate-100 my-1" />
-              <button type="button" className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2" onClick={() => { handleSwitchLayout(); setFormatMenuPos(null); }}>
+              <button type="button" className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700" onClick={() => { handleSwitchLayout(); setFormatMenuPos(null); }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 8 6-6 6 6"/><path d="M11 2v10"/><path d="m19 16-6 6-6-6"/><path d="M13 12v10"/></svg>
                 Переключить раскладку
                 <span className="ml-auto text-xs text-slate-400">Ctrl+T</span>
@@ -5528,7 +5584,7 @@ export default function ChatPage({
               </div>
               <div className="px-6 pb-2 flex flex-col items-center">
                 {chat.avatar_url ? (
-                  <img src={toSameOriginMediaUrl(chat.avatar_url)} alt={t("chat.chatPhoto")} className="w-48 h-48 rounded-2xl object-cover mb-6" />
+                  <MediaImage source={chat.avatar_url} alt={t("chat.chatPhoto")} className="w-48 h-48 rounded-2xl object-cover mb-6" lazy={false} />
                 ) : (
                   <div className="w-48 h-48 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-6">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
@@ -5577,13 +5633,13 @@ export default function ChatPage({
         {/* Avatar editor: crop, draw, text */}
         {showAvatarEditor && chat && (
           <AvatarEditorModal
-            imageUrl={toSameOriginMediaUrl(chat.avatar_url ?? undefined) || null}
+            imageUrl={chatAvatarResolvedUrl ? (toSameOriginMediaUrl(chatAvatarResolvedUrl) || chatAvatarResolvedUrl) : null}
             onSave={handleAvatarSaveFromEditor}
             onCancel={() => setShowAvatarEditor(false)}
           />
         )}
         {/* Fullscreen avatar view */}
-        {showAvatarFullscreen && (
+        {showAvatarFullscreen && fullscreenAvatarResolvedUrl && (
           <div
             className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4"
             onClick={() => setShowAvatarFullscreen(null)}
@@ -5592,7 +5648,7 @@ export default function ChatPage({
             aria-label={t("common.close")}
           >
             <img
-              src={showAvatarFullscreen}
+              src={fullscreenAvatarResolvedUrl}
               alt={t("chat.fullPhoto")}
               className="max-w-full max-h-full object-contain"
               onClick={(e) => e.stopPropagation()}
@@ -5616,21 +5672,31 @@ export default function ChatPage({
         <>
           {/* Backdrop (mobile only): tap to close */}
           <div
-            className="fixed inset-0 z-40 bg-black/30 md:hidden"
+            className={`fixed inset-0 z-40 bg-black/30 ${shouldReplaceChatWithInfo ? "" : "md:hidden"}`}
             onClick={() => setShowInfo(false)}
             aria-hidden
           />
           <aside
             className={`
-              fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] backdrop-blur
-              md:static md:inset-auto md:z-auto md:w-80 md:border-l md:border-slate-200/70 md:shrink-0
+              flex flex-col overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] backdrop-blur
+              ${shouldReplaceChatWithInfo
+                ? "fixed z-50 border-l border-slate-200/70"
+                : "fixed inset-0 z-50 md:static md:inset-auto md:z-auto md:w-80 md:border-l md:border-slate-200/70 md:shrink-0"}
             `}
+            style={shouldReplaceChatWithInfo && chatAreaBounds
+              ? {
+                  top: chatAreaBounds.top,
+                  left: chatAreaBounds.left,
+                  width: chatAreaBounds.width,
+                  height: chatAreaBounds.height,
+                }
+              : undefined}
           >
             <div className="relative z-10 flex h-16 shrink-0 items-center gap-2 border-b border-slate-200/70 bg-white/88 px-3 backdrop-blur">
               <button
                 type="button"
                 onClick={() => setShowInfo(false)}
-                className="md:hidden p-2 -ml-1 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color] shrink-0"
+                className={`${shouldReplaceChatWithInfo ? "" : "md:hidden "}p-2 -ml-1 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color] shrink-0`}
                 aria-label={t("common.close")}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -5878,11 +5944,16 @@ export default function ChatPage({
                       {avatarUrl ? (
                         <button
                           type="button"
-                          onClick={() => setShowAvatarFullscreen(toSameOriginMediaUrl(avatarUrl))}
+                          onClick={() => setShowAvatarFullscreen(avatarUrl)}
                           className="block rounded-full overflow-hidden cursor-zoom-in hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                           title={t("chat.viewPhoto")}
                         >
-                          <img src={toSameOriginMediaUrl(getAvatarUrlBySize(avatarUrl, (profileUser as User).avatar_url_small, (profileUser as User).avatar_url_medium, "medium")) || ""} alt="" className="w-20 h-20 rounded-full object-cover" />
+                          <MediaImage
+                            source={getAvatarUrlBySize(avatarUrl, (profileUser as User).avatar_url_small, (profileUser as User).avatar_url_medium, "medium")}
+                            alt=""
+                            className="w-20 h-20 rounded-full object-cover"
+                            lazy={false}
+                          />
                         </button>
                       ) : (
                         <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-2xl font-bold">
@@ -6210,11 +6281,16 @@ export default function ChatPage({
                 ) : (chat.is_personal && (chat.other_member?.avatar_url ?? chat.other_member?.avatar)) || (!chat.is_personal && chat.avatar_url) ? (
                   <button
                     type="button"
-                    onClick={() => setShowAvatarFullscreen(toSameOriginMediaUrl(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!))}
+                    onClick={() => setShowAvatarFullscreen(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!)}
                     className="block rounded-full overflow-hidden cursor-zoom-in hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                     title={t("chat.viewPhoto")}
                   >
-                    <img src={toSameOriginMediaUrl(getAvatarUrlBySize(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, "medium")) || ""} alt="" className="w-20 h-20 rounded-full object-cover" />
+                    <MediaImage
+                      source={getAvatarUrlBySize(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, "medium")}
+                      alt=""
+                      className="w-20 h-20 rounded-full object-cover"
+                      lazy={false}
+                    />
                   </button>
                 ) : (
                   <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-2xl font-bold">
@@ -6636,9 +6712,8 @@ export default function ChatPage({
                             const openDm = !isMe && onOpenDmWithUserId ? () => onOpenDmWithUserId(m.user.id) : undefined;
                             return (
                               <li key={m.id} className="flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() => { setInfoUserId(m.user.id); }}
+                                <Link
+                                  to={buildUserInfoHref(m.user)}
                                   className="relative shrink-0 rounded-full hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                                   title={t("chat.personInfo")}
                                 >
@@ -6646,7 +6721,7 @@ export default function ChatPage({
                                   {onlineStatus[m.user.id]?.is_online && (
                                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full" />
                                   )}
-                                </button>
+                                </Link>
                                 <div className="flex-1 min-w-0">
                                   {openDm ? (
                                     <button type="button" onClick={openDm} className="text-left w-full min-w-0 block truncate text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium">
@@ -7883,25 +7958,37 @@ const MessageBubble = memo(function MessageBubble({
           (() => {
             const sender = message.sender as User;
             const avatarUrl = sender?.avatar_url ?? sender?.avatar ?? null;
+            const isAvatarLink = !(message as Message & { sender_display_name?: string }).sender_display_name && !!sender?.id;
             return (
-              <button
-                type="button"
-                onClick={() => !(message as Message & { sender_display_name?: string }).sender_display_name && onAvatarClick?.(sender?.id)}
-                className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200 transition-shadow ${(message as Message & { sender_display_name?: string }).sender_display_name ? "cursor-default" : "cursor-pointer hover:ring-2 hover:ring-blue-300"}`}
-                title={senderName}
-              >
-                {(message as Message & { sender_display_name?: string }).sender_display_name ? (
+              isAvatarLink ? (
+                <Link
+                  to={buildUserInfoHref(sender)}
+                  className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200 transition-shadow cursor-pointer hover:ring-2 hover:ring-blue-300"
+                  title={senderName}
+                >
+                  {avatarUrl ? (
+                    <MediaImage
+                      source={getAvatarUrlBySize(avatarUrl, (message.sender as User)?.avatar_url_small, (message.sender as User)?.avatar_url_medium, "small")}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      lazy={false}
+                    />
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-600">
+                      {getAvatarInitials(senderName)}
+                    </span>
+                  )}
+                </Link>
+              ) : (
+                <span
+                  className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-200"
+                  title={senderName}
+                >
                   <span className="text-xs font-semibold text-slate-600">
                     {getAvatarInitials(senderName)}
                   </span>
-                ) : avatarUrl ? (
-                  <img src={toSameOriginMediaUrl(getAvatarUrlBySize(avatarUrl, (message.sender as User)?.avatar_url_small, (message.sender as User)?.avatar_url_medium, "small")) || ""} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-xs font-semibold text-slate-600">
-                    {getAvatarInitials(senderName)}
-                  </span>
-                )}
-              </button>
+                </span>
+              )
             );
           })()
         ) : (
@@ -7962,10 +8049,10 @@ const MessageBubble = memo(function MessageBubble({
           )}
           {/* Reply quote block — aligned to the right for own messages */}
           {message.reply_to && !message.reply_to.is_deleted && (
-            <div className="mb-0.5 -mt-0.5">
+            <div className="mb-0.5 -mt-0.5 max-w-full min-w-0">
               <button
                 type="button"
-                className={`rounded-lg px-2 py-0.5 border-l-[3px] w-full text-left ${isMine ? "border-blue-400 bg-blue-50/50" : "border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
+                className={`block w-full max-w-full min-w-0 rounded-lg border-l-[3px] px-2 py-0.5 text-left ${isMine ? "border-blue-400 bg-blue-50/50" : "border-slate-400 bg-slate-50/50"} cursor-pointer hover:opacity-80`}
                 onClick={() => {
                   const el = document.querySelector(`[data-message-id="${message.reply_to!.id}"]`);
                   el?.previousElementSibling?.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -7982,11 +8069,11 @@ const MessageBubble = memo(function MessageBubble({
                   }
                 }}
               >
-                <div className="text-xs font-medium text-blue-600 truncate">
+                <div className="block max-w-full min-w-0 truncate text-xs font-medium text-blue-600">
                   {(message.reply_to as ReplyMessage).sender_display_name ||
                     userDisplayName((message.reply_to.sender as User) ?? { display_name: "", phone: "" })}
                 </div>
-                <div className="text-xs text-slate-500 truncate">
+                <div className="block max-w-full min-w-0 truncate text-xs text-slate-500">
                   {message.reply_to.msg_type === "gif"
                     ? "(GIF)"
                     : message.reply_to.msg_type === "sticker"
@@ -8001,9 +8088,9 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           )}
           {message.reply_to && message.reply_to.is_deleted && (
-            <div className="mb-0.5 -mt-0.5">
-              <div className="rounded-lg px-2 py-0.5 border-l-[3px] border-slate-300 bg-slate-50/50 w-full text-left">
-                <div className="text-xs text-slate-400 italic">{t("chat.messageDeleted")}</div>
+            <div className="mb-0.5 -mt-0.5 max-w-full min-w-0">
+              <div className="w-full max-w-full min-w-0 rounded-lg border-l-[3px] border-slate-300 bg-slate-50/50 px-2 py-0.5 text-left">
+                <div className="block max-w-full min-w-0 truncate text-xs italic text-slate-400">{t("chat.messageDeleted")}</div>
               </div>
             </div>
           )}
@@ -8113,13 +8200,13 @@ const MessageBubble = memo(function MessageBubble({
                   const isLottie = mime.includes("application/json");
                   return isLottie
                     ? <LottieSticker animationUrl={stickerUrl} size={112} />
-                    : <img src={stickerUrl} alt="" className="w-28 h-28 object-contain" />;
+                    : <MediaImage source={stickerUrl} alt="" className="w-28 h-28 object-contain" lazy={false} />;
                 }
                 const stickerPath = content.startsWith("/") ? content : `/${(content || "").replace(/^\/+/, "")}`;
                 const stickerAnim = getStickerAnimationUrl(stickerPath);
                 return stickerAnim
                   ? <LottieSticker animationUrl={stickerAnim} size={112} />
-                  : <img src={stickerPath} alt="" className="w-28 h-28 object-contain" />;
+                  : <MediaImage source={stickerPath} alt="" className="w-28 h-28 object-contain" lazy={false} />;
               })()}
               <div className={`mt-0 min-w-0 max-w-full flex flex-wrap items-center gap-x-1 gap-y-0 justify-start`}>
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
@@ -8637,7 +8724,12 @@ const MessageBubble = memo(function MessageBubble({
                   {message.read_by!.map((u) => (
                     <div key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 text-slate-700">
                       {(u.avatar_url ?? u.avatar) ? (
-                        <img src={toSameOriginMediaUrl(getAvatarUrlBySize(u.avatar_url ?? u.avatar, u.avatar_url_small, u.avatar_url_medium, "small")) || ""} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                        <MediaImage
+                          source={getAvatarUrlBySize(u.avatar_url ?? u.avatar, u.avatar_url_small, u.avatar_url_medium, "small")}
+                          alt=""
+                          className="w-6 h-6 rounded-full object-cover shrink-0"
+                          lazy={false}
+                        />
                       ) : (
                         <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[0.625rem] font-semibold shrink-0">
                           {getAvatarInitials(userDisplayName(u) || u.telegram_username || u.id)}
@@ -9057,27 +9149,36 @@ function ImageTileGrid({ images }: { images: ImageTileItem[] }) {
     const toLoadCount = needLoad.filter(Boolean).length;
     visibleImages.forEach((img, idx) => {
       if (!needLoad[idx]) return;
-      const url = toSameOriginMediaUrl(img.url || "#") || "#";
-      if (!url || url === "#") {
-        results[idx] = { w: 400, h: 300, ratio: 4 / 3 };
-        loaded++;
-        if (loaded === toLoadCount && !cancelled) setLoadedDims([...results]);
-        return;
-      }
-      const el = new Image();
-      el.onload = () => {
-        if (cancelled) return;
-        results[idx] = { w: el.naturalWidth, h: el.naturalHeight, ratio: el.naturalWidth / el.naturalHeight };
-        loaded++;
-        if (loaded === toLoadCount) setLoadedDims([...results]);
-      };
-      el.onerror = () => {
-        if (cancelled) return;
-        results[idx] = { w: 400, h: 300, ratio: 4 / 3 };
-        loaded++;
-        if (loaded === toLoadCount) setLoadedDims([...results]);
-      };
-      el.src = url;
+      resolveMediaAccess(img.url ?? null)
+        .then((resolved) => {
+          const url = toSameOriginMediaUrl(resolved || img.url || "#") || "#";
+          if (!url || url === "#") {
+            results[idx] = { w: 400, h: 300, ratio: 4 / 3 };
+            loaded++;
+            if (loaded === toLoadCount && !cancelled) setLoadedDims([...results]);
+            return;
+          }
+          const el = new Image();
+          el.onload = () => {
+            if (cancelled) return;
+            results[idx] = { w: el.naturalWidth, h: el.naturalHeight, ratio: el.naturalWidth / el.naturalHeight };
+            loaded++;
+            if (loaded === toLoadCount) setLoadedDims([...results]);
+          };
+          el.onerror = () => {
+            if (cancelled) return;
+            results[idx] = { w: 400, h: 300, ratio: 4 / 3 };
+            loaded++;
+            if (loaded === toLoadCount) setLoadedDims([...results]);
+          };
+          el.src = url;
+        })
+        .catch(() => {
+          if (cancelled) return;
+          results[idx] = { w: 400, h: 300, ratio: 4 / 3 };
+          loaded++;
+          if (loaded === toLoadCount) setLoadedDims([...results]);
+        });
     });
     return () => { cancelled = true; };
   }, [imagesKey]);
@@ -9094,7 +9195,7 @@ function ImageTileGrid({ images }: { images: ImageTileItem[] }) {
   const clampW = (w: number) => Math.min(Math.max(w, TILE_MIN_W), TILE_MAX_W);
 
   const renderTile = (img: typeof visibleImages[0], idx: number, style: React.CSSProperties) => {
-    const url = toSameOriginMediaUrl(img.url || "#") || "#";
+    const url = img.url || "#";
     const isLast = idx === maxShow - 1 && hiddenCount > 0;
     return (
       <div key={img.id} className="relative cursor-pointer overflow-hidden" style={style} onClick={() => setLightboxIdx(idx)}>
@@ -9269,7 +9370,8 @@ function ImageLightbox({
   const { t } = useTranslation();
   const [idx, setIdx] = useState(initialIndex);
   const img = images[idx];
-  const url = toSameOriginMediaUrl(img?.url || "#") || "#";
+  const resolvedUrl = useMediaAccess(img?.url ?? null, { enabled: !!img?.url });
+  const url = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "#";
   const downloadName = (img?.original_name || `image-${idx + 1}`).replace(/[\\/:*?"<>|]+/g, "_");
   const canDownload = url && url !== "#";
 
@@ -9359,7 +9461,8 @@ function VideoLightbox({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const url = src || "#";
+  const resolvedUrl = useMediaAccess(src || null, { enabled: !!src });
+  const url = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "#";
   const downloadName = (originalName || "video").replace(/[\\/:*?"<>|]+/g, "_");
   const canDownload = url && url !== "#";
 
@@ -9412,6 +9515,10 @@ function VideoLightbox({
 }
 
 function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; ownerId: string; durationSeconds?: number }) {
+  const R = 46;
+  const strokeWidth = 4;
+  const resolvedUrl = useMediaAccess(src || null, { enabled: !!src });
+  const videoUrl = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "";
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -9422,12 +9529,13 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
   const progress = effectiveDuration > 0 ? currentTime / effectiveDuration : 0;
   const isDraggingRef = useRef(false);
   const dragStartedRef = useRef(false);
+  const ringInteractionRef = useRef(false);
   const pointerIdRef = useRef<number | null>(null);
   const downXYRef = useRef({ x: 0, y: 0 });
   const pendingPlayRef = useRef(false);
   const wasDragRef = useRef(false);
   const isSeekingRef = useRef(false);
-  const DRAG_THRESHOLD_PX = 6;
+  const pendingSeekTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -9456,6 +9564,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     setMuted(true);
     setCurrentTime(0);
     setDuration(durationSeconds ?? 0);
+    pendingSeekTimeRef.current = null;
     const onTimeUpdate = () => {
       if (isSeekingRef.current) return;
       setCurrentTime(el.currentTime);
@@ -9463,19 +9572,41 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     const onSeeking = () => { isSeekingRef.current = true; };
     const onSeeked = () => {
       isSeekingRef.current = false;
+      if (pendingSeekTimeRef.current != null && Math.abs(el.currentTime - pendingSeekTimeRef.current) <= 0.25) {
+        pendingSeekTimeRef.current = null;
+      }
       setCurrentTime(el.currentTime);
     };
-    const onLoadedMetadata = () => syncDuration(el);
+    const applyPendingSeek = () => {
+      if (pendingSeekTimeRef.current == null) return;
+      const pendingTime = pendingSeekTimeRef.current;
+      if (!(Number.isFinite(pendingTime) && pendingTime >= 0)) return;
+      try {
+        el.currentTime = pendingTime;
+        setCurrentTime(pendingTime);
+      } catch {
+        // Some browsers temporarily reject seeks until media becomes ready.
+      }
+    };
+    const onLoadedMetadata = () => {
+      syncDuration(el);
+      applyPendingSeek();
+    };
+    const onLoadedData = () => applyPendingSeek();
+    const onCanPlay = () => applyPendingSeek();
     const onDurationChange = () => syncDuration(el);
     const onEnded = () => {
       setPlaying(false);
       setCurrentTime(0);
+      pendingSeekTimeRef.current = null;
       exclusiveSound.release(ownerId);
     };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("seeking", onSeeking);
     el.addEventListener("seeked", onSeeked);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("loadeddata", onLoadedData);
+    el.addEventListener("canplay", onCanPlay);
     el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("ended", onEnded);
     try { el.load(); } catch {}
@@ -9485,6 +9616,8 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
       el.removeEventListener("seeking", onSeeking);
       el.removeEventListener("seeked", onSeeked);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("loadeddata", onLoadedData);
+      el.removeEventListener("canplay", onCanPlay);
       el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("ended", onEnded);
     };
@@ -9555,16 +9688,34 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     const cy = rect.top + rect.height / 2;
     const dx = clientX - cx;
     const dy = clientY - cy;
-    const angleRad = Math.atan2(dx, -dy);
-    const percent = ((angleRad + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI);
+    const angleRad = Math.atan2(dy, dx);
+    const normalizedAngle = (angleRad + Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI);
+    const percent = normalizedAngle / (2 * Math.PI);
     return Math.max(0, Math.min(1, percent));
   }, []);
+
+  const isPointOnSeekRing = useCallback((clientX: number, clientY: number): boolean => {
+    const container = containerRef.current;
+    if (!container) return false;
+    const rect = container.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const distance = Math.hypot(dx, dy);
+    const visualRadius = Math.min(rect.width, rect.height) * (R / 100);
+    const hitPadding = Math.max(10, Math.min(rect.width, rect.height) * 0.04);
+    const minDistance = visualRadius - strokeWidth * 2 - hitPadding;
+    const maxDistance = visualRadius + strokeWidth * 2 + hitPadding;
+    return distance >= minDistance && distance <= maxDistance;
+  }, [R, strokeWidth]);
 
   const seekToPercent = useCallback((percent: number) => {
     const v = videoRef.current;
     if (!v || !Number.isFinite(effectiveDuration) || effectiveDuration <= 0) return;
     const time = Math.max(0, Math.min(effectiveDuration, percent * effectiveDuration));
     isSeekingRef.current = true;
+    pendingSeekTimeRef.current = time;
     v.currentTime = time;
     setCurrentTime(time);
   }, [effectiveDuration]);
@@ -9577,6 +9728,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     pointerIdRef.current = null;
     dragStartedRef.current = false;
     isDraggingRef.current = false;
+    ringInteractionRef.current = false;
   }, []);
 
   const handleCirclePointerDown = (e: React.PointerEvent) => {
@@ -9584,29 +9736,34 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     isDraggingRef.current = false;
     dragStartedRef.current = true;
     wasDragRef.current = false;
+    pendingPlayRef.current = false;
     pointerIdRef.current = e.pointerId;
     downXYRef.current = { x: e.clientX, y: e.clientY };
+    ringInteractionRef.current = isPointOnSeekRing(e.clientX, e.clientY);
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (ringInteractionRef.current) {
+      isDraggingRef.current = true;
+      wasDragRef.current = true;
+      seekToPercent(getPercentFromEvent(e.clientX, e.clientY));
+      e.preventDefault();
+      e.stopPropagation();
+    }
   };
 
   const handleCirclePointerMove = (e: React.PointerEvent) => {
     if (!dragStartedRef.current) return;
-    if (!isDraggingRef.current) {
-      const dx = e.clientX - downXYRef.current.x;
-      const dy = e.clientY - downXYRef.current.y;
-      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-      isDraggingRef.current = true;
-    }
-    const percent = getPercentFromEvent(e.clientX, e.clientY);
-    seekToPercent(percent);
+    if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return;
+    if (!ringInteractionRef.current) return;
+    seekToPercent(getPercentFromEvent(e.clientX, e.clientY));
   };
 
   const handleCirclePointerUp = () => {
     const wasDrag = isDraggingRef.current;
+    const wasRingInteraction = ringInteractionRef.current;
     clearDragState();
     if (wasDrag) {
       wasDragRef.current = true;
-    } else {
+    } else if (!wasRingInteraction) {
       pendingPlayRef.current = true;
     }
   };
@@ -9623,17 +9780,15 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     }
   };
 
-  const handleCirclePointerLeave = () => {
-    clearDragState();
-  };
-
   const handleCirclePointerCancel = (_e: React.PointerEvent) => {
     clearDragState();
   };
-
-  const R = 46;
-  const strokeWidth = 4;
   const circumference = 2 * Math.PI * R;
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const progressOffset = circumference * (1 - clampedProgress);
+  const thumbAngle = -Math.PI / 2 + clampedProgress * 2 * Math.PI;
+  const thumbX = 50 + R * Math.cos(thumbAngle);
+  const thumbY = 50 + R * Math.sin(thumbAngle);
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -9641,20 +9796,19 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
         ref={containerRef}
         role="button"
         tabIndex={0}
-        className="relative w-48 h-48 rounded-full overflow-hidden cursor-pointer group bg-black select-none"
+        className="relative w-48 h-48 rounded-full overflow-hidden cursor-pointer group bg-black select-none touch-none"
         onPointerDown={handleCirclePointerDown}
         onPointerMove={handleCirclePointerMove}
         onPointerUp={handleCirclePointerUp}
-        onPointerLeave={handleCirclePointerLeave}
         onPointerCancel={handleCirclePointerCancel}
         onClick={handleCircleClick}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePlay(); } }}
       >
         <video
           ref={videoRef}
-          src={src}
+          src={videoUrl || undefined}
           className="w-full h-full object-cover pointer-events-none"
-          preload="metadata"
+          preload="auto"
           crossOrigin="anonymous"
           playsInline
           muted={muted}
@@ -9667,7 +9821,6 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
           viewBox="0 0 100 100"
-          style={{ transform: "rotate(-90deg)" }}
           aria-hidden
         >
           <circle
@@ -9677,6 +9830,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
             fill="none"
             stroke="rgba(255,255,255,0.35)"
             strokeWidth={strokeWidth}
+            transform="rotate(-90 50 50)"
           />
           <circle
             cx="50"
@@ -9686,8 +9840,17 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
             stroke="rgba(96,165,250,0.9)"
             strokeWidth={strokeWidth}
             strokeLinecap="round"
-            strokeDasharray={`${circumference * progress} ${circumference}`}
-            className="transition-all duration-75"
+            strokeDasharray={circumference}
+            strokeDashoffset={progressOffset}
+            transform="rotate(-90 50 50)"
+            className={ringInteractionRef.current ? "" : "transition-[stroke-dashoffset] duration-75"}
+          />
+          <circle
+            cx={thumbX}
+            cy={thumbY}
+            r="2.6"
+            fill="rgba(255,255,255,0.96)"
+            className={ringInteractionRef.current ? "" : "transition-[cx,cy] duration-75"}
           />
         </svg>
         {!playing && (

@@ -117,3 +117,79 @@ class SendCodePerMinuteLimitTest(TestCase):
             "\u0447\u0435\u0440\u0435\u0437 \u043c\u0438\u043d\u0443\u0442\u0443."
         )
         self.assertEqual(res3.data.get("detail"), expected_detail)
+
+
+class SendCodeDeliveryRoutingTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            phone="+79990005555",
+            display_name="Existing user",
+            username="existing_user",
+        )
+
+    @patch("apps.users.views.can_send_sms", return_value=True)
+    @patch("apps.users.views.send_sms", return_value=True)
+    @patch("apps.users.views.send_telegram_verification", return_value=({"request_id": "tg-1"}, None))
+    @patch("apps.users.views.send_pingy_verification_message", return_value=True)
+    @patch("apps.users.views.generate_code", return_value="654321")
+    def test_active_session_prefers_pingy_over_telegram(
+        self,
+        mock_generate,
+        mock_pingy,
+        mock_tg,
+        mock_sms,
+        mock_can,
+    ):
+        from apps.users.models import UserSession
+
+        UserSession.objects.create(user=self.user, is_active=True, device_label="Chrome")
+
+        res = self.client.post(
+            "/api/auth/send-code/",
+            {"phone": self.user.phone},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data.get("method"), "pingy")
+        mock_pingy.assert_called_once_with(self.user, "654321")
+        mock_tg.assert_not_called()
+        mock_sms.assert_not_called()
+
+    @patch("apps.users.views.can_send_sms", return_value=True)
+    @patch("apps.users.views.send_sms", return_value=True)
+    @patch("apps.users.views.send_telegram_verification", return_value=({"request_id": "tg-2"}, None))
+    @patch("apps.users.views.send_pingy_verification_message", return_value=True)
+    @patch("apps.users.views.generate_code", return_value="112233")
+    @patch("apps.users.views.get_otp", return_value="112233")
+    def test_explicit_telegram_request_reuses_existing_code(
+        self,
+        mock_get_otp,
+        mock_generate,
+        mock_pingy,
+        mock_tg,
+        mock_sms,
+        mock_can,
+    ):
+        from apps.users.models import UserSession
+
+        UserSession.objects.create(user=self.user, is_active=True, device_label="Desktop")
+
+        first = self.client.post(
+            "/api/auth/send-code/",
+            {"phone": self.user.phone},
+            format="json",
+        )
+        second = self.client.post(
+            "/api/auth/send-code/",
+            {"phone": self.user.phone, "method": "telegram", "reuse_existing": True},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data.get("method"), "pingy")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.data.get("method"), "telegram")
+        mock_pingy.assert_called_once_with(self.user, "112233")
+        mock_tg.assert_called_once_with(self.user.phone, "112233")

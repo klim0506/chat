@@ -17,6 +17,8 @@ type PhoneInputProps = {
   "data-testid"?: string;
 };
 
+const PHONE_INPUT_COUNTRY_STORAGE_KEY = "auth.phoneInputCountry";
+
 /**
  * Phone input in Telegram style:
  * - Left: country selector (flag + dial code) with dropdown
@@ -32,12 +34,21 @@ export function PhoneInput({
   disabled = false,
   "data-testid": dataTestId,
 }: PhoneInputProps) {
-  const [country, setCountry] = useState<Country>(COUNTRIES[0]);
+  const [country, setCountry] = useState<Country>(() => {
+    if (typeof window === "undefined") return COUNTRIES[0];
+    const savedIso = window.sessionStorage.getItem(PHONE_INPUT_COUNTRY_STORAGE_KEY);
+    return (savedIso && getCountryByIso(savedIso)) || COUNTRIES[0];
+  });
   const [number, setNumber] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const persistCountry = useCallback((nextCountry: Country) => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(PHONE_INPUT_COUNTRY_STORAGE_KEY, nextCountry.iso);
+  }, []);
 
   // Parse incoming value into country + number
   useEffect(() => {
@@ -51,6 +62,7 @@ export function PhoneInput({
         found = COUNTRIES.find((c) => c.dialCode === code);
         if (found) {
           setCountry(found);
+          persistCountry(found);
           const num = (codePart.slice(len) + rest).replace(/\D/g, "");
           setNumber(num);
           break;
@@ -62,7 +74,7 @@ export function PhoneInput({
     } else {
       setNumber(value.replace(/\D/g, "").slice(0, 15));
     }
-  }, []); // only on mount
+  }, [country, number, value, persistCountry]); // sync from initial value after mount/remount
 
   const getFullPhone = useCallback((c: Country, num: string) => {
     const n = num.replace(/\D/g, "");
@@ -85,6 +97,7 @@ export function PhoneInput({
 
   const handleCountrySelect = (c: Country) => {
     setCountry(c);
+    persistCountry(c);
     setDropdownOpen(false);
     setSearch("");
     notifyChange(c, number);
@@ -119,6 +132,10 @@ export function PhoneInput({
   // Geo: pre-select country by IP
   useEffect(() => {
     let cancelled = false;
+    if (value) return;
+    if (typeof window !== "undefined" && window.sessionStorage.getItem(PHONE_INPUT_COUNTRY_STORAGE_KEY)) {
+      return;
+    }
     api
       .get<{ country_code?: string | null }>("/geo/country-code/")
       .then(({ data }) => {
@@ -126,22 +143,25 @@ export function PhoneInput({
         const iso = data.country_code;
         if (typeof iso === "string") {
           const c = getCountryByIso(iso.toUpperCase());
-          if (c) setCountry(c);
+          if (c) {
+            setCountry(c);
+            persistCountry(c);
+          }
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [persistCountry, value]);
 
   return (
     <div ref={containerRef} className="relative">
-    <div className={`flex overflow-hidden rounded-[18px] border bg-transparent transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${error ? "border-rose-300 focus-within:ring-rose-100" : "border-slate-200 focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
+    <div className={`ui-field-shell flex overflow-hidden rounded-[18px] border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${error ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
       {/* Country selector */}
       <button
         type="button"
         onClick={() => setDropdownOpen((o) => !o)}
         disabled={disabled}
-        className="flex min-w-0 items-center gap-2 border-r border-slate-200 bg-slate-50/80 px-3 py-3 text-left hover:bg-slate-100/80 focus:outline-none focus:ring-0 disabled:opacity-50"
+        className="ui-picker-tile flex min-w-0 items-center gap-2 rounded-none border-r border-slate-200 px-3 py-3 text-left focus:outline-none focus:ring-0 disabled:opacity-50"
         aria-haspopup="listbox"
         aria-expanded={dropdownOpen}
         aria-label="Country"
@@ -174,17 +194,19 @@ export function PhoneInput({
           portalRef={dropdownRef}
           width="anchor"
           offset={8}
-          className="flex max-h-72 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur"
+          className="ui-popover-surface flex max-h-72 flex-col overflow-hidden rounded-2xl"
         >
-          <div role="listbox">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search country..."
-              className="m-2 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm text-slate-700 outline-none transition-[border-color,box-shadow] focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
-              autoFocus
-            />
+          <div role="listbox" className="flex min-h-0 flex-1 flex-col">
+            <div className="border-b border-slate-100 p-2">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search country..."
+                className="ui-field-shell block w-full rounded-xl px-3 py-2 text-sm text-slate-700 outline-none transition-[border-color,box-shadow] focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                autoFocus
+              />
+            </div>
             <div className="overflow-y-auto flex-1 min-h-0">
               {filteredCountries.map((c) => (
                 <button
@@ -193,8 +215,8 @@ export function PhoneInput({
                   role="option"
                   aria-selected={c.iso === country.iso}
                   onClick={() => handleCountrySelect(c)}
-                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 ${
-                    c.iso === country.iso ? "bg-sky-50 text-sky-700" : "text-slate-700"
+                  className={`ui-list-row flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm ${
+                    c.iso === country.iso ? "ui-list-row-active text-sky-700" : "text-slate-700"
                   }`}
                 >
                   <span className="text-lg">{c.flag}</span>

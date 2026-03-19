@@ -286,6 +286,25 @@ REACTION_EMOJIS = [
     "🔥", "💫", "✨", "❤️", "🥰", "😂", "😎", "🎉", "🙌", "👏", "💪", "🤩", "🌟", "😮", "😢",
 ]
 # Maximum reactions a single user can add to one message
+REACTION_EMOJIS = [
+    "\U0001F525",
+    "\U0001F4AB",
+    "\u2728",
+    "\u2764\ufe0f",
+    "\U0001F970",
+    "\U0001F602",
+    "\U0001F60B",
+    "\U0001F389",
+    "\U0001F64C",
+    "\U0001F44F",
+    "\U0001F4AA",
+    "\U0001F929",
+    "\U0001F31F",
+    "\U0001F62E",
+    "\U0001F622",
+]
+
+# Maximum reactions a single user can add to one message
 MAX_REACTIONS_PER_USER = 3
 
 

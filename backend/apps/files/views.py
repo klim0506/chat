@@ -1,7 +1,9 @@
 import hashlib
 import hmac
+import logging
 import mimetypes
 import re
+from datetime import timezone as dt_timezone
 from io import BytesIO
 from urllib.parse import quote
 import os
@@ -11,6 +13,7 @@ from pathlib import Path
 from uuid import UUID
 
 from django.conf import settings
+from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -21,11 +24,22 @@ from rest_framework.response import Response
 
 from apps.chats.models import ChatMember
 from apps.payments.plan_limits import get_max_file_size_bytes, get_max_daily_file_uploads, RESTRICTION_CODE
+from .access_handles import (
+    KIND_CHANNEL_AVATAR,
+    KIND_CHAT_AVATAR,
+    KIND_CHAT_BACKGROUND,
+    KIND_FILE,
+    KIND_USER_AVATAR,
+    KIND_USER_GALLERY_AVATAR,
+    parse_media_handle,
+)
 from .models import ChunkedUploadSession, FileAttachment
-from .protected_media import verify_protected_media_token
+from .protected_media import make_protected_media_url, verify_protected_media_token
 from .serializers import FileAttachmentSerializer
 from .tasks import optimize_uploaded_image
 from PIL import Image, ImageOps
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB fallback
 FILE_TOKEN_TTL_SECONDS = 24 * 60 * 60  # 24h — reduce 403 for cached/long-open tabs
@@ -180,6 +194,154 @@ def verify_file_token(file_id: str, token: str) -> bool:
     payload = f"{file_id}:{expires_at}"
     expected_sig = hmac.new(settings.SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected_sig, sig)
+
+
+def _signed_file_url(request, att: FileAttachment, *, expires_at: int) -> str:
+    token = make_file_token(str(att.id), expires_at=expires_at)
+    path = f"/api/files/{att.id}/?t={token}"
+    return request.build_absolute_uri(path) if request else path
+
+
+def _chat_access_q(user) -> Q:
+    return Q(chat__members__user=user, chat__members__status=ChatMember.Status.ACTIVE)
+
+
+def _channel_access_q(user) -> Q:
+    from apps.chats.models import ChannelMember
+
+    return Q(channel__is_public=True) | Q(channel__members__user=user, channel__members__status=ChannelMember.Status.ACTIVE)
+
+
+def _user_can_access_file(user, att: FileAttachment) -> bool:
+    from apps.chats.models import ChannelPost, ChannelPostComment, Message, Sticker
+
+    if att.external_url:
+        return True
+    if att.uploader_id == user.id:
+        return True
+    file_q = Q(file=att) | Q(files=att)
+    if Message.objects.filter(file_q).filter(_chat_access_q(user)).exists():
+        return True
+    if ChannelPost.objects.filter(file_q, is_deleted=False).filter(_channel_access_q(user)).exists():
+        return True
+    comment_access = Q(post__channel__is_public=True) | Q(
+        post__channel__members__user=user,
+        post__channel__members__status="active",
+    )
+    if ChannelPostComment.objects.filter(file_q, is_deleted=False).filter(comment_access).exists():
+        return True
+    if Sticker.objects.filter(file=att).filter(Q(pack__owner=user) | Q(pack__installed_by__user=user)).exists():
+        return True
+    return False
+
+
+def _user_can_access_chat_media(user, chat_id: str) -> bool:
+    return ChatMember.objects.filter(chat_id=chat_id, user=user, status=ChatMember.Status.ACTIVE).exists()
+
+
+def _user_can_access_channel_media(user, channel) -> bool:
+    from apps.chats.models import ChannelMember
+
+    if getattr(channel, "is_public", False):
+        return True
+    return ChannelMember.objects.filter(channel=channel, user=user, status=ChannelMember.Status.ACTIVE).exists()
+
+
+class MediaAccessView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        handle = str(request.query_params.get("handle") or "").strip()
+        if not handle:
+            return Response({"detail": "Media handle is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            payload = parse_media_handle(handle)
+        except Exception:
+            return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+
+        kind = payload["kind"]
+        object_id = payload["object_id"]
+        variant = payload["variant"] or "original"
+        expires_at = int(time.time()) + 15 * 60
+
+        if kind == KIND_FILE:
+            try:
+                att = FileAttachment.objects.get(pk=object_id)
+            except FileAttachment.DoesNotExist:
+                raise Http404
+            if not _user_can_access_file(request.user, att):
+                return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+            url = att.external_url or _signed_file_url(request, att, expires_at=expires_at)
+            target_id = str(att.id)
+        elif kind == KIND_USER_AVATAR:
+            from apps.users.models import User
+
+            try:
+                user = User.objects.get(pk=object_id)
+            except User.DoesNotExist:
+                raise Http404
+            path = user._get_avatar_path()
+            if not path:
+                raise Http404
+            url = make_protected_media_url(path, request, size=variant, expires_at=expires_at)
+            target_id = str(user.id)
+        elif kind == KIND_USER_GALLERY_AVATAR:
+            from apps.users.models import UserAvatar
+
+            try:
+                avatar = UserAvatar.objects.select_related("user").get(pk=object_id)
+            except UserAvatar.DoesNotExist:
+                raise Http404
+            url = make_protected_media_url(avatar.image.name, request, size=variant, expires_at=expires_at)
+            target_id = str(avatar.id)
+        elif kind == KIND_CHAT_AVATAR:
+            from apps.chats.models import Chat
+
+            try:
+                chat = Chat.objects.get(pk=object_id, is_active=True)
+            except Chat.DoesNotExist:
+                raise Http404
+            if not chat.avatar or not _user_can_access_chat_media(request.user, str(chat.id)):
+                return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+            url = make_protected_media_url(chat.avatar.name, request, size=variant, expires_at=expires_at)
+            target_id = str(chat.id)
+        elif kind == KIND_CHAT_BACKGROUND:
+            from apps.chats.models import Chat
+
+            try:
+                chat = Chat.objects.get(pk=object_id, is_active=True)
+            except Chat.DoesNotExist:
+                raise Http404
+            if not chat.background or not _user_can_access_chat_media(request.user, str(chat.id)):
+                return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+            url = make_protected_media_url(chat.background.name, request, expires_at=expires_at)
+            target_id = str(chat.id)
+        elif kind == KIND_CHANNEL_AVATAR:
+            from apps.chats.models import Channel
+
+            try:
+                channel = Channel.objects.get(pk=object_id, is_active=True)
+            except Channel.DoesNotExist:
+                raise Http404
+            if not channel.avatar or not _user_can_access_channel_media(request.user, channel):
+                return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+            url = make_protected_media_url(channel.avatar.name, request, size=variant, expires_at=expires_at)
+            target_id = str(channel.id)
+        else:
+            return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not url:
+            raise Http404
+
+        expires_at_iso = timezone.datetime.fromtimestamp(expires_at, tz=dt_timezone.utc).isoformat()
+        logger.info(
+            "media_access_granted user_id=%s kind=%s target_id=%s expires_at=%s",
+            request.user.id,
+            kind,
+            target_id,
+            expires_at_iso,
+        )
+        return Response({"url": url, "expires_at": expires_at_iso})
 
 
 class FileUploadView(APIView):

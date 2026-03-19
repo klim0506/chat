@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { chatsApi, type JoinChatPreview } from "../api/client";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { useTranslation, formatMembersCount } from "../lib/i18n";
-import { toSameOriginMediaUrl } from "../lib/media-url";
+import { MediaImage } from "./MediaImage";
 
 interface JoinChatPreviewModalProps {
   isOpen: boolean;
@@ -143,11 +143,7 @@ export default function JoinChatPreviewModal({
               <div className="flex gap-4 items-start">
                 {preview.chat_type === "open" && (preview.avatar_url || preview.members_count !== undefined) ? (
                   preview.avatar_url ? (
-                    <img
-                      src={toSameOriginMediaUrl(preview.avatar_url)}
-                      alt=""
-                      className="w-16 h-16 rounded-full object-cover shrink-0"
-                    />
+                    <MediaImage source={preview.avatar_url} alt="" className="w-16 h-16 rounded-full object-cover shrink-0" />
                   ) : (
                     <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center text-lg font-semibold text-slate-600 shrink-0">
                       {getAvatarInitials(preview.title)}

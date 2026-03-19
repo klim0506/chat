@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { getCachedMediaUrl } from "../lib/media-cache";
 import { toSameOriginMediaUrl } from "../lib/media-url";
 import { useNetworkStore } from "../store/network";
+import { useMediaAccess } from "./useMediaAccess";
 
 /**
  * Hook that returns a (possibly cached) URL for a media resource.
@@ -16,15 +17,16 @@ import { useNetworkStore } from "../store/network";
  */
 export function useCachedMediaUrl(originalUrl: string | null | undefined): string {
   const isOnline = useNetworkStore((s) => s.isOnline);
-  const [resolvedUrl, setResolvedUrl] = useState(originalUrl || "");
+  const accessibleUrl = useMediaAccess(originalUrl);
+  const [resolvedUrl, setResolvedUrl] = useState(accessibleUrl || originalUrl || "");
 
   useEffect(() => {
-    if (!originalUrl) {
+    if (!accessibleUrl) {
       setResolvedUrl("");
       return;
     }
 
-    const url = toSameOriginMediaUrl(originalUrl);
+    const url = toSameOriginMediaUrl(accessibleUrl);
     let cancelled = false;
 
     if (isOnline) {
@@ -40,7 +42,7 @@ export function useCachedMediaUrl(originalUrl: string | null | undefined): strin
     }
 
     return () => { cancelled = true; };
-  }, [originalUrl, isOnline]);
+  }, [accessibleUrl, isOnline]);
 
   return resolvedUrl;
 }

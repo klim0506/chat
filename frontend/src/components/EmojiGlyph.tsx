@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { TELEGRAM_EMOJI_SRC_BY_EMOJI } from "../data/telegram-emojis";
 
 interface EmojiGlyphProps {
   emoji: string;
   size?: number;
   className?: string;
+  preferNative?: boolean;
 }
 
-export function EmojiGlyph({ emoji, size = 22, className = "" }: EmojiGlyphProps) {
+export function EmojiGlyph({ emoji, size = 22, className = "", preferNative = false }: EmojiGlyphProps) {
   const src = TELEGRAM_EMOJI_SRC_BY_EMOJI.get(emoji);
-  if (src) {
+  const [useNativeFallback, setUseNativeFallback] = useState(preferNative);
+  if (src && !useNativeFallback) {
     return (
       <img
         src={src}
@@ -17,6 +20,7 @@ export function EmojiGlyph({ emoji, size = 22, className = "" }: EmojiGlyphProps
         height={size}
         loading="lazy"
         decoding="async"
+        onError={() => setUseNativeFallback(true)}
         className={`inline-block shrink-0 object-contain ${className}`}
       />
     );

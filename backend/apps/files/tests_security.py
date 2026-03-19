@@ -10,6 +10,8 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.chats.models import Chat, ChatMember, DEFAULT_MAX_MEMBERS, Message
+from apps.files.access_handles import make_file_handle
 from apps.users.models import User
 from apps.users.jwt_utils import make_access_token
 from apps.files.models import FileAttachment
@@ -150,3 +152,64 @@ class FileDailyLimitTest(TestCase):
         res = self.client.post("/api/files/upload/", {"file": f}, format="multipart")
         self.assertEqual(res.status_code, 403, res.data)
         self.assertEqual(res.data.get("code"), "plan_restriction")
+
+
+class MediaAccessBrokerSecurityTest(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(phone="+79990001234", display_name="Owner")
+        self.member = User.objects.create_user(phone="+79990005678", display_name="Member")
+        self.outsider = User.objects.create_user(phone="+79990009998", display_name="Outsider")
+        self.chat = Chat.objects.create(
+            title="Sec",
+            slug="sec-chat",
+            verification_code="sec-code",
+            chat_type=Chat.ChatType.OPEN,
+            max_members=DEFAULT_MAX_MEMBERS,
+            owner=self.owner,
+        )
+        ChatMember.objects.create(chat=self.chat, user=self.owner, role=ChatMember.Role.ADMIN, status=ChatMember.Status.ACTIVE)
+        ChatMember.objects.create(chat=self.chat, user=self.member, role=ChatMember.Role.MEMBER, status=ChatMember.Status.ACTIVE)
+        self.attachment = FileAttachment.objects.create(
+            uploader=self.owner,
+            original_name="doc.pdf",
+            file_path="chat_uploads/test/doc.pdf",
+            mime_type="application/pdf",
+            size_bytes=128,
+            storage_type=FileAttachment.StorageType.LOCAL,
+        )
+        self.message = Message.objects.create(
+            chat=self.chat,
+            sender=self.owner,
+            msg_type=Message.MsgType.FILE,
+            content="doc",
+            file=self.attachment,
+        )
+        self.message.files.set([self.attachment])
+
+    def _auth(self, user: User) -> APIClient:
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_access_token(user.pk)}")
+        return client
+
+    def test_broker_requires_auth(self):
+        client = APIClient()
+        res = client.get("/api/media/access/", {"handle": make_file_handle(self.attachment.id)})
+        self.assertEqual(res.status_code, 401)
+
+    def test_broker_denies_non_member(self):
+        res = self._auth(self.outsider).get("/api/media/access/", {"handle": make_file_handle(self.attachment.id)})
+        self.assertEqual(res.status_code, 403)
+
+    def test_broker_denies_after_leaving_chat(self):
+        member_client = self._auth(self.member)
+        first = member_client.get("/api/media/access/", {"handle": make_file_handle(self.attachment.id)})
+        self.assertEqual(first.status_code, 200, first.data)
+        ChatMember.objects.filter(chat=self.chat, user=self.member).delete()
+        second = member_client.get("/api/media/access/", {"handle": make_file_handle(self.attachment.id)})
+        self.assertEqual(second.status_code, 403)
+
+    def test_handle_does_not_expose_file_path(self):
+        handle = make_file_handle(self.attachment.id)
+        self.assertNotIn("chat_uploads", handle)
+        self.assertNotIn("MEDIA_ROOT", handle)
+        self.assertNotIn(str(self.attachment.file_path), handle)

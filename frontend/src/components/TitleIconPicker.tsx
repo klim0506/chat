@@ -39,10 +39,8 @@ export function TitleIconPicker({ value, onChange, label, compact }: TitleIconPi
           type="button"
           onClick={() => { onChange(emoji); setOpen(false); }}
           title={emoji ? emoji : "Без иконки"}
-          className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-colors ${
-            (emoji || "") === (value || "")
-              ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300"
-              : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+          className={`ui-picker-tile h-9 w-9 rounded-lg flex items-center justify-center text-lg ${
+            (emoji || "") === (value || "") ? "ui-picker-tile-active" : ""
           }`}
         >
           {emoji || "−"}
@@ -58,15 +56,15 @@ export function TitleIconPicker({ value, onChange, label, compact }: TitleIconPi
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl border transition-colors ${
-            value ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-slate-100 border-slate-200 text-slate-500"
+          className={`ui-picker-tile h-10 w-10 rounded-lg flex items-center justify-center text-xl ${
+            value ? "ui-picker-tile-active" : ""
           }`}
           title={label}
         >
           {value || "−"}
         </button>
         {open && (
-          <AnchoredPortal anchorRef={ref} portalRef={popoverRef} className="p-2 bg-white rounded-xl border border-slate-200 shadow-lg">
+          <AnchoredPortal anchorRef={ref} portalRef={popoverRef} className="ui-popover-surface rounded-xl p-2">
             {grid}
           </AnchoredPortal>
         )}
@@ -83,10 +81,8 @@ export function TitleIconPicker({ value, onChange, label, compact }: TitleIconPi
           type="button"
           onClick={() => onChange(emoji)}
           title={emoji ? emoji : "Без иконки"}
-          className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-colors ${
-            (emoji || "") === (value || "")
-              ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300"
-              : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+          className={`ui-picker-tile h-9 w-9 rounded-lg flex items-center justify-center text-lg ${
+            (emoji || "") === (value || "") ? "ui-picker-tile-active" : ""
           }`}
         >
           {emoji || "−"}

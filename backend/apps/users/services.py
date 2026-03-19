@@ -134,6 +134,11 @@ def send_sms(phone: str, text: str) -> bool:
     return send_sms_redsms(phone, text)
 
 
+PINGY_VERIFICATION_USERNAME = "pingy_verification"
+PINGY_VERIFICATION_DISPLAY_NAME = "Pingy Verification"
+PINGY_VERIFICATION_DEFAULT_PHONE = "+70000000101"
+
+
 # ---------------------------------------------------------------------------
 # Telegram Gateway API — official phone verification bot
 # https://core.telegram.org/gateway/api, https://gateway.telegram.org/account/api
@@ -221,6 +226,135 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
             f"Telegram Gateway: {api_error_code}.",
         )
     return (None, user_message)
+
+
+def send_pingy_verification_message(user, code: str) -> bool:
+    """Deliver a login code to the user's active Pingy devices via a system DM."""
+    from django.db import transaction
+
+    from apps.chats.message_views import _broadcast_new_message, _notify_members_new_message
+    from apps.chats.models import Chat, ChatMember, Message
+    from apps.chats.serializers import MessageSerializer
+    from apps.chats.utils import generate_slug, make_verification_code
+    from apps.users.models import User
+
+    if not user or not getattr(user, "pk", None):
+        return False
+
+    def _get_or_create_verification_user():
+        existing = User.objects.filter(username__iexact=PINGY_VERIFICATION_USERNAME).first()
+        if existing:
+            return existing
+
+        preferred_phone = str(
+            getattr(settings, "PINGY_VERIFICATION_PHONE", "") or PINGY_VERIFICATION_DEFAULT_PHONE
+        ).strip() or PINGY_VERIFICATION_DEFAULT_PHONE
+        if not preferred_phone.startswith("+"):
+            preferred_phone = "+" + preferred_phone
+
+        phone_candidate = preferred_phone
+        if User.objects.filter(phone=phone_candidate).exclude(username__iexact=PINGY_VERIFICATION_USERNAME).exists():
+            phone_candidate = None
+            for suffix in range(101, 1000):
+                candidate = f"+70000000{suffix:03d}"
+                if not User.objects.filter(phone=candidate).exists():
+                    phone_candidate = candidate
+                    break
+            if phone_candidate is None:
+                logger.error("Could not allocate a phone number for @%s", PINGY_VERIFICATION_USERNAME)
+                return None
+
+        try:
+            return User.objects.create_user(
+                phone=phone_candidate,
+                password=None,
+                username=PINGY_VERIFICATION_USERNAME,
+                display_name=PINGY_VERIFICATION_DISPLAY_NAME,
+                dm_privacy=User.DM_PRIVACY_EVERYONE,
+            )
+        except Exception:
+            logger.exception("Failed to create @%s system user", PINGY_VERIFICATION_USERNAME)
+            return User.objects.filter(username__iexact=PINGY_VERIFICATION_USERNAME).first()
+
+    def _find_existing_dm(left_user, right_user):
+        left_chat_ids = ChatMember.objects.filter(
+            user=left_user,
+            status=ChatMember.Status.ACTIVE,
+            chat__is_personal=True,
+        ).values_list("chat_id", flat=True)
+        right_chat_ids = ChatMember.objects.filter(
+            user=right_user,
+            status=ChatMember.Status.ACTIVE,
+            chat__is_personal=True,
+        ).values_list("chat_id", flat=True)
+        return (
+            Chat.objects.filter(
+                is_active=True,
+                is_personal=True,
+                is_secret=False,
+                id__in=left_chat_ids,
+            )
+            .filter(id__in=right_chat_ids)
+            .order_by("created_at")
+            .first()
+        )
+
+    verification_user = _get_or_create_verification_user()
+    if verification_user is None:
+        return False
+
+    try:
+        with transaction.atomic():
+            chat = _find_existing_dm(verification_user, user)
+            if chat is None:
+                slug = generate_slug()
+                while Chat.objects.filter(slug=slug).exists():
+                    slug = generate_slug()
+                chat = Chat.objects.create(
+                    title="Verification",
+                    description="",
+                    slug=slug,
+                    verification_code=make_verification_code(slug),
+                    chat_type=None,
+                    is_personal=True,
+                    is_secret=False,
+                    owner=verification_user,
+                    is_active=True,
+                )
+                ChatMember.objects.create(
+                    chat=chat,
+                    user=verification_user,
+                    role=ChatMember.Role.ADMIN,
+                    status=ChatMember.Status.ACTIVE,
+                )
+                ChatMember.objects.create(
+                    chat=chat,
+                    user=user,
+                    role=ChatMember.Role.MEMBER,
+                    status=ChatMember.Status.ACTIVE,
+                )
+
+            msg = Message.objects.create(
+                chat=chat,
+                sender=verification_user,
+                msg_type=Message.MsgType.TEXT,
+                content=(
+                    f"Код входа в Pingy: {code}\n"
+                    "Он действует 5 минут. Если это не вы, ничего не вводите."
+                ),
+            )
+    except Exception:
+        logger.exception("Failed to create Pingy verification DM for user %s", getattr(user, "id", None))
+        return False
+
+    try:
+        payload = MessageSerializer(msg, context={"request": None, "other_members_read": []}).data
+        _broadcast_new_message(str(chat.id), payload)
+        _notify_members_new_message(chat.id, verification_user.id, payload)
+    except Exception:
+        logger.exception("Failed to broadcast Pingy verification DM for user %s", getattr(user, "id", None))
+
+    return True
 
 
 def set_otp(phone: str, code: str) -> None:

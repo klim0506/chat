@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { authApi, type UserAvatar } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AvatarCropConfirmModal } from "./AvatarCropConfirmModal";
+import { MediaImage } from "./MediaImage";
 
 const MAX_AVATARS = 30;
 
@@ -113,17 +113,17 @@ export function AvatarManagerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      className="ui-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col"
+        className="ui-modal-surface max-w-lg w-full max-h-[85vh] overflow-hidden rounded-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">Аватарки</h2>
-          <button type="button" onClick={onClose} className="p-2 text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100" title={t("avatar.close")} aria-label={t("avatar.close")}>
+          <button type="button" onClick={onClose} className="ui-icon-button rounded-lg p-2" title={t("avatar.close")} aria-label={t("avatar.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
@@ -133,8 +133,8 @@ export function AvatarManagerModal({
           <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
             {avatars.map((a, i) => (
               <div key={a.id} className="relative group">
-                <div className="aspect-square rounded-full overflow-hidden bg-slate-100 border-2 border-slate-200">
-                  <img src={toSameOriginMediaUrl(a.url)} alt="" className="w-full h-full object-cover" />
+                <div className="ui-avatar-slot aspect-square rounded-full overflow-hidden border-2">
+                  <MediaImage source={a.url} alt="" className="w-full h-full object-cover" />
                 </div>
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 bg-black/50 rounded-full transition-opacity p-1">
                   {(a.id !== "legacy") && (
@@ -143,7 +143,7 @@ export function AvatarManagerModal({
                         type="button"
                         onClick={(e) => { e.stopPropagation(); moveUp(i); }}
                         disabled={loading || i === 0}
-                        className="w-6 h-6 bg-white/90 rounded flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="ui-icon-button flex h-6 w-6 items-center justify-center rounded disabled:opacity-40 disabled:cursor-not-allowed"
                         title={t("avatar.moveUp")}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6"/></svg>
@@ -152,7 +152,7 @@ export function AvatarManagerModal({
                         type="button"
                         onClick={(e) => { e.stopPropagation(); moveDown(i); }}
                         disabled={loading || i === avatars.length - 1}
-                        className="w-6 h-6 bg-white/90 rounded flex items-center justify-center text-slate-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="ui-icon-button flex h-6 w-6 items-center justify-center rounded disabled:opacity-40 disabled:cursor-not-allowed"
                         title={t("avatar.moveDown")}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
@@ -172,7 +172,7 @@ export function AvatarManagerModal({
               </div>
             ))}
             {avatars.length < MAX_AVATARS && (
-              <label className="aspect-square rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+              <label className="ui-avatar-slot aspect-square rounded-full border-2 border-dashed flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
                 <input
                   ref={fileInputRef}
                   type="file"

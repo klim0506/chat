@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.files.models import FileAttachment
-from apps.files.views import make_file_token
+from apps.files.access_handles import make_file_handle
 
 from .models import RECENT_STICKERS_LIMIT, Sticker, StickerSet, UserStickerSet, RecentSticker
 from apps.payments.plan_limits import can_create_custom_stickers, RESTRICTION_CODE
@@ -22,12 +22,10 @@ def _file_dict(att, request=None):
     """Build file dict with url for sticker display."""
     if not att:
         return None
-    token = make_file_token(str(att.id))
-    path = f"/api/files/{att.id}/?t={token}"
-    url = request.build_absolute_uri(path) if request else path
+    access_handle = att.external_url or make_file_handle(att.id)
     return {
         "id": str(att.id),
-        "url": url,
+        "access_handle": access_handle,
         "mime_type": att.mime_type,
         "original_name": att.original_name,
     }

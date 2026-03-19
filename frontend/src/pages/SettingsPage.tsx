@@ -19,13 +19,14 @@ import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
 import { usePreferencesStore, MESSAGE_TEXT_SCALE_MIN, MESSAGE_TEXT_SCALE_MAX, MESSAGE_TEXT_SCALES, type MessageTextScale } from "../store/preferences";
 import { getAvatarInitials } from "../lib/avatar-initials";
-import { toSameOriginMediaUrl } from "../lib/media-url";
 import { AvatarManagerModal } from "../components/AvatarManagerModal";
 import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
 import ConfirmModal from "../components/ConfirmModal";
 import CreateChannelModal from "../components/CreateChannelModal";
 import PaymentMethodsModal from "../components/PaymentMethodsModal";
 import SupportModal from "../components/SupportModal";
+import CreateFolderModal from "../components/CreateFolderModal";
+import { MediaImage } from "../components/MediaImage";
 
 const FOLDER_COLORS = ["#3B82F6", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#6B7280", "#EC4899", "#14B8A6"];
 const FOLDER_EMOJIS = ["📁", "📂", "💼", "⭐", "🏠", "👥", "💬", "❤️", "🔔", "📢", "🎯", "📱", "🌟", "🔥", "📣", "💡", "🎬", "✅", "📎", "🔒"];
@@ -80,8 +81,10 @@ export const SETTINGS_NAV = [
 const SETTINGS_PANEL_CLASS = "rounded-[28px] border border-slate-200/80 bg-white/82 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur overflow-hidden";
 const SETTINGS_PANEL_HEADER_CLASS = "flex items-start justify-between gap-3 border-b border-slate-100/80 px-6 py-5";
 const SETTINGS_PANEL_BODY_CLASS = "px-6 py-5";
-const SETTINGS_NAV_SHELL_CLASS = "flex h-full min-h-0 flex-col rounded-[30px] bg-white/72 p-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.06)] backdrop-blur";
+const SETTINGS_NAV_SHELL_CLASS = "flex h-full min-h-0 flex-col p-2";
 const SETTINGS_NAV_ACTION_CLASS = "flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-sm transition-colors";
+const SETTINGS_DESKTOP_NAV_WIDTH = 272;
+const SETTINGS_DESKTOP_NAV_OVERLAY_BREAKPOINT = SETTINGS_DESKTOP_NAV_WIDTH * 2 + 56;
 
 function SettingsNav({ section, onSection, t, hasSubscription }: { section: SettingsSection; onSection: (s: SettingsSection) => void; t: ReturnType<typeof useTranslation>["t"]; hasSubscription: boolean }) {
   const navItems = SETTINGS_NAV.filter((item) => {
@@ -93,7 +96,7 @@ function SettingsNav({ section, onSection, t, hasSubscription }: { section: Sett
       case "account":
         return t("settings.profile");
       case "chats":
-        return t("settings.messageTextScale");
+        return t("settings.navChatSettingsShort");
       case "privacy":
         return t("settings.privacy");
       case "folders":
@@ -107,20 +110,20 @@ function SettingsNav({ section, onSection, t, hasSubscription }: { section: Sett
     }
   };
   return (
-    <nav className="flex flex-col gap-1 overflow-y-auto pr-1">
+    <nav className="flex w-full max-w-[17rem] flex-col gap-1 overflow-y-auto pr-1">
       {navItems.map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onSection(item.id)}
           aria-current={section === item.id ? "page" : undefined}
-          className={`flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
+          className={`flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
             section === item.id
-              ? "border-sky-200/80 bg-white text-slate-900 shadow-[0_10px_26px_rgba(15,23,42,0.08)]"
+              ? "border-sky-200/80 bg-white text-slate-900 shadow-[0_6px_18px_rgba(15,23,42,0.04)]"
               : "border-transparent text-slate-600 hover:bg-white/80 hover:text-slate-900"
           }`}
         >
-          <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
             section === item.id ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
           }`}>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -128,10 +131,10 @@ function SettingsNav({ section, onSection, t, hasSubscription }: { section: Sett
             </svg>
           </span>
           <span className="min-w-0 flex-1">
-            <span className={`block truncate text-[0.95rem] font-medium ${section === item.id ? "text-slate-900" : "text-slate-700"}`}>
+            <span className={`block truncate text-[0.9375rem] font-medium ${section === item.id ? "text-slate-900" : "text-slate-700"}`}>
               {t(item.labelKey)}
             </span>
-            <span className="mt-0.5 block truncate text-xs text-slate-400">
+            <span className="mt-0.5 block truncate text-[0.8125rem] text-slate-400">
               {getItemSubtitle(item.id)}
             </span>
           </span>
@@ -146,7 +149,7 @@ function SettingsNav({ section, onSection, t, hasSubscription }: { section: Sett
   );
 }
 
-function ReferralProgressBar({ progress, t, lang }: { progress: ReferralProgress; t: ReturnType<typeof useTranslation>["t"]; lang: AppLanguage }) {
+export function ReferralProgressBar({ progress, t, lang }: { progress: ReferralProgress; t: ReturnType<typeof useTranslation>["t"]; lang: AppLanguage }) {
   const { invited_count, next_milestone, milestones } = progress;
   const nextTier = next_milestone ?? 80;
   const nextMonths = milestones[String(nextTier)] ?? 12;
@@ -168,6 +171,208 @@ function ReferralProgressBar({ progress, t, lang }: { progress: ReferralProgress
           />
         </div>
         {nextLabel && <p className="text-xs text-slate-500 mt-0.5">{nextLabel}</p>}
+      </div>
+    </div>
+  );
+}
+
+void ReferralProgressBar;
+
+function ReferralProgressCard({
+  progress,
+  referralLink,
+  copied,
+  shake,
+  onCopy,
+  t,
+  lang,
+}: {
+  progress: ReferralProgress;
+  referralLink: string;
+  copied: boolean;
+  shake: boolean;
+  onCopy: () => void;
+  t: ReturnType<typeof useTranslation>["t"];
+  lang: AppLanguage;
+}) {
+  const [showAllLevels, setShowAllLevels] = useState(false);
+  const { invited_count, milestones } = progress;
+  const tiers = Object.entries(milestones)
+    .map(([target, rewardMonths]) => ({ target: Number(target), rewardMonths }))
+    .filter((tier) => Number.isFinite(tier.target) && tier.target > 0)
+    .sort((a, b) => a.target - b.target);
+  const orderedTiers = tiers.length > 0 ? tiers : [
+    { target: 10, rewardMonths: 1 },
+    { target: 40, rewardMonths: 6 },
+    { target: 80, rewardMonths: 12 },
+  ];
+  const activeTierIndex = orderedTiers.findIndex((tier) => invited_count < tier.target);
+  const currentTierIndex = activeTierIndex === -1 ? orderedTiers.length - 1 : activeTierIndex;
+  const currentTier = orderedTiers[currentTierIndex];
+  const previousTierTarget = currentTierIndex > 0 ? orderedTiers[currentTierIndex - 1].target : 0;
+  const tierSpan = Math.max(1, currentTier.target - previousTierTarget);
+  const tierProgress = Math.max(0, Math.min(tierSpan, invited_count - previousTierTarget));
+  const progressPct = invited_count >= currentTier.target && activeTierIndex === -1
+    ? 100
+    : Math.max(6, Math.min(100, (tierProgress / tierSpan) * 100));
+  const remaining = Math.max(0, currentTier.target - invited_count);
+  const levelLabel = lang === "ru"
+    ? `Уровень ${currentTierIndex + 1} из ${orderedTiers.length}`
+    : `Level ${currentTierIndex + 1} of ${orderedTiers.length}`;
+  const rewardLabel = lang === "ru"
+    ? `${currentTier.rewardMonths} ${currentTier.rewardMonths === 1 ? "месяц" : currentTier.rewardMonths < 5 ? "месяца" : "месяцев"} Premium`
+    : `${currentTier.rewardMonths} ${currentTier.rewardMonths === 1 ? "month" : "months"} Premium`;
+  const goalLabel = lang === "ru"
+    ? `${currentTier.target} ${currentTier.target === 1 ? "друг" : currentTier.target < 5 ? "друга" : "друзей"}`
+    : `${currentTier.target} ${currentTier.target === 1 ? "friend" : "friends"}`;
+  const remainingLabel = lang === "ru"
+    ? remaining === 0 ? "Цель уровня достигнута" : `Осталось ${remaining} до награды`
+    : remaining === 0 ? "Tier completed" : `${remaining} left to unlock`;
+  const invitedLabel = lang === "ru" ? `${invited_count} приглашено` : `${invited_count} invited`;
+  const rewardSummary = lang === "ru"
+    ? remaining === 0
+      ? `Награда открыта: ${rewardLabel}`
+      : `Пригласите ещё ${remaining}, чтобы получить ${rewardLabel}`
+    : remaining === 0
+      ? `Reward unlocked: ${rewardLabel}`
+      : `Invite ${remaining} more to get ${rewardLabel}`;
+  const steps = lang === "ru"
+    ? [
+        "Скопируйте ссылку",
+        `Пригласите ${goalLabel.toLowerCase()}`,
+        `Получите ${rewardLabel}`,
+      ]
+    : [
+        "Copy your link",
+        `Invite ${goalLabel.toLowerCase()}`,
+        `Get ${rewardLabel}`,
+      ];
+
+  return (
+    <div className="space-y-5 rounded-[28px] border border-slate-200/80 bg-gradient-to-br from-sky-50/80 via-white to-blue-50/40 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => setShowAllLevels((prev) => !prev)}
+            className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-sky-700 shadow-sm transition-colors hover:bg-white"
+          >
+            {levelLabel}
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transition-transform ${showAllLevels ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <h3 className="mt-3 text-xl font-semibold text-slate-900">{t("settings.referralHeroTitle")}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">{rewardSummary}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="ui-accent-strong inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors shrink-0"
+        >
+          {copied ? t("common.copied") : t("settings.referralCopyCta")}
+        </button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {steps.map((step, index) => (
+          <div
+            key={step}
+            className={`rounded-2xl border px-4 py-3 ${
+              index === 2
+                ? "border-emerald-200/80 bg-emerald-50/70"
+                : "border-slate-200/80 bg-white/85"
+            }`}
+          >
+            <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.14em] ${
+              index === 2 ? "text-emerald-600" : "text-slate-400"
+            }`}>
+              {lang === "ru" ? `Шаг ${index + 1}` : `Step ${index + 1}`}
+            </p>
+            <p className={`mt-1 text-base font-semibold ${index === 2 ? "text-emerald-800" : "text-slate-900"}`}>
+              {step}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className={`rounded-2xl border border-white/70 bg-white/85 px-4 py-3 shadow-sm ${shake ? "animate-username-shake" : ""}`}>
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">{t("settings.referralLinkLabel")}</p>
+        <p className="mt-1 truncate text-sm text-slate-700">{referralLink}</p>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">{t("settings.referralProgressLabel")}</p>
+            <p className="mt-1 text-base font-semibold text-slate-900">{remainingLabel}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAllLevels((prev) => !prev)}
+            className="text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
+          >
+            {showAllLevels ? (lang === "ru" ? "Скрыть уровни" : "Hide levels") : (lang === "ru" ? "Показать все уровни" : "Show all levels")}
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-slate-700">{invitedLabel}</span>
+            <span className="text-slate-500">{previousTierTarget} - {currentTier.target}</span>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {showAllLevels && (
+          <div className="mt-4 space-y-2 border-t border-slate-200/80 pt-4">
+            {orderedTiers.map((tier, index) => {
+              const isCurrent = index === currentTierIndex;
+              const isDone = invited_count >= tier.target;
+              const tierRewardLabel = lang === "ru"
+                ? `${tier.rewardMonths} ${tier.rewardMonths === 1 ? "месяц" : tier.rewardMonths < 5 ? "месяца" : "месяцев"} Premium`
+                : `${tier.rewardMonths} ${tier.rewardMonths === 1 ? "month" : "months"} Premium`;
+              const tierGoalLabel = lang === "ru"
+                ? `${tier.target} ${tier.target === 1 ? "друг" : tier.target < 5 ? "друга" : "друзей"}`
+                : `${tier.target} ${tier.target === 1 ? "friend" : "friends"}`;
+              return (
+                <div
+                  key={tier.target}
+                  className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
+                    isCurrent
+                      ? "border-sky-200 bg-sky-50/70"
+                      : isDone
+                        ? "border-emerald-200 bg-emerald-50/60"
+                        : "border-slate-200/80 bg-white/85"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {lang === "ru" ? `Уровень ${index + 1}` : `Level ${index + 1}`}
+                    </p>
+                    <p className="mt-0.5 text-sm text-slate-600">
+                      {tierGoalLabel} · {tierRewardLabel}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    isCurrent
+                      ? "bg-sky-100 text-sky-700"
+                      : isDone
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {isCurrent ? (lang === "ru" ? "Текущий" : "Current") : isDone ? (lang === "ru" ? "Пройден" : "Done") : (lang === "ru" ? "Далее" : "Next")}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -464,16 +669,21 @@ function SoundsSection() {
   const setSoundReceive = usePreferencesStore((s) => s.setSoundReceive);
   const setSoundMention = usePreferencesStore((s) => s.setSoundMention);
 
+  const toggleClass = (enabled: boolean) => `relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+    enabled ? "bg-blue-600" : "bg-slate-300"
+  }`;
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-800">{t("settings.enableSounds")}</p>
+    <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3">
+      <div className="flex items-center justify-between rounded-2xl bg-white/85 px-3 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
+        <div>
+          <p className="text-sm font-medium text-slate-800">{t("settings.enableSounds")}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{t("settings.sounds")}</p>
+        </div>
         <button
           type="button"
           onClick={() => setSoundEnabled(!soundEnabled)}
-          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-            soundEnabled ? "bg-blue-600" : "bg-slate-200"
-          }`}
+          className={toggleClass(soundEnabled)}
         >
           <span
             className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
@@ -482,16 +692,17 @@ function SoundsSection() {
           />
         </button>
       </div>
-      <div className={`space-y-3 pl-1 ${!soundEnabled ? "opacity-50 pointer-events-none" : ""}`}>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-700">{t("settings.soundSend")}</span>
+      <div className={`mt-3 space-y-2 ${!soundEnabled ? "opacity-50 pointer-events-none" : ""}`}>
+        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
+          <div>
+            <span className="text-sm font-medium text-slate-700">{t("settings.soundSend")}</span>
+            <p className="mt-0.5 text-xs text-slate-500">{t("settings.enableSounds")}</p>
+          </div>
           <button
             type="button"
             disabled={!soundEnabled}
             onClick={() => setSoundSend(!soundSend)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
-              soundSend ? "bg-blue-600" : "bg-slate-200"
-            }`}
+            className={`${toggleClass(soundSend)} disabled:cursor-not-allowed`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
@@ -500,15 +711,16 @@ function SoundsSection() {
             />
           </button>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-700">{t("settings.soundReceive")}</span>
+        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
+          <div>
+            <span className="text-sm font-medium text-slate-700">{t("settings.soundReceive")}</span>
+            <p className="mt-0.5 text-xs text-slate-500">{t("settings.notifications")}</p>
+          </div>
           <button
             type="button"
             disabled={!soundEnabled}
             onClick={() => setSoundReceive(!soundReceive)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
-              soundReceive ? "bg-blue-600" : "bg-slate-200"
-            }`}
+            className={`${toggleClass(soundReceive)} disabled:cursor-not-allowed`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
@@ -517,15 +729,16 @@ function SoundsSection() {
             />
           </button>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-700">{t("settings.soundMention")}</span>
+        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
+          <div>
+            <span className="text-sm font-medium text-slate-700">{t("settings.soundMention")}</span>
+            <p className="mt-0.5 text-xs text-slate-500">@ mention</p>
+          </div>
           <button
             type="button"
             disabled={!soundEnabled}
             onClick={() => setSoundMention(!soundMention)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed ${
-              soundMention ? "bg-blue-600" : "bg-slate-200"
-            }`}
+            className={`${toggleClass(soundMention)} disabled:cursor-not-allowed`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
@@ -551,24 +764,24 @@ function MessageScaleSlider() {
     Math.abs(s - scale) < Math.abs(MESSAGE_TEXT_SCALES[best] - scale) ? i : best
   , 0);
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 rounded-[24px] border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-slate-50/80 p-4">
       <div className="flex flex-wrap gap-2">
         {MESSAGE_TEXT_SCALES.map((value, i) => (
           <button
             key={value}
             type="button"
             onClick={() => setScale(value as MessageTextScale)}
-            className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
+            className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
               currentPresetIndex === i
-                ? "bg-blue-600 text-white shadow-sm"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.22)]"
+                : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
             }`}
           >
             {t(SCALE_PRESET_KEYS[i])}
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 rounded-2xl bg-white/85 px-3 py-3 ring-1 ring-slate-200/70">
         <input
           type="range"
           min={MESSAGE_TEXT_SCALE_MIN}
@@ -578,24 +791,24 @@ function MessageScaleSlider() {
           onChange={(e) => setScale(parseFloat(e.target.value) as MessageTextScale)}
           className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer"
         />
-        <span className="text-sm font-medium text-slate-600 w-11 tabular-nums shrink-0">{Math.round(scale * 100)}%</span>
+        <span className="w-14 shrink-0 rounded-full bg-slate-100 px-2 py-1 text-center text-sm font-semibold text-slate-700 tabular-nums">{Math.round(scale * 100)}%</span>
       </div>
       <div
-        className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 p-4 shadow-sm"
-        style={{ minHeight: 80 }}
+        className="rounded-[22px] bg-white/88 px-5 py-4 ring-1 ring-slate-200/70 shadow-[0_12px_28px_rgba(15,23,42,0.05)]"
+        style={{ minHeight: 132 }}
       >
-        <p className="text-[0.625rem] text-slate-400 mb-2 font-medium uppercase tracking-wider">{t("settings.scalePreview")}</p>
-        <div className="flex gap-2 items-end">
-          <div className="w-8 h-8 rounded-full bg-slate-300 shrink-0" />
-          <div className="flex flex-col gap-1.5 min-w-0">
+        <p className="mb-3 text-[0.625rem] font-medium uppercase tracking-[0.18em] text-slate-400">{t("settings.scalePreview")}</p>
+        <div className="flex items-end gap-3">
+          <div className="h-9 w-9 rounded-full bg-slate-300/80 shrink-0" />
+          <div className="flex min-w-0 flex-col gap-2">
             <div
-              className="rounded-2xl rounded-tl-sm px-3 py-1.5 bg-blue-500 text-white shadow-sm max-w-[180px] break-words"
+              className="max-w-[200px] break-words rounded-[20px] rounded-bl-md bg-blue-500 px-3 py-2 text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
               style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale}px` }}
             >
               {t("settings.scalePreviewMessage1")}
             </div>
             <div
-              className="rounded-2xl rounded-tl-sm px-3 py-1.5 bg-slate-200 text-slate-700 shadow-sm max-w-[140px] break-words"
+              className="max-w-[156px] break-words rounded-[20px] rounded-bl-md bg-slate-100 px-3 py-2 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
               style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale * 0.95}px` }}
             >
               {t("settings.scalePreviewMessage2")}
@@ -627,6 +840,7 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
   const [folders, setFolders] = useState<ChatFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -857,15 +1071,14 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
         </div>
       </div>
       <div>
-      {/* TODO: re-enable creation of new (custom) folders */}
-      {/* <button
+      <button
         type="button"
         onClick={() => setShowCreateModal(true)}
         className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
         {t("folders.create")}
-      </button> */}
+      </button>
       {folders.length > 0 && (
         <ul className="space-y-3">
           {folders.map((f) => (
@@ -958,16 +1171,21 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
           ))}
         </ul>
       )}
-      {/* TODO: re-enable creation of new (custom) folders */}
-      {/* <CreateFolderModal
+      <CreateFolderModal
         isOpen={showCreateModal}
+        chats={chats}
         onClose={() => setShowCreateModal(false)}
-        onCreated={(folder) => {
+        onCreated={(folder, selectedChatIds) => {
           setFolders((prev) => [...prev, folder].sort((a, b) => a.position - b.position));
+          selectedChatIds.forEach((chatId) => {
+            const chat = chats.find((item) => item.id === chatId);
+            if (!chat) return;
+            storeUpdateChat(chatId, { folder_ids: [...new Set([...(chat.folder_ids || []), folder.id])] });
+          });
           setShowCreateModal(false);
           onFoldersUpdated?.();
         }}
-      /> */}
+      />
       </div>
       </>
       )}
@@ -993,6 +1211,8 @@ export default function SettingsPage({
   const sectionParam = searchParams.get("section") as SettingsSection | null;
   const setSection = (s: SettingsSection) => setSearchParams({ section: s });
   const [mobileShowContent, setMobileShowContent] = useState(false);
+  const [desktopShowContent, setDesktopShowContent] = useState(false);
+  const [desktopUseOverlay, setDesktopUseOverlay] = useState(false);
   const clearTokens = useAuthStore((s) => s.clearTokens);
   const theme = usePreferencesStore((s) => s.theme);
   const setTheme = usePreferencesStore((s) => s.setTheme);
@@ -1014,6 +1234,7 @@ export default function SettingsPage({
 
   const section: SettingsSection = sectionParam && SETTINGS_NAV.some((n) => n.id === sectionParam) ? sectionParam : "account";
   const mainContentRef = useRef<HTMLElement | null>(null);
+  const desktopLayoutRef = useRef<HTMLDivElement | null>(null);
 
   /* edit state */
   const [editing, setEditing] = useState(false);
@@ -1116,6 +1337,29 @@ export default function SettingsPage({
   useEffect(() => {
     if (embed) onMobileInSubSection?.(isMobile && mobileShowContent);
   }, [embed, isMobile, mobileShowContent, onMobileInSubSection]);
+
+  useEffect(() => {
+    if (!embed || isMobile) {
+      setDesktopUseOverlay(false);
+      setDesktopShowContent(false);
+      return;
+    }
+    const node = desktopLayoutRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const width = entry?.contentRect.width ?? 0;
+      setDesktopUseOverlay(width > 0 && width < SETTINGS_DESKTOP_NAV_OVERLAY_BREAKPOINT);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [embed, isMobile]);
+
+  useEffect(() => {
+    if (!desktopUseOverlay) {
+      setDesktopShowContent(false);
+    }
+  }, [desktopUseOverlay]);
 
   /* Плавная прокрутка к началу при смене раздела — убирает дёрганье */
   useEffect(() => {
@@ -1278,6 +1522,7 @@ export default function SettingsPage({
   const handleSectionSelect = (s: SettingsSection) => {
     setSection(s);
     if (isMobile) setMobileShowContent(true);
+    if (!isMobile && desktopUseOverlay) setDesktopShowContent(true);
   };
 
   const currentSectionLabel = SETTINGS_NAV.find((n) => n.id === section)?.labelKey ?? "settings.profile";
@@ -1344,7 +1589,7 @@ export default function SettingsPage({
                   >
                     <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl overflow-hidden">
                       {u.avatar_url ? (
-                        <img src={toSameOriginMediaUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" />
+                        <MediaImage source={u.avatar_url} alt="" className="w-full h-full object-cover" />
                       ) : (
                         getAvatarInitials(u.display_name || u.phone)
                       )}
@@ -1659,6 +1904,9 @@ export default function SettingsPage({
                       </button>
                     </div>
                   </div>
+                  <p className="mb-2 text-xs leading-5 text-slate-500">
+                    {t("settings.personalChannelHint")}
+                  </p>
                   {showPersonalChannelMenu && (
                     <AnchoredPortal
                       anchorRef={personalChannelButtonRef}
@@ -1668,6 +1916,9 @@ export default function SettingsPage({
                       className="rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_44px_rgba(15,23,42,0.12)]"
                     >
                       <div className="flex flex-col gap-1">
+                        <p className="px-3 pb-1 pt-0.5 text-xs leading-5 text-slate-500">
+                          {t("settings.personalChannelMenuHint")}
+                        </p>
                         {myChannels.length > 0 ? (
                           <>
                             {myChannels.map((ch) => (
@@ -1752,28 +2003,16 @@ export default function SettingsPage({
 
             {/* Referral program */}
             {u.referral_code && (
-              <div className={`${SETTINGS_PANEL_CLASS} mt-4`}>
-                <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-800 mb-1">{t("settings.referral")}</h2>
-                    <p className="text-sm text-slate-500">{t("settings.referralDesc")}</p>
-                  </div>
-                  <div className={`flex gap-2 items-center rounded-xl bg-slate-50 border border-slate-200 overflow-hidden ${referralShake ? "animate-username-shake" : ""}`}>
-                    <input
-                      type="text"
-                      readOnly
-                      value={`${window.location.origin}/auth?ref=${u.referral_code}`}
-                      className="flex-1 min-w-0 px-4 py-3 text-sm text-slate-700 bg-transparent truncate"
-                    />
-                    <button
-                      onClick={handleCopyReferral}
-                      className="px-4 py-3 bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors shrink-0"
-                    >
-                      {copied ? t("common.copied") : t("common.copy")}
-                    </button>
-                  </div>
-                  <ReferralProgressBar progress={referralProgress} t={t} lang={lang} />
-                </div>
+              <div className="mt-4">
+                <ReferralProgressCard
+                  progress={referralProgress}
+                  referralLink={`${window.location.origin}/auth?ref=${u.referral_code}`}
+                  copied={copied}
+                  shake={referralShake}
+                  onCopy={handleCopyReferral}
+                  t={t}
+                  lang={lang}
+                />
               </div>
             )}
             </>
@@ -1787,25 +2026,26 @@ export default function SettingsPage({
                   <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
                 </div>
               </div>
-              <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
+              <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-5"}>
+                <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                  <label className="mb-3 block text-sm font-semibold text-slate-700">
                     {t("settings.messageTextScale")}
                   </label>
                   <MessageScaleSlider />
                 </div>
 
                 {/* Message alignment */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                    <label className="mb-3 block text-sm font-semibold text-slate-700">
                     {t("settings.messageAlignment")}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
+                    </label>
+                    <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => setMessageAlignment("left")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        messageAlignment === "left" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        messageAlignment === "left" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       {t("settings.messageAlignmentLeft")}
@@ -1813,26 +2053,26 @@ export default function SettingsPage({
                     <button
                       type="button"
                       onClick={() => setMessageAlignment("right")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        messageAlignment === "right" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        messageAlignment === "right" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       {t("settings.messageAlignmentRight")}
                     </button>
+                    </div>
                   </div>
-                </div>
 
-                {/* Language */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    {t("settings.language")}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
+                  {/* Language */}
+                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                    <label className="mb-3 block text-sm font-semibold text-slate-700">
+                      {t("settings.language")}
+                    </label>
+                    <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => setLanguage("en")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        language === "en" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        language === "en" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       English
@@ -1840,26 +2080,28 @@ export default function SettingsPage({
                     <button
                       type="button"
                       onClick={() => setLanguage("ru")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        language === "ru" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        language === "ru" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       Russian
                     </button>
+                    </div>
                   </div>
                 </div>
 
                 {/* Theme */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
+                <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
+                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                    <label className="mb-3 block text-sm font-semibold text-slate-700">
                     {t("settings.theme")}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
+                    </label>
+                    <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => setTheme("light")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        theme === "light" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        theme === "light" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       {t("settings.themeLight")}
@@ -1867,21 +2109,22 @@ export default function SettingsPage({
                     <button
                       type="button"
                       onClick={() => setTheme("dark")}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        theme === "dark" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                        theme === "dark" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       {t("settings.themeDark")}
                     </button>
+                    </div>
                   </div>
-                </div>
 
-                {/* Sounds */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    {t("settings.sounds")}
-                  </label>
-                  <SoundsSection />
+                  {/* Sounds */}
+                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                    <label className="mb-3 block text-sm font-semibold text-slate-700">
+                      {t("settings.sounds")}
+                    </label>
+                    <SoundsSection />
+                  </div>
                 </div>
               </div>
             </div>
@@ -2188,7 +2431,7 @@ export default function SettingsPage({
         )}
 
         {!loading && (user || error) && (
-          <div className={`flex flex-1 min-h-0 ${embed ? "" : "container mx-auto max-w-5xl"}`}>
+          <div ref={desktopLayoutRef} className={`relative flex flex-1 min-h-0 ${embed ? "" : "container mx-auto max-w-5xl"}`}>
             {/* ===== Mobile: block list (step 1) ===== */}
             {isMobile && !mobileShowContent && (
               <div className="flex flex-col flex-1 min-w-0 w-full md:hidden ui-surface-1 overflow-y-auto">
@@ -2203,10 +2446,6 @@ export default function SettingsPage({
                   </div>
                   <div className="h-4" />
                   <div className={SETTINGS_NAV_SHELL_CLASS}>
-                    <div className="px-3 pb-3 pt-1">
-                      <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-slate-400">{t("common.settings")}</p>
-                      <p className="mt-1 text-sm text-slate-500">{t("settings.settingsTitle")}</p>
-                    </div>
                     <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
                   {user?.is_staff && (
                     <div className="mt-4 border-t border-slate-100 px-1 pt-4">
@@ -2271,13 +2510,9 @@ export default function SettingsPage({
             )}
 
             {/* ===== Desktop: two columns ===== */}
-            <aside className={`hidden md:flex shrink-0 border-r ui-border-subtle ui-surface-1 flex-col ${embed ? "w-[19rem] p-4" : "w-[20rem] p-5"}`}>
+            <aside className={`hidden md:flex shrink-0 ${desktopUseOverlay ? "border-r-0" : "border-r"} ui-border-subtle ui-surface-1 flex-col ${embed ? "w-[17rem] p-3.5" : "w-[18rem] p-4"}`}>
               <div className={SETTINGS_NAV_SHELL_CLASS}>
-                <div className="px-3 pb-3 pt-1">
-                  <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-slate-400">{t("common.settings")}</p>
-                  <p className="mt-1 text-sm text-slate-500">{t("settings.settingsTitle")}</p>
-                </div>
-                <SettingsNav section={section} onSection={setSection} t={t} hasSubscription={sub?.is_valid === true} />
+                <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
                 {user?.is_staff && (
                   <div className="mt-4 border-t border-slate-100 px-1 pt-4">
                   <Link
@@ -2313,11 +2548,40 @@ export default function SettingsPage({
             </aside>
 
             {/* ===== Desktop: Section content ===== */}
+            {!desktopUseOverlay && (
             <main ref={mainContentRef} className={`hidden md:block flex-1 min-w-0 overflow-y-auto ui-surface-1 ${embed ? "p-4" : "p-6"}`}>
               <div>
                 {renderSectionContent()}
               </div>
             </main>
+            )}
+
+            {desktopUseOverlay && desktopShowContent && (
+              <div className="hidden md:flex absolute inset-0 z-20 ui-overlay items-stretch justify-end">
+                <div className="flex h-full w-full flex-col ui-surface-1 shadow-[0_24px_80px_rgba(2,6,23,0.28)]">
+                  <div
+                    className="sticky top-0 z-20 shrink-0 border-b backdrop-blur px-5 h-16 flex items-center gap-3"
+                    style={{ background: "var(--glass-bg)", borderColor: "var(--border-subtle)", boxShadow: "var(--shadow-1)" }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDesktopShowContent(false)}
+                      className="flex items-center gap-1 -ml-1 p-2 rounded-xl hover:bg-slate-100/70 transition-colors"
+                      style={{ color: "var(--text-1)" }}
+                      aria-label={t("common.back")}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                    </button>
+                    <span className="font-semibold truncate" style={{ color: "var(--text-0)" }}>{t(currentSectionLabel)}</span>
+                  </div>
+                  <main ref={mainContentRef} className={`flex-1 min-w-0 overflow-y-auto ${embed ? "p-4" : "p-6"}`}>
+                    <div className="settings-section-fade-in">
+                      {renderSectionContent()}
+                    </div>
+                  </main>
+                </div>
+              </div>
+            )}
           </div>
         )}
       <ConfirmModal

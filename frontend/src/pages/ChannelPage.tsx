@@ -6,8 +6,8 @@ import { channelsApi, channelPostsApi, filesApi } from "../api/client";
 import type { Channel, ChannelPost } from "../api/client";
 import { userDisplayName } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-import { toSameOriginMediaUrl } from "../lib/media-url";
 import { ProgressiveImage } from "../components/ProgressiveImage";
+import { MediaImage } from "../components/MediaImage";
 import SendIcon from "../components/icons/SendIcon";
 import { REACTIONS } from "../lib/reaction-animations";
 
@@ -82,7 +82,7 @@ function PostImages({ post }: { post: ChannelPost }) {
   if (!images.length) return null;
   const urls = images
     .slice(0, 9)
-    .map((f) => (f && typeof f === "object" && "url" in f ? toSameOriginMediaUrl((f as { url?: string | null }).url) : ""))
+    .map((f) => (f && typeof f === "object" && "url" in f ? ((f as { url?: string | null }).url || "") : ""))
     .filter(Boolean);
   if (urls.length === 0) return null;
   if (urls.length === 1) {
@@ -230,7 +230,7 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
         {BackButton}
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {channel.avatar_url && (
-            <img src={toSameOriginMediaUrl(channel.avatar_url)} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+            <MediaImage source={channel.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
           )}
           <div className="min-w-0">
             <h1 className="font-semibold text-slate-800 truncate">

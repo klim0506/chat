@@ -176,8 +176,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         sender = getattr(msg, "sender", None)
         display_name = (sender.display_name or sender.phone) if sender else str(user_id)
         base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
-        sender_avatar_url = sender.get_avatar_url(base_url=base) if sender else None
-        sender_avatar_url_small = sender.get_avatar_url(base_url=base, size="small") if sender else None
+        sender_avatar_handle = sender.get_avatar_url(base_url=base) if sender else None
+        sender_avatar_handle_small = sender.get_avatar_url(base_url=base, size="small") if sender else None
         # Build reply_to snapshot if replying
         reply_to_data = None
         if msg.reply_to_id:
@@ -216,8 +216,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "chat_id": str(msg.chat_id),
             "sender_id": str(msg.sender_id),
             "sender_display_name": display_name,
-            "sender_avatar_url": sender_avatar_url,
-            "sender_avatar_url_small": sender_avatar_url_small,
+            "sender_avatar_handle": sender_avatar_handle,
+            "sender_avatar_handle_small": sender_avatar_handle_small,
             "msg_type": msg.msg_type,
             "content": msg.content,
             "file_id": str(msg.file_id) if msg.file_id else None,
@@ -233,16 +233,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "duration_seconds": msg.duration_seconds,
         }
         # Include file details for media messages
-        from apps.files.views import make_file_token
+        from apps.files.access_handles import make_file_handle
 
         def _file_dict(att):
-            token = make_file_token(str(att.id))
             return {
                 "id": str(att.id),
                 "original_name": att.original_name,
                 "mime_type": att.mime_type,
                 "size_bytes": att.size_bytes,
-                "url": f"/api/files/{att.id}/?t={token}",
+                "access_handle": att.external_url or make_file_handle(att.id),
             }
 
         if msg.file_id:

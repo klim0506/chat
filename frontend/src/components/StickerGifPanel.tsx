@@ -1,16 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { gifApi, stickersApi, type GifResult, type Sticker as ApiSticker, type StickerPack } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-import { AnimatedReaction } from "./AnimatedReaction";
 import { LottieSticker } from "./LottieSticker";
 import { TELEGRAM_EMOJI_CATEGORIES } from "../data/telegram-emojis";
-import { EmojiGlyph } from "./EmojiGlyph";
+import { EmojiCategoryList } from "./EmojiCategoryList";
+import { MediaImage } from "./MediaImage";
 
 const DEBOUNCE_MS = 300;
 const CONTENT_HEIGHT_PX = 8 * 32 + 7 * 2;
 
 const BUNDLED_STICKERS = [
   { id: "fire", path: "/stickers/default/fire.svg", label: "Fire", animationUrl: "/animations/reactions/fire.json" },
+  { id: "heart", path: "/stickers/default/heart.svg", label: "Heart" },
+  { id: "party", path: "/stickers/default/party.svg", label: "Party" },
+  { id: "smile", path: "/stickers/default/smile.svg", label: "Smile" },
+  { id: "thumbsup", path: "/stickers/default/thumbsup.svg", label: "Thumbs up" },
+  { id: "wave", path: "/stickers/default/wave.svg", label: "Wave" },
 ];
 
 type Tab = "emoji" | "stickers" | "gif";
@@ -27,47 +32,71 @@ interface StickerGifPanelProps {
   className?: string;
 }
 
-function EmojiSections({ onSelectEmoji }: { onSelectEmoji: (emoji: string) => void }) {
+function StickerGrid({
+  stickers,
+  onSelectSticker,
+}: {
+  stickers: Array<{ id: string; label?: string; path?: string; animationUrl?: string; fileId?: string; url?: string; emoji?: string }>;
+  onSelectSticker?: (pathOrSticker: StickerSelection) => void;
+}) {
   return (
-    <div className="space-y-3">
-      {TELEGRAM_EMOJI_CATEGORIES.map((category) => (
-        <section key={category.id}>
-          <div className="sticky top-0 z-[1] mb-1 bg-white/95 px-1 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-slate-400 backdrop-blur">
-            {category.label}
-          </div>
-          <div className="grid grid-cols-8 gap-0.5">
-            {category.items.map((item) => (
-              <button
-                key={item.src}
-                type="button"
-                onClick={() => onSelectEmoji(item.emoji)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
-                title={item.emoji}
-              >
-                {item.emoji === "\u{1F525}" ? <AnimatedReaction emoji={item.emoji} size={22} loop /> : <EmojiGlyph emoji={item.emoji} size={22} />}
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className="grid grid-cols-4 gap-1">
+      {stickers.map((sticker) => {
+        const title = sticker.label || sticker.emoji || "Sticker";
+        return (
+          <button
+            key={sticker.id}
+            type="button"
+            onClick={() => {
+              if (!onSelectSticker) return;
+              if (sticker.fileId && sticker.url) {
+                onSelectSticker({
+                  id: sticker.id,
+                  fileId: sticker.fileId,
+                  url: sticker.url,
+                  animationUrl: sticker.animationUrl,
+                });
+                return;
+              }
+              if (sticker.path) onSelectSticker(sticker.path);
+            }}
+            className="ui-picker-tile flex h-14 w-14 items-center justify-center rounded-lg p-1"
+            title={title}
+          >
+            {sticker.animationUrl ? (
+              <LottieSticker animationUrl={sticker.animationUrl} size={40} />
+            ) : sticker.url || sticker.path ? (
+              <MediaImage source={sticker.url || sticker.path} alt={title} className="h-10 w-10 object-contain" loading="lazy" />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, onManageStickers, refreshToken, emojiOnly, className = "" }: StickerGifPanelProps) {
+export function StickerGifPanel({
+  onSelectEmoji,
+  onSelectGif,
+  onSelectSticker,
+  onManageStickers,
+  refreshToken,
+  emojiOnly,
+  className = "",
+}: StickerGifPanelProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("emoji");
   const [gifQuery, setGifQuery] = useState("");
   const [gifResults, setGifResults] = useState<GifResult[]>([]);
   const [gifLoading, setGifLoading] = useState(false);
-  const [, setGifNext] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastQueryRef = useRef("");
 
   const [stickerSubTab, setStickerSubTab] = useState<"recent" | "default" | string>("recent");
   const [recentStickers, setRecentStickers] = useState<ApiSticker[]>([]);
   const [installedPacks, setInstalledPacks] = useState<StickerPack[]>([]);
+  const [packStickersById, setPackStickersById] = useState<Record<string, ApiSticker[]>>({});
   const [stickersLoading, setStickersLoading] = useState(false);
+  const [packLoadingId, setPackLoadingId] = useState<string | null>(null);
 
   const fetchStickers = useCallback(async () => {
     setStickersLoading(true);
@@ -77,40 +106,75 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
         stickersApi.listInstalled().catch(() => ({ data: [] })),
       ]);
 
-      const onlyEmoji = "\u{1F525}";
-      const recentFiltered = (recentRes.data ?? []).filter((s) => s.emoji === onlyEmoji);
-      const installedFiltered = (installedRes.data ?? [])
-        .map((pack) => ({
-          ...pack,
-          stickers: (pack.stickers ?? []).filter((s) => s.emoji === onlyEmoji),
-        }))
-        .filter((pack) => (pack.stickers?.length ?? 0) > 0);
+      const nextRecent = recentRes.data ?? [];
+      const nextInstalled = installedRes.data ?? [];
 
-      setRecentStickers(recentFiltered);
-      setInstalledPacks(installedFiltered);
+      setRecentStickers(nextRecent);
+      setInstalledPacks(nextInstalled);
+      setPackStickersById((prev) => {
+        const next = { ...prev };
+        nextInstalled.forEach((pack) => {
+          if (pack.stickers) next[pack.id] = pack.stickers;
+        });
+        return next;
+      });
+      setStickerSubTab((prev) => {
+        if (prev === "default") return prev;
+        if (prev === "recent" && nextRecent.length > 0) return prev;
+        if (prev !== "recent" && prev !== "default" && nextInstalled.some((pack) => pack.id === prev)) return prev;
+        return nextRecent.length > 0 ? "recent" : "default";
+      });
     } catch {
       setRecentStickers([]);
       setInstalledPacks([]);
+      setPackStickersById({});
+      setStickerSubTab("default");
     } finally {
       setStickersLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (tab === "stickers") fetchStickers();
+    if (tab === "stickers") {
+      fetchStickers();
+    }
   }, [tab, fetchStickers, refreshToken]);
 
-  const fetchGifs = useCallback(async (q: string, pos?: string) => {
+  useEffect(() => {
+    if (tab !== "stickers") return;
+    if (stickerSubTab === "recent" || stickerSubTab === "default") return;
+    if (packStickersById[stickerSubTab]) return;
+
+    let cancelled = false;
+    setPackLoadingId(stickerSubTab);
+
+    stickersApi.getPack(stickerSubTab)
+      .then((res) => {
+        if (cancelled) return;
+        setPackStickersById((prev) => ({ ...prev, [stickerSubTab]: res.data.stickers ?? [] }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPackStickersById((prev) => ({ ...prev, [stickerSubTab]: [] }));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPackLoadingId((current) => (current === stickerSubTab ? null : current));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, stickerSubTab, packStickersById]);
+
+  const fetchGifs = useCallback(async (q: string) => {
     setGifLoading(true);
     try {
-      const res = q.trim()
-        ? await gifApi.search(q, { limit: 20, pos })
-        : await gifApi.trending(20);
-      setGifResults(pos ? (prev) => [...prev, ...res.data.results] : res.data.results);
-      setGifNext(res.data.next || "");
+      const res = q.trim() ? await gifApi.search(q, { limit: 20 }) : await gifApi.trending(20);
+      setGifResults(res.data.results);
     } catch {
       setGifResults([]);
-      setGifNext("");
     } finally {
       setGifLoading(false);
     }
@@ -120,56 +184,79 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null;
-      if (tab === "gif") {
-        lastQueryRef.current = gifQuery;
-        fetchGifs(gifQuery);
-      }
+      if (tab === "gif") fetchGifs(gifQuery);
     }, DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [tab, gifQuery, fetchGifs]);
 
+  const currentPackStickers = stickerSubTab !== "recent" && stickerSubTab !== "default"
+    ? packStickersById[stickerSubTab] ?? []
+    : [];
+
+  const recentStickerCards = recentStickers.map((sticker) => {
+    const url = sticker.file?.url || "";
+    const isLottie = (sticker.file?.mime_type || "").includes("application/json");
+    return {
+      id: sticker.id,
+      label: sticker.label,
+      emoji: sticker.emoji,
+      fileId: sticker.file_id || undefined,
+      url,
+      animationUrl: isLottie ? url : undefined,
+    };
+  }).filter((sticker) => Boolean(sticker.fileId && sticker.url));
+
+  const currentPackCards = currentPackStickers.map((sticker) => {
+    const url = sticker.file?.url || "";
+    const isLottie = (sticker.file?.mime_type || "").includes("application/json");
+    return {
+      id: sticker.id,
+      label: sticker.label,
+      emoji: sticker.emoji,
+      fileId: sticker.file_id || undefined,
+      url,
+      animationUrl: isLottie ? url : undefined,
+    };
+  }).filter((sticker) => Boolean(sticker.fileId && sticker.url));
+
   if (emojiOnly) {
     return (
-      <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg ${className}`} style={{ width: "320px" }}>
-        <div className="scrollbar-hide overflow-y-auto p-2" style={{ height: CONTENT_HEIGHT_PX }}>
-          <EmojiSections onSelectEmoji={onSelectEmoji} />
-        </div>
+      <div className={`ui-popover-surface overflow-hidden rounded-xl ${className}`} style={{ width: "320px" }}>
+        <EmojiCategoryList categories={TELEGRAM_EMOJI_CATEGORIES} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
       </div>
     );
   }
 
   return (
-    <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg ${className}`} style={{ width: "320px" }}>
+    <div className={`ui-popover-surface overflow-hidden rounded-xl ${className}`} style={{ width: "320px" }}>
       <div className="flex border-b border-slate-100">
         <button
           type="button"
           onClick={() => setTab("emoji")}
-          className={`flex-1 py-2 text-sm font-medium transition-colors ${tab === "emoji" ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+          className={`flex-1 border-b py-2 text-sm font-medium transition-colors ${tab === "emoji" ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
         >
           Emoji
         </button>
         <button
           type="button"
           onClick={() => setTab("stickers")}
-          className={`flex-1 py-2 text-sm font-medium transition-colors ${tab === "stickers" ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+          className={`flex-1 border-b py-2 text-sm font-medium transition-colors ${tab === "stickers" ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
         >
-          Стикеры
+          Stickers
         </button>
         <button
           type="button"
           onClick={() => setTab("gif")}
-          className={`flex-1 py-2 text-sm font-medium transition-colors ${tab === "gif" ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+          className={`flex-1 border-b py-2 text-sm font-medium transition-colors ${tab === "gif" ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
         >
           GIF
         </button>
       </div>
 
       {tab === "emoji" && (
-        <div className="scrollbar-hide overflow-y-auto p-2" style={{ height: CONTENT_HEIGHT_PX }}>
-          <EmojiSections onSelectEmoji={onSelectEmoji} />
-        </div>
+        <EmojiCategoryList categories={TELEGRAM_EMOJI_CATEGORIES} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
       )}
 
       {tab === "stickers" && (
@@ -178,23 +265,23 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
             <button
               type="button"
               onClick={() => setStickerSubTab("recent")}
-              className={`px-2 py-1.5 text-xs font-medium whitespace-nowrap ${stickerSubTab === "recent" ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+              className={`px-2 py-1.5 text-xs font-medium whitespace-nowrap border-b transition-colors ${stickerSubTab === "recent" ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
             >
-              Последние
+              Recent
             </button>
             <button
               type="button"
               onClick={() => setStickerSubTab("default")}
-              className={`px-2 py-1.5 text-xs font-medium whitespace-nowrap ${stickerSubTab === "default" ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+              className={`px-2 py-1.5 text-xs font-medium whitespace-nowrap border-b transition-colors ${stickerSubTab === "default" ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
             >
-              По умолчанию
+              Default
             </button>
             {installedPacks.map((pack) => (
               <button
                 key={pack.id}
                 type="button"
                 onClick={() => setStickerSubTab(pack.id)}
-                className={`max-w-[80px] truncate px-2 py-1.5 text-xs font-medium whitespace-nowrap ${stickerSubTab === pack.id ? "border-b-2 border-blue-600 bg-blue-50/50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`max-w-[96px] truncate px-2 py-1.5 text-xs font-medium whitespace-nowrap border-b transition-colors ${stickerSubTab === pack.id ? "border-blue-500 bg-blue-50/50 text-blue-600" : "border-transparent text-slate-600 hover:bg-slate-50/70"}`}
                 title={pack.title}
               >
                 {pack.title}
@@ -203,117 +290,34 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
           </div>
           <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-2">
             {stickersLoading ? (
-              <div className="flex items-center justify-center py-8 text-sm text-slate-500">Загрузка...</div>
+              <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading...</div>
             ) : stickerSubTab === "recent" ? (
-              recentStickers.length === 0 ? (
-                <div className="py-8 text-center text-sm text-slate-500">Нет недавних стикеров</div>
+              recentStickerCards.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-500">No recent stickers</div>
               ) : (
-                <div className="grid grid-cols-4 gap-1">
-                  {recentStickers.map((sticker) => {
-                    const url = sticker.file?.url;
-                    const isLottie = (sticker.file?.mime_type || "").includes("application/json");
-                    return (
-                      <button
-                        key={sticker.id}
-                        type="button"
-                        onClick={() =>
-                          url &&
-                          sticker.file_id &&
-                          onSelectSticker?.({
-                            id: sticker.id,
-                            fileId: sticker.file_id,
-                            url,
-                            animationUrl: isLottie ? url : undefined,
-                          })
-                        }
-                        className="flex h-14 w-14 items-center justify-center rounded-lg p-1 transition-colors hover:bg-slate-100"
-                        title={sticker.label || sticker.emoji}
-                      >
-                        {url &&
-                          (isLottie ? (
-                            <LottieSticker animationUrl={url} size={40} />
-                          ) : (
-                            <img src={url} alt={sticker.label} className="h-10 w-10 object-contain" />
-                          ))}
-                      </button>
-                    );
-                  })}
-                </div>
+                <StickerGrid stickers={recentStickerCards} onSelectSticker={onSelectSticker} />
               )
             ) : stickerSubTab === "default" ? (
-              <div className="grid grid-cols-4 gap-1">
-                {BUNDLED_STICKERS.map((sticker) => (
-                  <button
-                    key={sticker.id}
-                    type="button"
-                    onClick={() => onSelectSticker?.(sticker.path)}
-                    className="flex h-14 w-14 items-center justify-center rounded-lg p-1 transition-colors hover:bg-slate-100"
-                    title={sticker.label}
-                  >
-                    {sticker.animationUrl ? (
-                      <LottieSticker animationUrl={sticker.animationUrl} size={40} />
-                    ) : (
-                      <img src={sticker.path} alt={sticker.label} className="h-10 w-10 object-contain" />
-                    )}
+              <StickerGrid stickers={BUNDLED_STICKERS} onSelectSticker={onSelectSticker} />
+            ) : packLoadingId === stickerSubTab ? (
+              <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading pack...</div>
+            ) : currentPackCards.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">
+                Empty pack
+                {onManageStickers && (
+                  <button type="button" onClick={onManageStickers} className="mt-2 block w-full text-blue-600 hover:underline">
+                    Add stickers
                   </button>
-                ))}
+                )}
               </div>
             ) : (
-              (() => {
-                const pack = installedPacks.find((item) => item.id === stickerSubTab);
-                const stickers = pack?.stickers ?? [];
-                if (stickers.length === 0) {
-                  return (
-                    <div className="py-8 text-center text-sm text-slate-500">
-                      Пустой набор
-                      {onManageStickers && (
-                        <button type="button" onClick={onManageStickers} className="mt-2 block text-blue-600 hover:underline">
-                          Добавить стикеры
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-                return (
-                  <div className="grid grid-cols-4 gap-1">
-                    {stickers.map((sticker) => {
-                      const url = sticker.file?.url;
-                      const isLottie = (sticker.file?.mime_type || "").includes("application/json");
-                      return (
-                        <button
-                          key={sticker.id}
-                          type="button"
-                          onClick={() =>
-                            url &&
-                            sticker.file_id &&
-                            onSelectSticker?.({
-                              id: sticker.id,
-                              fileId: sticker.file_id,
-                              url,
-                              animationUrl: isLottie ? url : undefined,
-                            })
-                          }
-                          className="flex h-14 w-14 items-center justify-center rounded-lg p-1 transition-colors hover:bg-slate-100"
-                          title={sticker.label || sticker.emoji}
-                        >
-                          {url &&
-                            (isLottie ? (
-                              <LottieSticker animationUrl={url} size={40} />
-                            ) : (
-                              <img src={url} alt={sticker.label} className="h-10 w-10 object-contain" />
-                            ))}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()
+              <StickerGrid stickers={currentPackCards} onSelectSticker={onSelectSticker} />
             )}
           </div>
           {onManageStickers && (
             <div className="shrink-0 border-t border-slate-100 p-2">
               <button type="button" onClick={onManageStickers} className="text-xs text-blue-600 hover:underline">
-                Управление наборами
+                Manage sticker packs
               </button>
             </div>
           )}
@@ -333,9 +337,9 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
           </div>
           <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-2">
             {gifLoading && gifResults.length === 0 ? (
-              <div className="flex items-center justify-center py-8 text-sm text-slate-500">Загрузка...</div>
+              <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading...</div>
             ) : gifResults.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">Введите запрос для поиска</div>
+              <div className="py-8 text-center text-sm text-slate-500">Enter a search query</div>
             ) : (
               <div className="grid grid-cols-4 gap-1">
                 {gifResults.map((gif) => (
@@ -343,7 +347,7 @@ export function StickerGifPanel({ onSelectEmoji, onSelectGif, onSelectSticker, o
                     key={gif.id}
                     type="button"
                     onClick={() => onSelectGif?.(gif.url)}
-                    className="aspect-square overflow-hidden rounded-lg bg-slate-100 hover:ring-2 hover:ring-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    className="ui-picker-tile aspect-square overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
                   >
                     <img src={gif.preview_url || gif.url} alt="" className="h-full w-full object-cover" loading="lazy" />
                   </button>

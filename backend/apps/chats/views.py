@@ -490,15 +490,16 @@ class JoinChatPreviewView(APIView):
                 "title": chat.title,
             })
 
-        avatar_url = None
+        avatar_handle = None
         if chat.avatar:
-            from apps.files.protected_media import make_protected_media_url
-            avatar_url = make_protected_media_url(chat.avatar.name, request)
+            from apps.files.access_handles import make_chat_avatar_handle
+
+            avatar_handle = make_chat_avatar_handle(chat.id)
         return Response({
             "chat_type": "open",
             "title": chat.title,
             "description": chat.description or "",
-            "avatar_url": avatar_url,
+            "avatar_handle": avatar_handle,
             "members_count": active_count,
         })
 

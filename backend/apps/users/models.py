@@ -189,13 +189,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def get_avatar_url(self, request=None, base_url: str | None = None, *, size: str = "original"):
         """Первая аватарка из галереи или legacy User.avatar. size: original|small|medium."""
-        from django.conf import settings as django_settings
-        from apps.files.protected_media import make_protected_media_url
-
-        base = base_url or (getattr(django_settings, "FRONTEND_URL", "") or "").rstrip("/")
         path = self._get_avatar_path()
         if path:
-            return make_protected_media_url(path, request, base_url=base or None, size=size)
+            from apps.files.access_handles import make_user_avatar_handle
+
+            return make_user_avatar_handle(self.id, size=size)
         return None
 
     def save(self, *args, **kwargs):

@@ -1,3 +1,23 @@
+export function isDirectMediaUrl(url: string | null | undefined): boolean {
+  if (!url || typeof url !== "string") return false;
+  const s = url.trim();
+  if (!s) return false;
+  return (
+    s.startsWith("http://") ||
+    s.startsWith("https://") ||
+    s.startsWith("/") ||
+    s.startsWith("blob:") ||
+    s.startsWith("data:")
+  );
+}
+
+export function isOpaqueMediaHandle(url: string | null | undefined): boolean {
+  if (!url || typeof url !== "string") return false;
+  const s = url.trim();
+  if (!s) return false;
+  return !isDirectMediaUrl(s) && !s.startsWith("media/");
+}
+
 /**
  * Pick avatar URL by display size. Backend stores 3 versions: original, small (64px), medium (160px).
  * Use small for header/bubble/read-by, medium for info panel/chat list, original for full-screen.
@@ -23,6 +43,7 @@ export function toSameOriginMediaUrl(url: string | null | undefined): string {
   if (!url || typeof url !== "string") return url || "";
   const s = url.trim();
   if (!s) return "";
+  if (isOpaqueMediaHandle(s)) return "";
 
   try {
     const page = new URL(window.location.href);

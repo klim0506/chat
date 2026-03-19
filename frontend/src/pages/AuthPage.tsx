@@ -44,9 +44,10 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [step, setStep] = useState<"phone" | "code" | "username">("phone");
-  const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "">("");
-  const [isNewAccount, setIsNewAccount] = useState(false);
+  const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "pingy" | "">("");
   const [isNewPhone, setIsNewPhone] = useState<boolean | null>(null); // null = not yet checked
+  const [deliveryInfo, setDeliveryInfo] = useState("");
+  const [telegramRequesting, setTelegramRequesting] = useState(false);
   const [pairingMode, setPairingMode] = useState<"code" | null>(null); // "code" = show manual code input
   const [pairingCode, setPairingCode] = useState("");
   const [pairingLoading, setPairingLoading] = useState(false);
@@ -96,7 +97,6 @@ export default function AuthPage() {
       navigate(target, { replace: true });
       return;
     }
-    setIsNewAccount(true);
     setStep("username");
   }, [isAuthenticated, existingUser, nextUrl, navigate]);
 
@@ -109,6 +109,7 @@ export default function AuthPage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
+  const [showOptionalProfileFields, setShowOptionalProfileFields] = useState(false);
 
   // Live username availability check
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -148,25 +149,47 @@ export default function AuthPage() {
 
   const onSendCode = async (data: PhoneForm) => {
     setError("");
+    setDeliveryInfo("");
     setLoading(true);
     setCodeMethod("");
     try {
       const res = await authApi.sendCode(data.phone);
       setPhone(data.phone);
       setStep("code");
-      const resData = res.data as { method?: string; is_new?: boolean };
-      setCodeMethod(resData.method === "sms" ? "sms" : "telegram");
+      const resData = res.data as { detail?: string; method?: string; is_new?: boolean };
+      setCodeMethod(resData.method === "sms" ? "sms" : resData.method === "pingy" ? "pingy" : "telegram");
       setIsNewPhone(resData.is_new ?? null);
+      setDeliveryInfo(resData.detail || "");
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string; wait?: number } } };
       const data = err?.response?.data;
       const statusCode = err?.response?.status;
-      setError(data?.detail || t("common.error"));
+      const fallbackMessage = t("auth.sendCodeFailed");
+      setError(statusCode === 429 ? (data?.detail || fallbackMessage) : fallbackMessage);
       if (statusCode === 429 && typeof data?.wait === "number" && data.wait > 0) {
         setSendCodeCooldown(data.wait);
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onRequestTelegramMessage = async () => {
+    if (!phone) return;
+    setError("");
+    setDeliveryInfo("");
+    setTelegramRequesting(true);
+    try {
+      const res = await authApi.sendCode(phone, "telegram", true);
+      const resData = res.data as { detail?: string; method?: string };
+      setCodeMethod(resData.method === "sms" ? "sms" : "telegram");
+      setDeliveryInfo(resData.detail || "");
+      codeForm.reset({ code: "" });
+    } catch (e: unknown) {
+      const data = (e as { response?: { data?: { detail?: string } } })?.response?.data;
+      setError(data?.detail || t("common.error"));
+    } finally {
+      setTelegramRequesting(false);
     }
   };
 
@@ -197,8 +220,6 @@ export default function AuthPage() {
     try {
       const res = await authApi.verifyCode(phone, data.code, isNewPhone !== false ? (refCode || undefined) : undefined);
       setTokens(res.data.access, res.data.refresh, res.data.user);
-      const created = !!(res.data as { created?: boolean }).created;
-      setIsNewAccount(created);
       if (res.data.user && !res.data.user.username) {
         setStep("username");
       } else {
@@ -298,8 +319,8 @@ export default function AuthPage() {
         ],
       };
   const primaryButtonClass = "ui-accent-strong w-full rounded-2xl px-4 py-3 text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50";
-  const secondaryButtonClass = "w-full rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-white";
-  const inputClass = "w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100";
+  const secondaryButtonClass = "ui-picker-tile w-full rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 transition-colors";
+  const inputClass = "ui-field-shell w-full rounded-2xl px-4 py-3 text-sm text-slate-800 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100";
   const authUxCopy = language === "ru"
     ? {
         eyebrow: "Pingy access flow",
@@ -307,7 +328,7 @@ export default function AuthPage() {
         subtitle: "Номер, код и короткая настройка профиля. Без разрозненных экранов и лишних решений.",
         stages: [
           { key: "phone" as const, label: "Номер", hint: "Введите телефон или код входа" },
-          { key: "verify" as const, label: "Код", hint: "Подтверждение через Telegram или SMS" },
+          { key: "verify" as const, label: "Код", hint: "Подтверждение через Pingy, Telegram или SMS" },
           { key: "profile" as const, label: "Профиль", hint: "Имя, username и фото по желанию" },
         ],
         flowBadges: { login: "Вход", create: "Новый аккаунт" },
@@ -317,10 +338,11 @@ export default function AuthPage() {
           profile: "Завершите профиль",
         },
         descriptions: {
-          phone: "Мы отправим код в Telegram или по SMS. Этот же сценарий подходит и для нового аккаунта.",
+          phone: "Если у вас уже есть Pingy, код придёт туда.",
+          verifyPingy: "Мы отправили сообщение на другое устройство с Pingy. Если удобнее, ниже можно запросить это же сообщение в Telegram.",
           verifyTelegram: "Код придёт в Telegram. Введите его и продолжайте без лишних шагов.",
           verifySms: "Введите шестизначный код из SMS, чтобы продолжить.",
-          profile: "Имя, username и фото можно задать сейчас или позже в настройках.",
+          profile: "Нужен только username. Имя и фото можно добавить позже в настройках.",
           pairing: "Введите код с другого устройства, чтобы подтвердить вход вручную.",
         },
       }
@@ -330,7 +352,7 @@ export default function AuthPage() {
         subtitle: "Phone, code, and a short profile step. No scattered screens and no extra friction.",
         stages: [
           { key: "phone" as const, label: "Phone", hint: "Enter your phone or pairing code" },
-          { key: "verify" as const, label: "Code", hint: "Telegram or SMS confirmation" },
+          { key: "verify" as const, label: "Code", hint: "Pingy, Telegram, or SMS confirmation" },
           { key: "profile" as const, label: "Profile", hint: "Name, username, and optional photo" },
         ],
         flowBadges: { login: "Log in", create: "New account" },
@@ -340,24 +362,26 @@ export default function AuthPage() {
           profile: "Finish your profile",
         },
         descriptions: {
-          phone: "We send a code via Telegram or SMS. The same flow works for both returning and new users.",
+          phone: "If you already have Pingy, the code will arrive there.",
+          verifyPingy: "We sent a message to your other active Pingy device. If you prefer, you can request the same code in Telegram below.",
           verifyTelegram: "The code arrives in Telegram. Enter it and keep going without extra steps.",
           verifySms: "Enter the six-digit SMS code to continue.",
-          profile: "Name, username, and photo can be set now or later in settings.",
+          profile: "Only a username is needed here. Name and photo can be added later in settings.",
           pairing: "Enter the code from another device to approve this sign-in manually.",
         },
       };
   const flowStage = pairingMode === "code" ? "verify" : step === "phone" ? "phone" : step === "code" ? "verify" : "profile";
   const currentStageIndex = authUxCopy.stages.findIndex((item) => item.key === flowStage);
-  const flowBadge = flowStage === "profile" || isNewAccount || isNewPhone === true ? authUxCopy.flowBadges.create : authUxCopy.flowBadges.login;
   const stageTitle = pairingMode === "code" ? t("settings.qrLogin") : authUxCopy.titles[flowStage];
   const stageDescription = pairingMode === "code"
     ? authUxCopy.descriptions.pairing
     : flowStage === "verify"
-      ? (codeMethod === "telegram" ? authUxCopy.descriptions.verifyTelegram : authUxCopy.descriptions.verifySms)
+      ? (codeMethod === "telegram"
+          ? authUxCopy.descriptions.verifyTelegram
+          : codeMethod === "pingy"
+            ? authUxCopy.descriptions.verifyPingy
+            : authUxCopy.descriptions.verifySms)
       : authUxCopy.descriptions[flowStage];
-  const infoCardClass = "rounded-2xl border border-slate-200/80 bg-white/60 px-4 py-3 text-sm leading-6 text-slate-600";
-
   return (
     <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
@@ -365,9 +389,9 @@ export default function AuthPage() {
         <div className="absolute bottom-[-8%] right-[-4%] h-72 w-72 rounded-full bg-blue-200/40 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl items-center justify-center">
-        <div className="grid w-full items-stretch gap-5 lg:grid-cols-[1.04fr_0.96fr]">
-          <section className="auth-soft-panel hidden min-h-[40rem] flex-col justify-between rounded-[32px] p-8 lg:flex xl:p-10">
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-3xl items-center justify-center">
+        <div className="grid w-full items-stretch gap-5">
+          <section className="hidden">
             <div className="space-y-8">
               <Link
                 to="/"
@@ -425,20 +449,17 @@ export default function AuthPage() {
             </div>
           </section>
 
-          <section className="auth-glass-card relative mx-auto flex w-full max-w-[32rem] flex-col justify-center rounded-[28px] p-5 sm:p-7 lg:max-w-none lg:rounded-[32px] lg:p-8">
-            <div className="mb-6 flex items-start justify-between gap-4">
+          <section className="auth-glass-card relative mx-auto flex w-full max-w-[34rem] flex-col justify-center rounded-[28px] p-5 sm:p-7 lg:rounded-[32px] lg:p-8">
+            <div className="mb-6 flex items-center justify-between gap-4">
               <div className="space-y-3">
                 <Link
                   to="/"
-                  className="inline-flex items-center rounded-2xl lg:hidden"
+                  className="inline-flex items-center rounded-2xl"
                   aria-label={t("landing.brand")}
                 >
                   <img src={LOGO_URL} alt={t("auth.logo")} className="h-12 w-auto object-contain opacity-95" />
                 </Link>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                    {flowBadge}
-                  </p>
                   <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">
                     {stageTitle}
                   </h2>
@@ -469,28 +490,6 @@ export default function AuthPage() {
               </div>
             </div>
 
-            <div className="mb-6 grid grid-cols-3 gap-2">
-              {authUxCopy.stages.map((item, index) => {
-                const isCurrent = index === currentStageIndex;
-                const isPassed = index < currentStageIndex;
-                return (
-                  <div
-                    key={item.key}
-                    className={`rounded-2xl border px-3 py-2 text-left transition-colors ${
-                      isCurrent
-                        ? "border-sky-200 bg-sky-50/90"
-                        : isPassed
-                          ? "border-slate-200 bg-white/80"
-                          : "border-slate-200/70 bg-white/45"
-                    }`}
-                  >
-                    <p className={`text-xs font-semibold ${isCurrent || isPassed ? "text-slate-800" : "text-slate-500"}`}>{item.label}</p>
-                    <p className="mt-1 text-[0.6875rem] leading-4 text-slate-400">{item.hint}</p>
-                  </div>
-                );
-              })}
-            </div>
-
             {refCode && isNewPhone === true && (
               <div className="mb-5 rounded-2xl border border-emerald-200/80 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-700">
                 {t("auth.referralBonus")}
@@ -503,9 +502,12 @@ export default function AuthPage() {
                 <p className="text-sm text-slate-500">{t("common.loading")}</p>
               </div>
             ) : pairingMode === "code" ? (
-              <form onSubmit={onPairingCodeSubmit} className="space-y-5">
-                <div className={infoCardClass}>
-                  {t("auth.qrLoginEnterCode")}
+              <form onSubmit={onPairingCodeSubmit} className="space-y-6">
+                <div className="space-y-4 text-center">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white/85 shadow-[0_12px_32px_rgba(15,23,42,0.08)]">
+                    <img src={LOGO_URL} alt="" className="h-10 w-auto object-contain" />
+                  </div>
+                  <p className="text-sm text-slate-500">{language === "ru" ? "Введите код подтверждения с другого устройства." : "Enter the confirmation code from another device."}</p>
                 </div>
                 <input
                   type="text"
@@ -514,8 +516,18 @@ export default function AuthPage() {
                   placeholder="123456"
                   value={pairingCode}
                   onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  className={`${inputClass} text-center text-xl tracking-[0.35em]`}
+                  className="sr-only"
+                  autoFocus
                 />
+                <div className="grid grid-cols-6 gap-2">
+                  {Array.from({ length: 6 }, (_, index) => pairingCode[index] ?? "").map((digit, index) => (
+                    <span key={index} className={`flex h-14 items-center justify-center rounded-2xl border text-xl font-medium ${
+                      digit ? "border-sky-300 bg-white text-slate-950" : "border-slate-200 bg-white/55 text-slate-300"
+                    }`}>
+                      {digit}
+                    </span>
+                  ))}
+                </div>
                 {error && <p className="text-sm text-rose-500">{error}</p>}
                 <div className="space-y-3">
                   <button
@@ -535,10 +547,9 @@ export default function AuthPage() {
                 </div>
               </form>
             ) : step === "phone" ? (
-              <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-5">
+              <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">{t("auth.phoneNumber")}</label>
-                  <div className="rounded-[22px] border border-slate-200/80 bg-white/72 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
+                  <div className="rounded-[22px] bg-white/40 p-1.5">
                     <Controller
                       name="phone"
                       control={phoneForm.control}
@@ -557,7 +568,7 @@ export default function AuthPage() {
                     <p className="text-sm text-rose-500">{phoneForm.formState.errors.phone.message}</p>
                   )}
                 </div>
-                <div className={infoCardClass}>{t("auth.codeHint")}</div>
+                <p className="text-center text-sm leading-6 text-slate-500">{t("auth.codeHint")}</p>
                 {error && <p className="text-sm text-rose-500">{error}</p>}
                 <div className="space-y-3">
                   <button
@@ -582,7 +593,7 @@ export default function AuthPage() {
               </form>
             ) : step === "username" ? (
               <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="space-y-5">
-                <div className={infoCardClass}>
+                <div className="rounded-2xl bg-white/55 px-4 py-3 text-sm leading-6 text-slate-600">
                   <span>{t("auth.verifiedPhone")}: </span>
                   <span className="font-medium text-slate-900">{phone || existingUser?.phone || "—"}</span>
                   <button
@@ -593,31 +604,12 @@ export default function AuthPage() {
                     {t("auth.changeNumber")}
                   </button>
                 </div>
-                <div className="flex items-start gap-4">
-                  <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
-                    <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
-                    <span className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-300 bg-white/70 text-center text-[0.625rem] font-medium text-slate-400 transition-colors hover:border-sky-300">
-                      {avatarPreview ? (
-                        <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        t("auth.photoPlaceholder")
-                      )}
-                    </span>
-                  </label>
-                  <div className="min-w-0 flex-1">
-                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("auth.nameLabel")}</label>
-                    <input
-                      type="text"
-                      autoComplete="name"
-                      placeholder={t("auth.howToAddress")}
-                      className={inputClass}
-                      {...usernameForm.register("display_name")}
-                    />
-                  </div>
+                <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-6 text-slate-600">
+                  {t("auth.usernameHint")}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">{t("auth.usernameLabel")}</label>
-                  <div className={`flex items-center overflow-hidden rounded-2xl border bg-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${usernameForm.formState.errors.username ? "border-rose-300 focus-within:ring-rose-100" : "border-slate-200 focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
+                  <div className={`ui-field-shell flex items-center overflow-hidden rounded-2xl border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${usernameForm.formState.errors.username ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
                     <span className="select-none border-r border-slate-200 bg-slate-50/80 px-4 py-3 text-base font-medium text-slate-500">@</span>
                     <input
                       type="text"
@@ -643,6 +635,42 @@ export default function AuthPage() {
                     <p className="text-xs text-rose-500">{usernameDetail || t("auth.usernameTakenLive")}</p>
                   )}
                 </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/45">
+                  <button
+                    type="button"
+                    onClick={() => setShowOptionalProfileFields((value) => !value)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-slate-700 transition-colors hover:text-slate-950"
+                  >
+                    <span>{language === "ru" ? "Имя и фото можно добавить сейчас" : "Add name and photo now"}</span>
+                    <span className="text-slate-400">{showOptionalProfileFields ? "−" : "+"}</span>
+                  </button>
+                  {showOptionalProfileFields && (
+                    <div className="space-y-4 border-t border-slate-200 px-4 py-4">
+                      <div className="flex items-start gap-4">
+                        <label className="cursor-pointer shrink-0" title={t("auth.addAvatar")}>
+                          <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
+                          <span className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-300 bg-white/70 text-center text-[0.625rem] font-medium text-slate-400 transition-colors hover:border-sky-300">
+                            {avatarPreview ? (
+                              <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              t("auth.photoPlaceholder")
+                            )}
+                          </span>
+                        </label>
+                        <div className="min-w-0 flex-1">
+                          <label className="mb-2 block text-sm font-medium text-slate-700">{t("auth.nameLabel")}</label>
+                          <input
+                            type="text"
+                            autoComplete="name"
+                            placeholder={t("auth.howToAddress")}
+                            className={inputClass}
+                            {...usernameForm.register("display_name")}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {error && <p className="text-sm text-rose-500">{error}</p>}
                 <div className="space-y-3">
                   <button
@@ -650,7 +678,7 @@ export default function AuthPage() {
                     disabled={loading || usernameStatus === "taken" || usernameStatus === "checking"}
                     className={primaryButtonClass}
                   >
-                    {loading ? t("auth.saving") : t("auth.continue")}
+                    {loading ? t("auth.saving") : (language === "ru" ? "Создать аккаунт" : "Create account")}
                   </button>
                   <button
                     type="button"
@@ -663,54 +691,85 @@ export default function AuthPage() {
               </form>
             ) : (
               <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="space-y-5">
-                <div className={infoCardClass}>
-                  {codeMethod === "telegram" ? (
-                    <>{t("auth.codeSentTelegram")} {phone} ({t("auth.codeSentTelegramFrom")} <strong>@VerificationCodes</strong>)</>
-                  ) : (
-                    <>{t("auth.codeSentSms")} {phone}</>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); }}
-                    className="ml-2 font-medium text-sky-700 transition-colors hover:text-sky-800"
-                  >
-                    {t("auth.changePhone")}
-                  </button>
+                <div className="space-y-3">
+                  <div className="rounded-2xl bg-white/55 px-4 py-3 text-sm leading-6 text-slate-600">
+                    <span>{t("auth.verifiedPhone")}: </span>
+                    <span className="font-medium text-slate-900">{phone}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setStep("phone"); setError(""); setDeliveryInfo(""); setIsNewPhone(null); }}
+                      className="ml-2 font-medium text-sky-700 transition-colors hover:text-sky-800"
+                    >
+                      {t("auth.changeNumber")}
+                    </button>
+                  </div>
                 </div>
+                {deliveryInfo && (
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-6 text-slate-700">
+                    {deliveryInfo}
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    {codeMethod === "telegram" ? t("auth.codeFromTelegram") : t("auth.codeFromSms")}
+                    {codeMethod === "telegram"
+                      ? t("auth.codeFromTelegram")
+                      : codeMethod === "pingy"
+                        ? t("auth.codeFromPingy")
+                        : t("auth.codeFromSms")}
                   </label>
                   <input
                     type="text"
                     inputMode="numeric"
+                    autoComplete="one-time-code"
                     maxLength={6}
                     placeholder="123456"
-                    className={`${inputClass} text-center text-xl tracking-[0.35em] ${codeForm.formState.errors.code ? "!border-rose-300 !ring-rose-100" : ""}`}
+                    autoFocus
+                    className="ui-field-shell w-full rounded-2xl px-4 py-4 text-center text-3xl font-semibold tracking-[0.45em] text-slate-950 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100"
                     {...codeForm.register("code", {
                       onChange: (e) => {
-                        if (e.target.value.length === 6 && !loading) {
+                        const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
+                        if (digitsOnly !== e.target.value) {
+                          e.target.value = digitsOnly;
+                        }
+                        codeForm.setValue("code", digitsOnly, {
+                          shouldDirty: true,
+                          shouldValidate: digitsOnly.length === 6,
+                        });
+                        if (digitsOnly.length === 6 && !loading) {
                           setTimeout(() => codeForm.handleSubmit(onVerifyCode)(), 0);
                         }
                       },
                     })}
                   />
-                  {codeForm.formState.errors.code && (
-                    <p className="text-sm text-rose-500">{codeForm.formState.errors.code.message}</p>
+                  <p className="text-xs text-slate-400">
+                    {language === "ru" ? "6 цифр, можно ввести или вставить целиком." : "6 digits, type or paste the full code."}
+                  </p>
+                  {codeMethod === "pingy" && (
+                    <button
+                      type="button"
+                      onClick={onRequestTelegramMessage}
+                      disabled={telegramRequesting || loading}
+                      className="text-sm font-medium text-sky-700 underline underline-offset-4 transition-colors hover:text-sky-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      {telegramRequesting ? t("auth.sendingTelegramMessage") : t("auth.getTelegramMessage")}
+                    </button>
                   )}
                 </div>
+                {codeForm.formState.errors.code && (
+                  <p className="text-sm text-rose-500">{codeForm.formState.errors.code.message}</p>
+                )}
                 {error && <p className="text-sm text-rose-500">{error}</p>}
-                <div className="space-y-3">
+                <div className="space-y-3 pt-1">
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || telegramRequesting || (codeForm.watch("code")?.length ?? 0) !== 6}
                     className={primaryButtonClass}
                   >
                     {loading ? t("auth.checking") : t("auth.loginBtn")}
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setStep("phone"); setError(""); setIsNewPhone(null); codeForm.reset({ code: "" }); }}
+                    onClick={() => { setStep("phone"); setError(""); setDeliveryInfo(""); setIsNewPhone(null); codeForm.reset({ code: "" }); }}
                     className={secondaryButtonClass}
                   >
                     {t("common.back")}
