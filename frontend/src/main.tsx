@@ -4,32 +4,56 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import { usePreferencesStore } from "./store/preferences";
+import type { AppTheme } from "./store/preferences";
+import { DEFAULT_MESSAGE_TEXT_SCALE, normalizeMessageTextScale } from "./store/preferences";
 
 const faviconUrl = "/favicon.ico";
+const themeColorByTheme: Record<AppTheme, string> = {
+  light: "#f4f7fb",
+  dark: "#08111d",
+};
 
 function readPersistedDocumentPrefs() {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem("preferences");
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { state?: { theme?: unknown; language?: unknown } } | null;
+    const parsed = JSON.parse(raw) as { state?: { theme?: unknown; language?: unknown; messageTextScale?: unknown } } | null;
     const theme = parsed?.state?.theme === "dark" ? "dark" : parsed?.state?.theme === "light" ? "light" : null;
     const language =
       parsed?.state?.language === "ru" ? "ru" : parsed?.state?.language === "en" ? "en" : null;
-    if (!theme && !language) return null;
-    return { theme, language };
+    const messageTextScale =
+      parsed?.state?.messageTextScale == null
+        ? null
+        : normalizeMessageTextScale(parsed.state.messageTextScale);
+    if (!theme && !language && messageTextScale == null) return null;
+    return { theme, language, messageTextScale };
   } catch {
     return null;
   }
 }
 
 function syncDocumentPrefs() {
-  const { theme: storeTheme, language: storeLanguage } = usePreferencesStore.getState();
+  const { theme: storeTheme, language: storeLanguage, messageTextScale: storeMessageTextScale } = usePreferencesStore.getState();
   const persisted = readPersistedDocumentPrefs();
-  const theme = persisted?.theme ?? storeTheme;
-  const language = persisted?.language ?? storeLanguage;
+  const hydrated = typeof usePreferencesStore.persist?.hasHydrated === "function"
+    ? usePreferencesStore.persist.hasHydrated()
+    : true;
+  const theme: AppTheme = (hydrated ? storeTheme : (persisted?.theme ?? storeTheme)) === "dark" ? "dark" : "light";
+  const language = hydrated ? storeLanguage : (persisted?.language ?? storeLanguage);
+  const messageTextScale = hydrated
+    ? normalizeMessageTextScale(storeMessageTextScale)
+    : normalizeMessageTextScale(persisted?.messageTextScale ?? storeMessageTextScale ?? DEFAULT_MESSAGE_TEXT_SCALE);
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.setAttribute("lang", language);
+  document.documentElement.style.fontSize = `${messageTextScale * 100}%`;
+  let themeColorMeta = document.querySelector<HTMLMetaElement>("meta[name='theme-color']");
+  if (!themeColorMeta) {
+    themeColorMeta = document.createElement("meta");
+    themeColorMeta.name = "theme-color";
+    document.head.appendChild(themeColorMeta);
+  }
+  themeColorMeta.content = themeColorByTheme[theme];
   let favicon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
   if (!favicon) {
     favicon = document.createElement("link");

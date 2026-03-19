@@ -1,10 +1,10 @@
 import type { Message, User } from "../api/client";
 
 export const CHAT_GROUP_TIME_MS = 5 * 60 * 1000;
-export const CHAT_MESSAGE_ITEM_GAP_CLASS = "mt-1.5";
-export const CHAT_MESSAGE_GROUP_GAP_CLASS = "mt-3";
-export const CHAT_MESSAGE_FIRST_ITEM_GAP_CLASS = "mt-0";
-export const CHAT_MESSAGE_AFTER_DATE_GAP_CLASS = "mt-1.5";
+export const CHAT_MESSAGE_ITEM_GAP_PX = 12;
+export const CHAT_MESSAGE_GROUP_GAP_PX = 16;
+export const CHAT_MESSAGE_FIRST_ITEM_GAP_PX = 0;
+export const CHAT_MESSAGE_AFTER_DATE_GAP_PX = 6;
 export const CHAT_GROUP_SENTINEL_HEIGHT = 4;
 
 function getSenderId(msg: Message): string {
@@ -37,7 +37,7 @@ export type ChatMessageLayoutMeta = {
   isLastInGroup: boolean;
   showAvatar: boolean;
   showDateDivider: boolean;
-  rowGapClass: string;
+  rowGapPx: number;
   sentinelHeight: number;
 };
 
@@ -57,17 +57,17 @@ export function getChatMessageLayoutMeta(messages: Message[], index: number): Ch
   const isLastInGroup = showAvatar && !!prevMsg && prevSender === currentSender;
   const showDateDivider = !prevMsg || !isSameDay(prevMsg.created_at, message.created_at);
 
-  let rowGapClass = CHAT_MESSAGE_ITEM_GAP_CLASS;
-  if (index === 0) rowGapClass = CHAT_MESSAGE_FIRST_ITEM_GAP_CLASS;
-  else if (showDateDivider) rowGapClass = CHAT_MESSAGE_AFTER_DATE_GAP_CLASS;
-  else if (isFirstInGroup) rowGapClass = CHAT_MESSAGE_GROUP_GAP_CLASS;
+  let rowGapPx = CHAT_MESSAGE_ITEM_GAP_PX;
+  if (index === 0) rowGapPx = CHAT_MESSAGE_FIRST_ITEM_GAP_PX;
+  else if (showDateDivider) rowGapPx = CHAT_MESSAGE_AFTER_DATE_GAP_PX;
+  else if (isFirstInGroup) rowGapPx = CHAT_MESSAGE_GROUP_GAP_PX;
 
   return {
     isFirstInGroup,
     isLastInGroup,
     showAvatar,
     showDateDivider,
-    rowGapClass,
+    rowGapPx,
     sentinelHeight: showAvatar ? CHAT_GROUP_SENTINEL_HEIGHT : 0,
   };
 }

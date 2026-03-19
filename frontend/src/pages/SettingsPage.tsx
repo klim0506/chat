@@ -195,7 +195,7 @@ function ReferralProgressCard({
   t: ReturnType<typeof useTranslation>["t"];
   lang: AppLanguage;
 }) {
-  const [showAllLevels, setShowAllLevels] = useState(false);
+  const [showLevelsModal, setShowLevelsModal] = useState(false);
   const { invited_count, milestones } = progress;
   const tiers = Object.entries(milestones)
     .map(([target, rewardMonths]) => ({ target: Number(target), rewardMonths }))
@@ -209,172 +209,198 @@ function ReferralProgressCard({
   const activeTierIndex = orderedTiers.findIndex((tier) => invited_count < tier.target);
   const currentTierIndex = activeTierIndex === -1 ? orderedTiers.length - 1 : activeTierIndex;
   const currentTier = orderedTiers[currentTierIndex];
-  const previousTierTarget = currentTierIndex > 0 ? orderedTiers[currentTierIndex - 1].target : 0;
-  const tierSpan = Math.max(1, currentTier.target - previousTierTarget);
-  const tierProgress = Math.max(0, Math.min(tierSpan, invited_count - previousTierTarget));
-  const progressPct = invited_count >= currentTier.target && activeTierIndex === -1
-    ? 100
-    : Math.max(6, Math.min(100, (tierProgress / tierSpan) * 100));
-  const remaining = Math.max(0, currentTier.target - invited_count);
+  const currentTarget = Math.max(1, currentTier.target);
+  const progressValue = Math.min(invited_count, currentTarget);
+  const progressPct = Math.max(0, Math.min(100, (progressValue / currentTarget) * 100));
+  const remaining = Math.max(0, currentTarget - invited_count);
+
+  const formatRewardLabel = (months: number) => (
+    lang === "ru"
+      ? `Премиум на ${months} ${months === 1 ? "месяц" : months < 5 ? "месяца" : "месяцев"}`
+      : `${months} ${months === 1 ? "month" : "months"} Premium`
+  );
+  const formatGoalLabel = (target: number) => (
+    lang === "ru"
+      ? `${target} ${target === 1 ? "друг" : target < 5 ? "друга" : "друзей"}`
+      : `${target} ${target === 1 ? "friend" : "friends"}`
+  );
+
   const levelLabel = lang === "ru"
     ? `Уровень ${currentTierIndex + 1} из ${orderedTiers.length}`
     : `Level ${currentTierIndex + 1} of ${orderedTiers.length}`;
-  const rewardLabel = lang === "ru"
-    ? `${currentTier.rewardMonths} ${currentTier.rewardMonths === 1 ? "месяц" : currentTier.rewardMonths < 5 ? "месяца" : "месяцев"} Premium`
-    : `${currentTier.rewardMonths} ${currentTier.rewardMonths === 1 ? "month" : "months"} Premium`;
-  const goalLabel = lang === "ru"
-    ? `${currentTier.target} ${currentTier.target === 1 ? "друг" : currentTier.target < 5 ? "друга" : "друзей"}`
-    : `${currentTier.target} ${currentTier.target === 1 ? "friend" : "friends"}`;
-  const remainingLabel = lang === "ru"
-    ? remaining === 0 ? "Цель уровня достигнута" : `Осталось ${remaining} до награды`
-    : remaining === 0 ? "Tier completed" : `${remaining} left to unlock`;
-  const invitedLabel = lang === "ru" ? `${invited_count} приглашено` : `${invited_count} invited`;
+  const rewardLabel = formatRewardLabel(currentTier.rewardMonths);
+  const goalLabel = formatGoalLabel(currentTarget);
+  const shortGoalLabel = lang === "ru"
+    ? `${progressValue}/${currentTarget}`
+    : `${progressValue}/${currentTarget}`;
   const rewardSummary = lang === "ru"
     ? remaining === 0
-      ? `Награда открыта: ${rewardLabel}`
-      : `Пригласите ещё ${remaining}, чтобы получить ${rewardLabel}`
+      ? `Награда доступна: ${rewardLabel}`
+      : `Поделитесь ссылкой и откройте награду текущего уровня`
     : remaining === 0
       ? `Reward unlocked: ${rewardLabel}`
-      : `Invite ${remaining} more to get ${rewardLabel}`;
-  const steps = lang === "ru"
-    ? [
-        "Скопируйте ссылку",
-        `Пригласите ${goalLabel.toLowerCase()}`,
-        `Получите ${rewardLabel}`,
-      ]
-    : [
-        "Copy your link",
-        `Invite ${goalLabel.toLowerCase()}`,
-        `Get ${rewardLabel}`,
-      ];
+      : `Share your link to unlock this level reward`;
+  const progressTitle = lang === "ru" ? `Прогресс ${shortGoalLabel}` : `Progress ${shortGoalLabel}`;
+  const levelsCta = lang === "ru" ? "Все уровни" : "All levels";
+  const levelsModalTitle = lang === "ru" ? "Уровни наград" : "Reward levels";
+  const levelCurrentLabel = lang === "ru" ? "Текущий" : "Current";
+  const levelDoneLabel = lang === "ru" ? "Получен" : "Done";
+  const levelNextLabel = lang === "ru" ? "Далее" : "Next";
+  const rewardCardLabel = lang === "ru" ? "Награда" : "Reward";
+  const rewardCardHint = lang === "ru" ? "за текущий уровень" : "for this level";
 
   return (
-    <div className="space-y-5 rounded-[28px] border border-slate-200/80 bg-gradient-to-br from-sky-50/80 via-white to-blue-50/40 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+    <>
+      <div className="space-y-4 rounded-[28px] border border-slate-200/80 bg-gradient-to-br from-sky-50/80 via-white to-blue-50/40 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={() => setShowLevelsModal(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-sky-700 shadow-sm transition-colors hover:bg-white"
+            >
+              {levelLabel}
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            <h3 className="mt-3 text-xl font-semibold text-slate-900">{t("settings.referralHeroTitle")}</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              {rewardSummary}
+              {remaining > 0 && (
+                <>
+                  {" - "}
+                  <button
+                    type="button"
+                    onClick={onCopy}
+                    className={`inline max-w-full truncate align-baseline text-sky-700 transition-colors hover:text-sky-800 hover:underline ${shake ? "animate-username-shake" : ""}`}
+                    title={referralLink}
+                  >
+                    {referralLink}
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
           <button
             type="button"
-            onClick={() => setShowAllLevels((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-sky-700 shadow-sm transition-colors hover:bg-white"
+            onClick={onCopy}
+            className={`ui-accent-strong inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors shrink-0 ${shake ? "animate-username-shake" : ""}`}
           >
-            {levelLabel}
-            <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transition-transform ${showAllLevels ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
-            </svg>
+            {copied ? t("common.copied") : t("settings.referralCopyCta")}
           </button>
-          <h3 className="mt-3 text-xl font-semibold text-slate-900">{t("settings.referralHeroTitle")}</h3>
-          <p className="mt-1 text-sm leading-6 text-slate-600">{rewardSummary}</p>
         </div>
-        <button
-          type="button"
-          onClick={onCopy}
-          className="ui-accent-strong inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors shrink-0"
-        >
-          {copied ? t("common.copied") : t("settings.referralCopyCta")}
-        </button>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-4">
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              {rewardCardLabel}
+            </p>
+            <p className="mt-2 text-lg font-semibold text-slate-900">{rewardLabel}</p>
+            <p className="mt-1 text-sm text-slate-600">{rewardCardHint}</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">{progressTitle}</p>
+              <button
+                type="button"
+                onClick={() => setShowLevelsModal(true)}
+                className="text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
+              >
+                {levelsCta}
+              </button>
+            </div>
+            <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              {lang === "ru"
+                ? remaining === 0
+                  ? "Награда уже доступна"
+                  : `Осталось ${remaining}`
+                : remaining === 0
+                  ? "Reward available"
+                  : `${remaining} left`}
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {steps.map((step, index) => (
+      {showLevelsModal && (
+        <TopLayerPortal>
           <div
-            key={step}
-            className={`rounded-2xl border px-4 py-3 ${
-              index === 2
-                ? "border-emerald-200/80 bg-emerald-50/70"
-                : "border-slate-200/80 bg-white/85"
-            }`}
+            className="fixed inset-0 flex items-center justify-center bg-slate-950/35 px-4"
+            style={{ zIndex: TOP_LAYER_Z_INDEX }}
+            onClick={() => setShowLevelsModal(false)}
           >
-            <p className={`text-[0.7rem] font-semibold uppercase tracking-[0.14em] ${
-              index === 2 ? "text-emerald-600" : "text-slate-400"
-            }`}>
-              {lang === "ru" ? `Шаг ${index + 1}` : `Step ${index + 1}`}
-            </p>
-            <p className={`mt-1 text-base font-semibold ${index === 2 ? "text-emerald-800" : "text-slate-900"}`}>
-              {step}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      <div className={`rounded-2xl border border-white/70 bg-white/85 px-4 py-3 shadow-sm ${shake ? "animate-username-shake" : ""}`}>
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">{t("settings.referralLinkLabel")}</p>
-        <p className="mt-1 truncate text-sm text-slate-700">{referralLink}</p>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">{t("settings.referralProgressLabel")}</p>
-            <p className="mt-1 text-base font-semibold text-slate-900">{remainingLabel}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowAllLevels((prev) => !prev)}
-            className="text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
-          >
-            {showAllLevels ? (lang === "ru" ? "Скрыть уровни" : "Hide levels") : (lang === "ru" ? "Показать все уровни" : "Show all levels")}
-          </button>
-        </div>
-
-        <div className="mt-4">
-          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-            <span className="font-medium text-slate-700">{invitedLabel}</span>
-            <span className="text-slate-500">{previousTierTarget} - {currentTier.target}</span>
-          </div>
-          <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-all duration-300"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-
-        {showAllLevels && (
-          <div className="mt-4 space-y-2 border-t border-slate-200/80 pt-4">
-            {orderedTiers.map((tier, index) => {
-              const isCurrent = index === currentTierIndex;
-              const isDone = invited_count >= tier.target;
-              const tierRewardLabel = lang === "ru"
-                ? `${tier.rewardMonths} ${tier.rewardMonths === 1 ? "месяц" : tier.rewardMonths < 5 ? "месяца" : "месяцев"} Premium`
-                : `${tier.rewardMonths} ${tier.rewardMonths === 1 ? "month" : "months"} Premium`;
-              const tierGoalLabel = lang === "ru"
-                ? `${tier.target} ${tier.target === 1 ? "друг" : tier.target < 5 ? "друга" : "друзей"}`
-                : `${tier.target} ${tier.target === 1 ? "friend" : "friends"}`;
-              return (
-                <div
-                  key={tier.target}
-                  className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
-                    isCurrent
-                      ? "border-sky-200 bg-sky-50/70"
-                      : isDone
-                        ? "border-emerald-200 bg-emerald-50/60"
-                        : "border-slate-200/80 bg-white/85"
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {lang === "ru" ? `Уровень ${index + 1}` : `Level ${index + 1}`}
-                    </p>
-                    <p className="mt-0.5 text-sm text-slate-600">
-                      {tierGoalLabel} · {tierRewardLabel}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                    isCurrent
-                      ? "bg-sky-100 text-sky-700"
-                      : isDone
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-100 text-slate-500"
-                  }`}>
-                    {isCurrent ? (lang === "ru" ? "Текущий" : "Current") : isDone ? (lang === "ru" ? "Пройден" : "Done") : (lang === "ru" ? "Далее" : "Next")}
-                  </span>
+              className="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{levelsCta}</p>
+                  <h4 className="mt-1 text-lg font-semibold text-slate-900">{levelsModalTitle}</h4>
                 </div>
-              );
-            })}
+                <button
+                  type="button"
+                  onClick={() => setShowLevelsModal(false)}
+                  className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  aria-label={t("common.close")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {orderedTiers.map((tier, index) => {
+                  const isCurrent = index === currentTierIndex;
+                  const isDone = invited_count >= tier.target;
+                  const tierRewardLabel = formatRewardLabel(tier.rewardMonths);
+                  const tierGoalLabel = formatGoalLabel(tier.target);
+                  return (
+                    <div
+                      key={tier.target}
+                      className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
+                        isCurrent
+                          ? "border-sky-200 bg-sky-50/70"
+                          : isDone
+                            ? "border-emerald-200 bg-emerald-50/60"
+                            : "border-slate-200/80 bg-white"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {lang === "ru" ? `Уровень ${index + 1}` : `Level ${index + 1}`}
+                        </p>
+                        <p className="mt-0.5 text-sm text-slate-600">
+                          {tierGoalLabel} • {tierRewardLabel}
+                        </p>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                        isCurrent
+                          ? "bg-sky-100 text-sky-700"
+                          : isDone
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-500"
+                      }`}>
+                        {isCurrent ? levelCurrentLabel : isDone ? levelDoneLabel : levelNextLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
-    </div>
+        </TopLayerPortal>
+      )}
+    </>
   );
 }
 
@@ -752,7 +778,7 @@ function SoundsSection() {
   );
 }
 
-const MESSAGE_PREVIEW_BASE_PX = 13;
+const MESSAGE_PREVIEW_BASE_REM = 13 / 16;
 
 const SCALE_PRESET_KEYS = ["settings.scaleSmall", "settings.scaleReduced", "settings.scaleNormal", "settings.scaleLarge", "settings.scaleExtraLarge"] as const;
 
@@ -764,7 +790,7 @@ function MessageScaleSlider() {
     Math.abs(s - scale) < Math.abs(MESSAGE_TEXT_SCALES[best] - scale) ? i : best
   , 0);
   return (
-    <div className="space-y-4 rounded-[24px] border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-slate-50/80 p-4">
+    <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
         {MESSAGE_TEXT_SCALES.map((value, i) => (
           <button
@@ -781,7 +807,8 @@ function MessageScaleSlider() {
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-3 rounded-2xl bg-white/85 px-3 py-3 ring-1 ring-slate-200/70">
+
+      <div className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3">
         <input
           type="range"
           min={MESSAGE_TEXT_SCALE_MIN}
@@ -793,8 +820,9 @@ function MessageScaleSlider() {
         />
         <span className="w-14 shrink-0 rounded-full bg-slate-100 px-2 py-1 text-center text-sm font-semibold text-slate-700 tabular-nums">{Math.round(scale * 100)}%</span>
       </div>
+
       <div
-        className="rounded-[22px] bg-white/88 px-5 py-4 ring-1 ring-slate-200/70 shadow-[0_12px_28px_rgba(15,23,42,0.05)]"
+        className="rounded-[22px] border border-slate-200/80 bg-slate-50/50 px-5 py-4"
         style={{ minHeight: 132 }}
       >
         <p className="mb-3 text-[0.625rem] font-medium uppercase tracking-[0.18em] text-slate-400">{t("settings.scalePreview")}</p>
@@ -803,13 +831,13 @@ function MessageScaleSlider() {
           <div className="flex min-w-0 flex-col gap-2">
             <div
               className="max-w-[200px] break-words rounded-[20px] rounded-bl-md bg-blue-500 px-3 py-2 text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale}px` }}
+              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_REM}rem` }}
             >
               {t("settings.scalePreviewMessage1")}
             </div>
             <div
               className="max-w-[156px] break-words rounded-[20px] rounded-bl-md bg-slate-100 px-3 py-2 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
-              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_PX * scale * 0.95}px` }}
+              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_REM * 0.95}rem` }}
             >
               {t("settings.scalePreviewMessage2")}
             </div>
@@ -2034,91 +2062,90 @@ export default function SettingsPage({
                   <MessageScaleSlider />
                 </div>
 
-                {/* Message alignment */}
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-                    <label className="mb-3 block text-sm font-semibold text-slate-700">
-                    {t("settings.messageAlignment")}
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMessageAlignment("left")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        messageAlignment === "left" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      {t("settings.messageAlignmentLeft")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMessageAlignment("right")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        messageAlignment === "right" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      {t("settings.messageAlignmentRight")}
-                    </button>
+                <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <div>
+                      <label className="mb-3 block text-sm font-semibold text-slate-700">
+                        {t("settings.messageAlignment")}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMessageAlignment("left")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            messageAlignment === "left" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          {t("settings.messageAlignmentLeft")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMessageAlignment("right")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            messageAlignment === "right" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          {t("settings.messageAlignmentRight")}
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Language */}
-                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-                    <label className="mb-3 block text-sm font-semibold text-slate-700">
-                      {t("settings.language")}
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLanguage("en")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        language === "en" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      English
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLanguage("ru")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        language === "ru" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      Russian
-                    </button>
+                    <div>
+                      <label className="mb-3 block text-sm font-semibold text-slate-700">
+                        {t("settings.language")}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLanguage("en")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            language === "en" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          English
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLanguage("ru")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            language === "ru" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          Russian
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-3 block text-sm font-semibold text-slate-700">
+                        {t("settings.theme")}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTheme("light")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            theme === "light" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          {t("settings.themeLight")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTheme("dark")}
+                          className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                            theme === "dark" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          {t("settings.themeDark")}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Theme */}
-                <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
-                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-                    <label className="mb-3 block text-sm font-semibold text-slate-700">
-                    {t("settings.theme")}
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTheme("light")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        theme === "light" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      {t("settings.themeLight")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTheme("dark")}
-                      className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-                        theme === "dark" ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
-                    >
-                      {t("settings.themeDark")}
-                    </button>
-                    </div>
-                  </div>
-
-                  {/* Sounds */}
+                {/* Sounds */}
+                <div className="grid gap-4 lg:grid-cols-[1fr]">
                   <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
                     <label className="mb-3 block text-sm font-semibold text-slate-700">
                       {t("settings.sounds")}
@@ -2286,6 +2313,18 @@ export default function SettingsPage({
 
               {section === "premium" && (
             <div className="space-y-6" ref={subscriptionPlansRef}>
+              {u.referral_code && (
+                <ReferralProgressCard
+                  progress={referralProgress}
+                  referralLink={`${window.location.origin}/auth?ref=${u.referral_code}`}
+                  copied={copied}
+                  shake={referralShake}
+                  onCopy={handleCopyReferral}
+                  t={t}
+                  lang={lang}
+                />
+              )}
+
               {/* Subscription: status + buy/gift */}
               <div className={SETTINGS_PANEL_CLASS}>
                 <div className={SETTINGS_PANEL_HEADER_CLASS}>

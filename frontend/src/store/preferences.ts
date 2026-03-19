@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 export const MESSAGE_TEXT_SCALE_MIN = 0.75;
 export const MESSAGE_TEXT_SCALE_MAX = 1.3;
 export const MESSAGE_TEXT_SCALES = [0.75, 0.85, 1, 1.15, 1.3] as const;
+export const DEFAULT_MESSAGE_TEXT_SCALE = 1;
 export type MessageTextScale = number;
 export type AppTheme = "light" | "dark";
 export type AppLanguage = "en" | "ru";
@@ -13,12 +14,12 @@ export type MessageAlignment = "left" | "right";
 /** Язык по умолчанию везде — русский. */
 const DEFAULT_LANGUAGE: AppLanguage = "ru";
 
-function normalizeScale(value: unknown): MessageTextScale {
+export function normalizeMessageTextScale(value: unknown): MessageTextScale {
   const num = typeof value === "string" ? parseFloat(value) : Number(value);
   if (typeof num === "number" && !Number.isNaN(num)) {
     return Math.max(MESSAGE_TEXT_SCALE_MIN, Math.min(MESSAGE_TEXT_SCALE_MAX, Math.round(num * 100) / 100));
   }
-  return 1;
+  return DEFAULT_MESSAGE_TEXT_SCALE;
 }
 
 interface PreferencesState {
@@ -59,7 +60,7 @@ interface PreferencesState {
 export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
-      messageTextScale: 1,
+      messageTextScale: DEFAULT_MESSAGE_TEXT_SCALE,
       theme: "light",
       language: DEFAULT_LANGUAGE,
       soundEnabled: true,
@@ -75,7 +76,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       folderColorUnread: "#F59E0B",
       folderColorArchive: "#6B7280",
       messageAlignment: "right",
-      setMessageTextScale: (scale) => set({ messageTextScale: normalizeScale(scale) as MessageTextScale }),
+      setMessageTextScale: (scale) => set({ messageTextScale: normalizeMessageTextScale(scale) as MessageTextScale }),
       setMessageAlignment: (alignment) => set({ messageAlignment: alignment === "right" ? "right" : "left" }),
       setTheme: (theme) => set({ theme: theme === "dark" ? "dark" : "light" }),
       setLanguage: (language) => set({ language: language === "ru" ? "ru" : "en" }),
@@ -134,7 +135,7 @@ export const usePreferencesStore = create<PreferencesState>()(
         const messageAlignment = stored?.messageAlignment === "left" ? "left" : "right";
         return {
           ...current,
-          messageTextScale: normalizeScale(scale),
+          messageTextScale: normalizeMessageTextScale(scale),
           theme,
           language,
           soundEnabled,

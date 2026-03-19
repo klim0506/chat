@@ -39,19 +39,19 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 0)).toMatchObject({
       isFirstInGroup: true,
       showAvatar: false,
-      rowGapClass: "mt-0",
+      rowGapPx: 0,
       sentinelHeight: 0,
     });
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: false,
       showAvatar: false,
-      rowGapClass: "mt-1.5",
+      rowGapPx: 12,
       sentinelHeight: 0,
     });
     expect(getChatMessageLayoutMeta(messages, 2)).toMatchObject({
       isFirstInGroup: false,
       showAvatar: true,
-      rowGapClass: "mt-1.5",
+      rowGapPx: 12,
       sentinelHeight: 4,
     });
   });
@@ -65,11 +65,11 @@ describe("chat layout grouping", () => {
 
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
-      rowGapClass: "mt-3",
+      rowGapPx: 16,
     });
     expect(getChatMessageLayoutMeta(messages, 2)).toMatchObject({
       isFirstInGroup: false,
-      rowGapClass: "mt-1.5",
+      rowGapPx: 12,
     });
   });
 
@@ -82,7 +82,7 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
       showDateDivider: true,
-      rowGapClass: "mt-1.5",
+      rowGapPx: 6,
     });
   });
 
@@ -95,7 +95,7 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
       showAvatar: true,
-      rowGapClass: "mt-3",
+      rowGapPx: 16,
     });
   });
 });

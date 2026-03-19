@@ -184,7 +184,7 @@ export function PhoneInput({
         placeholder={placeholder}
         disabled={disabled}
         data-testid={dataTestId}
-        className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-base font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 sm:text-lg"
       />
 
       {/* Dropdown */}

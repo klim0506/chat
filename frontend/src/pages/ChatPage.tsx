@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, channelPostCommentsApi, stickersApi, paymentsApi, userDisplayName, normalizeMediaPayload } from "../api/client";
 import type { Chat, ChatMember, Channel, ChannelPost, ChannelPostComment, Message, ReplyMessage, User, UserSearchResult, ScheduledMessage as ScheduledMessageType, Contact } from "../api/client";
 import { useAuthStore } from "../store/auth";
+import { buildSearchSnippet, rankSecretChatMessages } from "../lib/search";
 import { usePremiumModalStore } from "../store/premiumModal";
 import { usePreferencesStore } from "../store/preferences";
 import { useMessagesStore, normalizeMessage as storeNormalizeMessage } from "../store/messages";
@@ -912,7 +913,6 @@ export default function ChatPage({
   const token = useAuthStore((s) => s.accessToken);
   const currentUser = useAuthStore((s) => s.user);
   const myUserId = currentUser?.id || "";
-  const textScale = usePreferencesStore((s) => s.messageTextScale);
   const language = usePreferencesStore((s) => s.language);
   const { t, lang } = useTranslation();
 
@@ -1642,6 +1642,13 @@ export default function ChatPage({
     }
     setShowInfo(false);
   }, [messageIndexById, virtualState.offsets, flashHighlightMessage]);
+
+  useEffect(() => {
+    const targetMessageId = (location.state as { targetMessageId?: string } | null)?.targetMessageId;
+    if (!targetMessageId) return;
+    scrollToMessageId(targetMessageId);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate, scrollToMessageId]);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const handleMessagesScroll = useCallback(() => {
@@ -2463,9 +2470,7 @@ export default function ChatPage({
       try {
         if (chat?.is_secret) {
           const allMsgs = useMessagesStore.getState().byChat[chatId] ?? [];
-          const q = searchQuery.trim().toLowerCase();
-          const matched = allMsgs.filter((m) => !m.is_deleted && m.content?.toLowerCase().includes(q));
-          matched.reverse();
+          const matched = rankSecretChatMessages(allMsgs, searchQuery.trim());
           setSearchResults(matched); setSearchTotal(matched.length); setSearchIdx(0);
         } else {
           const { data } = await chatsApi.searchMessages(chatId, searchQuery.trim(), { limit: 50 });
@@ -4454,6 +4459,7 @@ export default function ChatPage({
                   }
                 }}
                 placeholder={chat?.is_secret ? t("search.secretLocal") : t("search.placeholder")}
+                spellCheck={false}
                 className="w-full pl-8 pr-2.5 py-1 ui-text-assist border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-slate-50"
                 autoFocus
               />
@@ -4463,6 +4469,11 @@ export default function ChatPage({
                 <span className="text-xs text-slate-500 tabular-nums min-w-[3ch] text-center">
                   {searchLoading ? "…" : searchResults.length > 0 ? `${searchIdx + 1}/${searchTotal}` : "0"}
                 </span>
+                {!searchLoading && searchResults[searchIdx]?.content && (
+                  <span className="hidden max-w-[18rem] truncate text-[0.6875rem] text-slate-400 md:inline">
+                    {buildSearchSnippet(searchResults[searchIdx]?.content, searchQuery, 26)}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setSearchIdx((prev) => (prev - 1 + searchResults.length) % searchResults.length)}
@@ -4612,7 +4623,6 @@ export default function ChatPage({
                       isMine={false}
                       chatId={conversationId}
                       channelId={channelId}
-                      textScale={textScale}
                       showAvatar
                       onMessageUpdated={handleCommentsPostUpdated}
                       onReactionUpdated={handleChannelPostReactionUpdated}
@@ -4641,7 +4651,6 @@ export default function ChatPage({
                           message={msg}
                           isMine={isMine}
                           chatId={conversationId}
-                          textScale={textScale}
                           showAvatar={layout.showAvatar}
                           isLastInGroup={layout.isLastInGroup}
                           showSenderName={layout.isFirstInGroup}
@@ -4798,7 +4807,8 @@ export default function ChatPage({
                             setVirtualMeasureTick((v) => v + 1);
                           }
                         }}
-                        className={`bubbles-group ${layout.rowGapClass} transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
+                        className={`bubbles-group transition-all duration-300${isNewMessage ? " message-enter" : ""}`}
+                        style={{ marginTop: `${layout.rowGapPx}px` }}
                       >
                         {layout.showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         {showUnreadLine && i === firstUnreadIndex && (
@@ -4843,7 +4853,6 @@ export default function ChatPage({
                           showSenderName={layout.isFirstInGroup && shouldShowSenderNames}
                           chatId={conversationId!}
                           channelId={channelId ?? undefined}
-                          textScale={textScale}
                           onMessageUpdated={handleMessageUpdated}
                           onMessageDeleted={handleMessageDeleted}
                           onUpdateMessageContent={handleUpdateMessageContent}
@@ -7373,7 +7382,6 @@ type MessageBubbleProps = {
   chatId: string;
   /** When set, use channel posts API for update/delete (channel mode) */
   channelId?: string;
-  textScale: number;
   /** Show avatar (false — placeholder for message grouping) */
   showAvatar?: boolean;
   /** Last message in a group (tail pointing toward the avatar) */
@@ -7439,7 +7447,6 @@ const MessageBubble = memo(function MessageBubble({
   message,
   isMine,
   chatId,
-  textScale,
   showAvatar = true,
   isLastInGroup = false,
   showSenderName = false,
@@ -8000,7 +8007,7 @@ const MessageBubble = memo(function MessageBubble({
           onMouseLeave={handleMouseLeave}
         >
         {isEmojiOnly && !editing ? (
-          <div className="inline-flex flex-col gap-0.5 max-w-full min-w-0" style={{ fontSize: `${MESSAGE_EMOJI_BASE_REM * textScale}rem` }}>
+          <div className="inline-flex flex-col gap-0.5 max-w-full min-w-0" style={{ fontSize: `${MESSAGE_EMOJI_BASE_REM}rem` }}>
             {showSenderName ? (
               <div className="mb-0.5 w-full min-w-0">
                 <button
@@ -8024,7 +8031,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
         <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${isLastInGroup ? "relative overflow-visible" : ""}`} style={optimalBubbleWidth != null && !hasCommentsFooter ? { maxWidth: optimalBubbleWidth } : undefined}>
-        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${message.edited_at && !hasCommentsFooter ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? `overflow-hidden ${bubbleSurfaceClass}` : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-2xl px-3 py-1.5 text-slate-800 ${bubbleSurfaceClass}`} ${isLastInGroup ? "rounded-bl-[4px]" : ""}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM * textScale}rem` }}>
+        <div className={`${hasCommentsFooter ? "w-full min-w-0" : "inline-block max-w-full"} ${message.edited_at && !hasCommentsFooter ? "min-w-fit" : "min-w-0"} ${isImageBubble || isSticker ? `rounded-2xl p-0 ${hasCommentsFooter ? `overflow-hidden ${bubbleSurfaceClass}` : "overflow-visible"}` : isShortText ? "overflow-visible" : "overflow-hidden"} ${isImageBubble || isSticker ? "rounded-2xl p-0" : `rounded-xl px-3 py-2 text-slate-800 ${bubbleSurfaceClass}`}`} style={{ fontSize: `${MESSAGE_TEXT_BASE_REM}rem` }}>
           {/* Имя отправителя — внутри пузырька, тот же размер что и текст сообщения */}
           {showSenderName ? (
             <div className={`mb-0.5 w-full min-w-0 ${isImageBubble || isSticker ? "px-3 pt-2 pb-1" : ""}`}>
@@ -8457,12 +8464,6 @@ const MessageBubble = memo(function MessageBubble({
             </button>
           )}
         </div>
-        {isLastInGroup && !isSticker && !isImageBubble && (
-          <div
-            className={`absolute w-0 h-0 border-[6px] border-transparent bottom-[10px] left-0 -ml-px ${isMine ? "border-r-blue-100" : "border-r-white"}`}
-            aria-hidden
-          />
-        )}
         </div>
         )}
         {/* Reaction picker — left of bubbleColumn (for isMine), right (for !isMine) */}
