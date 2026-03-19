@@ -7682,6 +7682,9 @@ const MessageBubble = memo(function MessageBubble({
     : (isAudio ? t("common.voice") : t("common.fileMsg"));
   const bubbleSurfaceClass = isMine ? "chat-bubble-surface chat-bubble-surface--mine" : "chat-bubble-surface chat-bubble-surface--other";
   const commentsFooterSurfaceClass = isMine ? "chat-bubble-footer chat-bubble-footer--mine" : "chat-bubble-footer chat-bubble-footer--other";
+  const commentsFooterLayoutClass = isImageBubble || isSticker
+    ? "mt-0 w-full"
+    : "-mx-3 -mb-1.5 mt-2 w-[calc(100%+1.5rem)]";
 
   const reactionCount = reactionEntries.length;
   const allowReactionWrap = reactionCount >= 5;
@@ -8346,10 +8349,10 @@ const MessageBubble = memo(function MessageBubble({
             <button
               type="button"
               onClick={onOpenComments}
-              className={`group block w-full min-w-0 cursor-pointer text-left box-border ${isLastInGroup ? "!rounded-bl-[4px]" : ""} ${
+              className={`group block min-w-0 cursor-pointer text-left box-border ${commentsFooterLayoutClass} ${isLastInGroup ? "!rounded-bl-[4px]" : ""} ${
                 isImageBubble || isSticker
                   ? `mt-0 border-t px-3 py-2 rounded-b-2xl transition-colors ${commentsFooterSurfaceClass}`
-                  : `mt-2 border-t px-3 py-2 rounded-b-2xl transition-colors ${commentsFooterSurfaceClass}`
+                  : `border-t px-3 py-2 rounded-b-2xl transition-colors ${commentsFooterSurfaceClass}`
               }`}
               title={t("channelComments.openDiscussion")}
             >
