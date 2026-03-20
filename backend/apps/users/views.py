@@ -251,16 +251,10 @@ class VerifyCodeView(APIView):
                     msg = e.detail[0] if isinstance(e.detail, list) else e.detail
                     return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create subscription + award referral rewards + Favorites chat on first registration
+        # Create Favorites chat on first registration
         if created:
-            from apps.payments.services import create_subscription_for_user, award_referral_subscription
             from apps.chats.services import create_favorites_chat
             from .models import record_analytics_event
-            # Тестовый бесплатный аккаунт: +70000000002 без подписки (ограниченный функционал)
-            if phone != "+70000000002":
-                create_subscription_for_user(user, is_referral=bool(referrer))
-            if referrer:
-                award_referral_subscription(inviter=referrer, invitee=user)
             create_favorites_chat(user)
             record_analytics_event(
                 user, "registration",
@@ -281,6 +275,12 @@ class VerifyCodeView(APIView):
                 notify_new_login(user, session)
             except Exception:
                 pass  # Don't block login if notification fails
+
+        try:
+            from apps.payments.services import grant_referral_rewards_on_login
+            grant_referral_rewards_on_login(user)
+        except Exception:
+            pass
 
         response = Response({"access": access, "refresh": refresh, "user": UserSerializer(user).data, "created": created})
         if client == "web":

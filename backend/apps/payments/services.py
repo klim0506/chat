@@ -14,6 +14,17 @@ from .constants import (
 )
 
 
+def _get_or_create_subscription_record(user) -> UserSubscription:
+    sub, _ = UserSubscription.objects.get_or_create(
+        user=user,
+        defaults={
+            "price_kopecks": SUBSCRIPTION_PLANS[1]["per_month_kopecks"],
+            "status": UserSubscription.Status.CANCELLED,
+        },
+    )
+    return sub
+
+
 def create_subscription_for_user(user, *, is_referral: bool = False) -> UserSubscription:
     """
     Creates a subscription for the user upon registration.
@@ -49,43 +60,46 @@ def extend_subscription(sub: UserSubscription, months: int) -> None:
 
 
 @transaction.atomic
-def award_referral_subscription(inviter, invitee) -> bool:
-    """
-    On referral registration: invitee gets extended trial; inviter may get
-    subscription months when hitting milestones (10→1 mo, 40→6 mo, 80→1 yr).
-    """
-    if not inviter or not invitee or inviter.pk == invitee.pk:
+def grant_referral_rewards_on_login(user) -> bool:
+    """Grant pending referral milestone rewards the next time the inviter logs in."""
+    if not user or not user.pk:
         return False
 
-    # Lock both users in stable order
-    user_ids = sorted([inviter.pk, invitee.pk], key=str)
-    users = {
-        u.pk: u
-        for u in inviter.__class__.objects.select_for_update().filter(pk__in=user_ids)
-    }
-    locked_inviter = users.get(inviter.pk)
-    locked_invitee = users.get(invitee.pk)
-    if not locked_inviter or not locked_invitee:
+    locked_user = (
+        user.__class__.objects.select_for_update()
+        .filter(pk=user.pk)
+        .first()
+    )
+    if not locked_user:
         return False
 
-    invited_count = locked_inviter.referrals.count()
+    invited_count = locked_user.referrals.count()
+    granted_any = False
 
     for tier, months in sorted(REFERRAL_MILESTONES.items()):
         if invited_count >= tier and not ReferralReward.objects.filter(
-            user=locked_inviter, tier=tier
+            user=locked_user, tier=tier
         ).exists():
             ReferralReward.objects.create(
-                user=locked_inviter,
+                user=locked_user,
                 tier=tier,
                 months_granted=months,
             )
-            sub, _ = UserSubscription.objects.get_or_create(
-                user=locked_inviter,
-                defaults={
-                    "price_kopecks": SUBSCRIPTION_PLANS[1]["per_month_kopecks"],
-                    "status": UserSubscription.Status.TRIAL,
-                },
-            )
+            sub = _get_or_create_subscription_record(locked_user)
             extend_subscription(sub, months)
+            granted_any = True
 
-    return True
+    return granted_any
+
+
+@transaction.atomic
+def award_referral_subscription(inviter, invitee=None) -> bool:
+    """
+    Backward-compatible wrapper used by tests and scripts.
+    Rewards are now granted on the inviter's next login, not on invitee registration.
+    """
+    if not inviter or not inviter.pk:
+        return False
+    if invitee and inviter.pk == invitee.pk:
+        return False
+    return grant_referral_rewards_on_login(inviter)

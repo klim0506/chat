@@ -406,15 +406,19 @@ function ReferralProgressCard({
 
 function SubscriptionPlansBlock({
   plans,
+  introOffer,
   subLoading,
   onSubscribe,
+  onIntroOffer,
   paymentError,
   t,
   lang,
 }: {
   plans: SubscriptionPlan[];
+  introOffer?: SubscriptionStatus["intro_offer"] | null;
   subLoading: boolean;
   onSubscribe: (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) => void;
+  onIntroOffer: () => void;
   paymentError?: string;
   t: ReturnType<typeof useTranslation>["t"];
   lang: AppLanguage;
@@ -448,6 +452,33 @@ function SubscriptionPlansBlock({
 
   return (
     <div className="space-y-4">
+      {mode === "buy" && introOffer?.available && (
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-emerald-900">{t("sub.introOfferTitle")}</p>
+              <p className="mt-1 text-sm text-emerald-800">
+                {t("sub.introOfferDesc")
+                  .replace("%price%", String(introOffer.price_rub))
+                  .replace("%days%", String(introOffer.duration_days))
+                  .replace("%renew%", String(introOffer.renew_price_rub))}
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">
+              {lang === "ru" ? "Старт" : "Start"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onIntroOffer}
+            disabled={subLoading}
+            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {subLoading ? t("settings.goToPayment") : t("sub.introOfferCta")}
+          </button>
+        </div>
+      )}
+
       <p className="text-sm font-medium text-slate-700">{t("sub.buyOrGift")}</p>
       <div className="flex gap-2">
         <button
@@ -1500,15 +1531,18 @@ export default function SettingsPage({
   };
 
   const [paymentError, setPaymentError] = useState("");
-  const handleSubscribe = async (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) => {
+  const startSubscriptionCheckout = async (params: {
+    plan_months?: 1 | 6 | 12 | 24;
+    recipient_user_id?: string;
+    offer_code?: string;
+  }) => {
     setPaymentError("");
     setSubLoading(true);
     try {
       const returnUrl = window.location.origin + window.location.pathname + "?paid=1";
       const { data } = await paymentsApi.subscribe({
         return_url: returnUrl,
-        plan_months: planMonths,
-        ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
+        ...params,
       });
       if (data.confirmation_url) {
         window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
@@ -1525,6 +1559,15 @@ export default function SettingsPage({
       setSubLoading(false);
     }
   };
+  const handleSubscribe = async (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) =>
+    startSubscriptionCheckout({
+      plan_months: planMonths,
+      ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
+    });
+  const handleIntroOffer = async () =>
+    startSubscriptionCheckout({
+      offer_code: "intro_week",
+    });
 
   const handleCopyReferral = () => {
     const code = user?.referral_code;
@@ -2379,19 +2422,16 @@ export default function SettingsPage({
                           </span>
                         </div>
                       )}
-                      {sub.is_referral_trial && (
-                        <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">
-                          {t("settings.referralTrial")}
-                        </p>
-                      )}
                     </>
                   )}
 
                   {/* Buy or gift */}
                   <SubscriptionPlansBlock
                     plans={plans}
+                    introOffer={sub?.intro_offer ?? null}
                     subLoading={subLoading}
                     onSubscribe={handleSubscribe}
+                    onIntroOffer={handleIntroOffer}
                     paymentError={paymentError}
                     t={t}
                     lang={lang}

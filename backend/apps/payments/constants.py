@@ -19,3 +19,8 @@ REFERRAL_MILESTONES = {
     40: 6,   # 40 invited -> 6 months
     80: 12,  # 80 invited -> 1 year
 }
+
+INTRO_OFFER_CODE = "intro_week"
+INTRO_OFFER_DAYS = 7
+INTRO_OFFER_PRICE_KOPECKS = 1100
+INTRO_OFFER_RENEW_PRICE_KOPECKS = SUBSCRIPTION_PLANS[1]["per_month_kopecks"]

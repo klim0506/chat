@@ -46,7 +46,7 @@ export default function AuthPage() {
   const [step, setStep] = useState<"phone" | "code" | "username">("phone");
   const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "pingy" | "">("");
   const [isNewPhone, setIsNewPhone] = useState<boolean | null>(null); // null = not yet checked
-  const [deliveryInfo, setDeliveryInfo] = useState("");
+  const [, setDeliveryInfo] = useState("");
   const [telegramRequesting, setTelegramRequesting] = useState(false);
   const [pairingMode, setPairingMode] = useState<"code" | null>(null); // "code" = show manual code input
   const [pairingCode, setPairingCode] = useState("");
@@ -110,6 +110,18 @@ export default function AuthPage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const codeInputRef = useRef<HTMLInputElement>(null);
+  const { ref: codeRegisterRef, ...codeFieldProps } = codeForm.register("code", {
+    onChange: (e) => {
+      const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
+      if (digitsOnly !== e.target.value) {
+        e.target.value = digitsOnly;
+      }
+      codeForm.setValue("code", digitsOnly, {
+        shouldDirty: true,
+        shouldValidate: digitsOnly.length === 6,
+      });
+    },
+  });
   const pairingInputRef = useRef<HTMLInputElement>(null);
 
   // Live username availability check
@@ -250,16 +262,6 @@ export default function AuthPage() {
     }
   };
 
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
-    setCropFile(file);
-    // Reset input so the same file can be re-selected
-    if (avatarInputRef.current) avatarInputRef.current.value = "";
-  };
-
   const onCropConfirm = (blob: Blob) => {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
     const croppedFile = new File([blob], "avatar.png", { type: "image/png" });
@@ -362,7 +364,6 @@ export default function AuthPage() {
         ],
       };
   const primaryButtonClass = "ui-accent-strong w-full rounded-2xl px-4 py-3 text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50";
-  const secondaryButtonClass = "ui-picker-tile w-full rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 transition-colors";
   const inputClass = "ui-field-shell w-full rounded-2xl px-4 py-3 text-sm text-slate-800 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100";
   const authUxCopy = language === "ru"
     ? {
@@ -717,7 +718,10 @@ export default function AuthPage() {
                         </span>
                       </div>
                       <input
-                        ref={codeInputRef}
+                        ref={(node) => {
+                          codeInputRef.current = node;
+                          codeRegisterRef(node);
+                        }}
                         type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
@@ -725,18 +729,7 @@ export default function AuthPage() {
                         placeholder="123456"
                         autoFocus
                         className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-base font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 sm:text-lg"
-                        {...codeForm.register("code", {
-                          onChange: (e) => {
-                            const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
-                            if (digitsOnly !== e.target.value) {
-                              e.target.value = digitsOnly;
-                            }
-                            codeForm.setValue("code", digitsOnly, {
-                              shouldDirty: true,
-                              shouldValidate: digitsOnly.length === 6,
-                            });
-                          },
-                        })}
+                        {...codeFieldProps}
                       />
                     </div>
                   </div>

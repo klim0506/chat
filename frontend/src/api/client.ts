@@ -185,6 +185,14 @@ export interface ReferralProgress {
   milestones: Record<string, number>;
 }
 
+export interface IntroOffer {
+  available: boolean;
+  offer_code: string;
+  price_rub: number;
+  duration_days: number;
+  renew_price_rub: number;
+}
+
 export interface SubscriptionStatus {
   has_subscription: boolean;
   status: "trial" | "active" | "past_due" | "cancelled" | null;
@@ -194,6 +202,8 @@ export interface SubscriptionStatus {
   price_rub: number;
   plans?: SubscriptionPlan[];
   referral_progress?: ReferralProgress;
+  intro_offer?: IntroOffer;
+  intro_offer_available?: boolean;
 }
 
 export interface StarTransaction {
@@ -1077,10 +1087,11 @@ export const paymentsApi = {
   unlinkPaymentMethod: (id: string) => api.delete(`/payments/payment-methods/${encodeURIComponent(id)}/unlink/`),
   subscribe: (params: {
     return_url?: string;
-    plan_months: 1 | 6 | 12 | 24;
+    plan_months?: 1 | 6 | 12 | 24;
     recipient_user_id?: string;
+    offer_code?: string;
   }) =>
-    api.post<{ payment_id: string; confirmation_url: string; amount: number; plan_months: number }>(
+    api.post<{ payment_id: string; confirmation_url: string; amount: number; plan_months?: number; offer_code?: string | null }>(
       "/payments/subscribe/",
       params
     ),

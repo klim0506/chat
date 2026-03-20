@@ -67,7 +67,7 @@ export default function WikiChatsPage() {
 
       <section>
         <h2 className="text-xl font-bold text-slate-900 mt-10 mb-3">Подписка</h2>
-        <p className="text-slate-700">Пользоваться чатами можно при активной подписке. При регистрации — free-аккаунт навсегда. Premium — по тарифам платформы (YooKassa).</p>
+        <p className="text-slate-700">Пользоваться чатами можно на free-плане. Premium нужен только для расширенных возможностей и оформляется отдельно через YooKassa.</p>
       </section>
 
       <p className="mt-10 text-slate-500 text-sm">

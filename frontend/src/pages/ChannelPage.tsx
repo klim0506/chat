@@ -2,10 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { channelsApi, channelPostsApi, filesApi } from "../api/client";
-import type { Channel, ChannelPost } from "../api/client";
+import { channelsApi, channelPostsApi, filesApi, paymentsApi } from "../api/client";
+import type { Channel, ChannelPost, SubscriptionStatus } from "../api/client";
 import { userDisplayName } from "../api/client";
 import { useTranslation } from "../lib/i18n";
+import { usePremiumModalStore } from "../store/premiumModal";
 import { ProgressiveImage } from "../components/ProgressiveImage";
 import { MediaImage } from "../components/MediaImage";
 import SendIcon from "../components/icons/SendIcon";
@@ -112,8 +113,19 @@ interface ChannelPageProps {
 export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
   const { channelId } = useParams<{ channelId: string }>();
   const { t } = useTranslation();
+  const openPremiumModal = usePremiumModalStore((s) => s.openModal);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [posts, setPosts] = useState<ChannelPost[]>([]);
+  const [subscriptionState, setSubscriptionState] = useState<Pick<SubscriptionStatus, "is_valid" | "has_subscription"> | null>(() => {
+    try {
+      const raw = localStorage.getItem("subscription_cache_v1");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Pick<SubscriptionStatus, "is_valid" | "has_subscription"> | null;
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [content, setContent] = useState("");
@@ -141,6 +153,22 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [posts]);
 
+  useEffect(() => {
+    paymentsApi
+      .getSubscription()
+      .then((res) => {
+        const next = {
+          is_valid: res.data.is_valid,
+          has_subscription: res.data.has_subscription,
+        };
+        setSubscriptionState(next);
+        localStorage.setItem("subscription_cache_v1", JSON.stringify(next));
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
+
   const loadPosts = () => {
     if (!channelId) return;
     channelPostsApi.list(channelId).then((res) => setPosts(res.data));
@@ -158,6 +186,11 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
 
   const handlePublish = async () => {
     if (!channelId || (!content.trim() && imageFiles.length === 0)) return;
+    if (!(channel?.my_role === "owner" || channel?.my_role === "admin")) return;
+    if (subscriptionState?.is_valid !== true) {
+      openPremiumModal();
+      return;
+    }
     setPublishing(true);
     setPublishError("");
     try {
@@ -202,7 +235,8 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
     );
   }
 
-  const canPost = channel.my_role === "owner" || channel.my_role === "admin";
+  const hasChannelAuthorRole = channel.my_role === "owner" || channel.my_role === "admin";
+  const canPost = hasChannelAuthorRole && subscriptionState?.is_valid === true;
 
   const BackButton = embed && onBack ? (
     <button
@@ -303,48 +337,61 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
       </main>
 
       {/* Input — только для автора */}
-      {canPost ? (
+      {hasChannelAuthorRole ? (
         <div className="shrink-0 border-t border-slate-200 bg-white p-3">
-          <div className="flex flex-col gap-2">
-            {imageFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {imageFiles.map((file, i) => (
-                  <PostImagePreview key={i} file={file} onRemove={() => removeImage(i)} />
-                ))}
+          {canPost ? (
+            <div className="flex flex-col gap-2">
+              {imageFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {imageFiles.map((file, i) => (
+                    <PostImagePreview key={i} file={file} onRemove={() => removeImage(i)} />
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 items-end">
+                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0"
+                  title={t("channelPage.addPhotos")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                    <circle cx="9" cy="9" r="2" />
+                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                  </svg>
+                </button>
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder={t("channelPage.contentPlaceholder")}
+                  className="flex-1 min-h-[44px] max-h-32 resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                  rows={1}
+                />
+                <button
+                  type="button"
+                  onClick={handlePublish}
+                  disabled={publishing || (!content.trim() && imageFiles.length === 0)}
+                  className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 shrink-0"
+                >
+                  <SendIcon size={20} />
+                </button>
               </div>
-            )}
-            <div className="flex gap-2 items-end">
-              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
+              {publishError && <p className="text-red-600 text-sm">{publishError}</p>}
+            </div>
+          ) : (
+            <div className="text-center">
+              <p className="text-sm text-slate-500">{t("channelPage.premiumRequiredToPost")}</p>
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0"
-                title={t("channelPage.addPhotos")}
+                onClick={openPremiumModal}
+                className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                  <circle cx="9" cy="9" r="2" />
-                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                </svg>
-              </button>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder={t("channelPage.contentPlaceholder")}
-                className="flex-1 min-h-[44px] max-h-32 resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-                rows={1}
-              />
-              <button
-                type="button"
-                onClick={handlePublish}
-                disabled={publishing || (!content.trim() && imageFiles.length === 0)}
-                className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 shrink-0"
-              >
-                <SendIcon size={20} />
+                {t("premiumModal.cta")}
               </button>
             </div>
-            {publishError && <p className="text-red-600 text-sm">{publishError}</p>}
-          </div>
+          )}
         </div>
       ) : (
         <div className="shrink-0 border-t border-slate-200 bg-white p-3">

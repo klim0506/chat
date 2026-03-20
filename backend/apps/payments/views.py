@@ -15,7 +15,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 
 from .models import UserSubscription, PaymentLog
-from .constants import SUBSCRIPTION_PLANS, REFERRAL_MILESTONES
+from .constants import (
+    SUBSCRIPTION_PLANS,
+    REFERRAL_MILESTONES,
+    INTRO_OFFER_CODE,
+    INTRO_OFFER_DAYS,
+    INTRO_OFFER_PRICE_KOPECKS,
+    INTRO_OFFER_RENEW_PRICE_KOPECKS,
+)
 from .plan_limits import get_video_circles_remaining_today
 from .yookassa_client import create_payment, get_payment, get_payment_method
 from .services import extend_subscription
@@ -85,6 +92,18 @@ def _get_referral_progress(user):
     }
 
 
+def _get_intro_offer_payload(sub: UserSubscription | None):
+    is_valid = sub.is_valid if sub else False
+    intro_used = bool(sub and sub.intro_offer_used_at)
+    return {
+        "available": not intro_used and not is_valid,
+        "offer_code": INTRO_OFFER_CODE,
+        "price_rub": INTRO_OFFER_PRICE_KOPECKS / 100,
+        "duration_days": INTRO_OFFER_DAYS,
+        "renew_price_rub": INTRO_OFFER_RENEW_PRICE_KOPECKS / 100,
+    }
+
+
 class SubscriptionStatusView(APIView):
     """GET — current subscription status + referral progress + plans."""
 
@@ -92,6 +111,7 @@ class SubscriptionStatusView(APIView):
 
     def get(self, request):
         sub = UserSubscription.objects.filter(user=request.user).first()
+        intro_offer = _get_intro_offer_payload(sub)
         plans = [
             {
                 "months": m,
@@ -106,6 +126,8 @@ class SubscriptionStatusView(APIView):
         base = {
             "plans": plans,
             "referral_progress": _get_referral_progress(request.user),
+            "intro_offer": intro_offer,
+            "intro_offer_available": intro_offer["available"],
         }
         if not sub:
             return Response({
@@ -215,17 +237,30 @@ class CreateSubscriptionPaymentView(APIView):
 
     def post(self, request):
         plan_months = request.data.get("plan_months")
+        offer_code = (request.data.get("offer_code") or "").strip()
         recipient_user_id = request.data.get("recipient_user_id")  # for gift
-        if plan_months not in SUBSCRIPTION_PLANS:
+        is_intro_offer = offer_code == INTRO_OFFER_CODE
+        if not is_intro_offer and plan_months not in SUBSCRIPTION_PLANS:
             return Response(
                 {"detail": "Укажите plan_months: 1, 6, 12 или 24."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        plan_info = SUBSCRIPTION_PLANS[plan_months]
-        amount_kopecks = plan_info["total_kopecks"]
-        amount_rubles = amount_kopecks / 100.0
+        if is_intro_offer:
+            amount_kopecks = INTRO_OFFER_PRICE_KOPECKS
+            amount_rubles = amount_kopecks / 100.0
+            renewal_price_kopecks = INTRO_OFFER_RENEW_PRICE_KOPECKS
+        else:
+            plan_info = SUBSCRIPTION_PLANS[plan_months]
+            amount_kopecks = plan_info["total_kopecks"]
+            amount_rubles = amount_kopecks / 100.0
+            renewal_price_kopecks = plan_info["per_month_kopecks"]
 
         is_gift = bool(recipient_user_id)
+        if is_intro_offer and is_gift:
+            return Response(
+                {"detail": "Пробную неделю нельзя подарить."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if is_gift:
             from apps.users.models import User
             recipient = User.objects.filter(id=recipient_user_id, is_active=True).first()
@@ -236,7 +271,7 @@ class CreateSubscriptionPaymentView(APIView):
             sub, _ = UserSubscription.objects.get_or_create(
                 user=recipient,
                 defaults={
-                    "price_kopecks": plan_info["per_month_kopecks"],
+                    "price_kopecks": renewal_price_kopecks,
                     "status": UserSubscription.Status.CANCELLED,
                 },
             )
@@ -244,10 +279,15 @@ class CreateSubscriptionPaymentView(APIView):
             sub, created = UserSubscription.objects.get_or_create(
                 user=request.user,
                 defaults={
-                    "price_kopecks": plan_info["per_month_kopecks"],
+                    "price_kopecks": renewal_price_kopecks,
                     "status": UserSubscription.Status.CANCELLED,
                 },
             )
+            if is_intro_offer and sub.intro_offer_used_at:
+                return Response(
+                    {"detail": "Пробная неделя уже была использована."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if sub.is_valid and sub.yookassa_payment_method_id and not created:
                 return Response(
                     {"detail": "Подписка уже активна."},
@@ -263,13 +303,18 @@ class CreateSubscriptionPaymentView(APIView):
             )
 
         desc = f"Подписка Premium — {plan_months} мес." if plan_months == 1 else f"Подписка Premium — {plan_months} мес."
-        if is_gift:
+        if is_intro_offer:
+            desc = "Пробная неделя Pingy Premium — 7 дней за 11 ₽"
+        elif is_gift:
             desc = f"Подарок подписки Premium — {plan_months} мес."
 
         metadata = {
             "subscription_id": str(sub.id),
-            "plan_months": plan_months,
         }
+        if is_intro_offer:
+            metadata["offer_code"] = INTRO_OFFER_CODE
+        else:
+            metadata["plan_months"] = plan_months
         if is_gift:
             metadata["recipient_user_id"] = str(recipient_user_id)
 
@@ -280,7 +325,9 @@ class CreateSubscriptionPaymentView(APIView):
         if not receipt_email or "@" not in str(receipt_email):
             receipt_email = "payments@pingychat.com"
         receipt_desc = f"Подписка Pingy Premium на {plan_months} мес."
-        if is_gift:
+        if is_intro_offer:
+            receipt_desc = "Пробная неделя Pingy Premium: 7 дней за 11 ₽, затем 299 ₽/мес."
+        elif is_gift:
             receipt_desc = f"Подарок подписки Pingy Premium на {plan_months} мес."
         receipt = {
             "customer": {"email": str(receipt_email).strip()},
@@ -322,7 +369,12 @@ class CreateSubscriptionPaymentView(APIView):
             yookassa_payment_id=pid,
             amount_kopecks=amount_kopecks,
             status=PaymentLog.Status.PENDING,
-            raw_response={"id": pid, "plan_months": plan_months, "recipient_user_id": recipient_user_id},
+            raw_response={
+                "id": pid,
+                "plan_months": plan_months,
+                "offer_code": INTRO_OFFER_CODE if is_intro_offer else None,
+                "recipient_user_id": recipient_user_id,
+            },
         )
         confirmation = getattr(payment, "confirmation", None) or (
             payment.get("confirmation") if isinstance(payment, dict) else None
@@ -341,6 +393,7 @@ class CreateSubscriptionPaymentView(APIView):
             "confirmation_url": url,
             "amount": amount_rubles,
             "plan_months": plan_months,
+            "offer_code": INTRO_OFFER_CODE if is_intro_offer else None,
         })
 
 
@@ -401,12 +454,17 @@ class YooKassaWebhookView(APIView):
         if paylog.status == PaymentLog.Status.SUCCEEDED:
             return Response(status=status.HTTP_200_OK)
 
+        offer_code = metadata.get("offer_code") or paylog.raw_response.get("offer_code")
         months = plan_months
         if months is None:
             months = paylog.raw_response.get("plan_months", 1)
-        if months not in SUBSCRIPTION_PLANS:
+        if offer_code != INTRO_OFFER_CODE and months not in SUBSCRIPTION_PLANS:
             months = 1
-        expected_kopecks = SUBSCRIPTION_PLANS[months]["total_kopecks"]
+        expected_kopecks = (
+            INTRO_OFFER_PRICE_KOPECKS
+            if offer_code == INTRO_OFFER_CODE
+            else SUBSCRIPTION_PLANS[months]["total_kopecks"]
+        )
 
         amount_obj = getattr(payment, "amount", None) or (
             payment.get("amount") if isinstance(payment, dict) else None
@@ -436,11 +494,37 @@ class YooKassaWebhookView(APIView):
             if payment_method:
                 subscription.yookassa_payment_method_id = payment_method
 
-        subscription.status = UserSubscription.Status.ACTIVE
-        extend_subscription(subscription, months)
+        if offer_code == INTRO_OFFER_CODE:
+            now = timezone.now()
+            subscription.status = UserSubscription.Status.TRIAL
+            subscription.price_kopecks = INTRO_OFFER_RENEW_PRICE_KOPECKS
+            subscription.intro_offer_used_at = subscription.intro_offer_used_at or now
+            subscription.current_period_start = now
+            subscription.current_period_end = now + timedelta(days=INTRO_OFFER_DAYS)
+            subscription.save(
+                update_fields=[
+                    "status",
+                    "price_kopecks",
+                    "intro_offer_used_at",
+                    "current_period_start",
+                    "current_period_end",
+                    "yookassa_payment_method_id",
+                    "updated_at",
+                ]
+            )
+        else:
+            subscription.status = UserSubscription.Status.ACTIVE
+            extend_subscription(subscription, months)
 
         PaymentLog.objects.filter(yookassa_payment_id=payment_id).update(
             status=PaymentLog.Status.SUCCEEDED,
-            raw_response={"id": payment_id, "status": payment_status, "amount": value_raw, "currency": currency},
+            raw_response={
+                "id": payment_id,
+                "status": payment_status,
+                "amount": value_raw,
+                "currency": currency,
+                "offer_code": offer_code,
+                "plan_months": months,
+            },
         )
         return Response(status=status.HTTP_200_OK)

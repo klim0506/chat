@@ -147,6 +147,7 @@ export default function PaymentMethodsModal({ isOpen, onClose, onAddCard }: Paym
                 </div>
               )}
               <p className="text-xs text-slate-500 mt-4">{t("settings.addCardHint")}</p>
+              <p className="text-xs text-slate-500 mt-2">{t("settings.unlinkPaymentMethodHint")}</p>
               <button
                 type="button"
                 onClick={handleAddCard}

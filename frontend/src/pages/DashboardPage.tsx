@@ -329,7 +329,6 @@ export default function DashboardPage() {
             <h2 className="text-lg font-semibold text-amber-900 mb-2">{t("dashboard.needsSub")}</h2>
             <p className="text-sm text-amber-800 mb-4">
               <span dangerouslySetInnerHTML={{ __html: t("dashboard.needsSubDesc") }} />
-              {sub?.is_referral_trial && t("dashboard.freeTrialMonth")}
             </p>
             <Link
               to="/settings"

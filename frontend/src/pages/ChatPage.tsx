@@ -931,6 +931,7 @@ export default function ChatPage({
 
   const [members, setMembers] = useState<ChatMember[]>([]);
   const messages = useMessagesStore((s) => s.byChat[conversationId ?? ""] ?? []);
+  const openPremiumModal = usePremiumModalStore((s) => s.openModal);
   const storeUpsertMessage = useMessagesStore((s) => s.upsertMessage);
   const storeLoadMessages = useMessagesStore((s) => s.loadMessages);
   const storeLoadOlderMessages = useMessagesStore((s) => s.loadOlderMessages);
@@ -977,6 +978,16 @@ export default function ChatPage({
   const commentsEndRef = useRef<HTMLDivElement>(null);
   const isCommentsView = !!channelId && !!openCommentsPost;
   const visiblePostComments = useMemo(() => postComments.filter((msg) => !msg.is_deleted), [postComments]);
+  const [subscriptionState, setSubscriptionState] = useState<{ is_valid?: boolean; has_subscription?: boolean } | null>(() => {
+    try {
+      const raw = localStorage.getItem("subscription_cache_v1");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { is_valid?: boolean; has_subscription?: boolean } | null;
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
     if (chatId && typeof localStorage !== "undefined") {
@@ -1017,10 +1028,29 @@ export default function ChatPage({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [openCommentsPost]);
 
-  const canPostToChannel = useMemo(
+  useEffect(() => {
+    paymentsApi
+      .getSubscription()
+      .then((res) => {
+        const next = {
+          is_valid: res.data.is_valid,
+          has_subscription: res.data.has_subscription,
+        };
+        setSubscriptionState(next);
+        localStorage.setItem("subscription_cache_v1", JSON.stringify(next));
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
+
+  const hasChannelAuthorRole = useMemo(
     () => !!(channelRaw && (channelRaw.owner?.id === myUserId || channelRaw.my_role === "admin")),
     [channelRaw, myUserId],
   );
+  const hasPremiumAccess = subscriptionState?.is_valid === true;
+  const canPostToChannel = hasChannelAuthorRole && hasPremiumAccess;
+  const canCommentInChannel = !!(channelRaw?.comments_enabled && channelRaw?.my_role && hasPremiumAccess);
   const canPinForAll = useMemo(
     () => !!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"))),
     [chat, members, myUserId],
@@ -1195,6 +1225,10 @@ export default function ChatPage({
   }, [channelId, openCommentsPost]);
   const handleSendComment = useCallback(async () => {
     if (!channelId || !openCommentsPost) return;
+    if (!canCommentInChannel) {
+      openPremiumModal();
+      return;
+    }
     const trimmed = commentInput.trim();
     if (!trimmed) return;
     setCommentSubmitting(true);
@@ -1218,7 +1252,7 @@ export default function ChatPage({
     } finally {
       setCommentSubmitting(false);
     }
-  }, [channelId, commentInput, openCommentsPost, replyToComment, t, updateChannelPostCommentsCount]);
+  }, [canCommentInChannel, channelId, commentInput, openCommentsPost, openPremiumModal, replyToComment, t, updateChannelPostCommentsCount]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   /** Только у одного сообщения может быть открыт пикер реакций; при открытии другого — предыдущий закрывается. */
@@ -5060,6 +5094,7 @@ export default function ChatPage({
               </div>
             )}
             {channelRaw?.comments_enabled ? (
+              canCommentInChannel ? (
               <div className="p-2 sm:p-2.5 flex gap-2 items-end">
                 <textarea
                   value={commentInput}
@@ -5084,6 +5119,18 @@ export default function ChatPage({
                   <SendIcon size={18} />
                 </button>
               </div>
+              ) : (
+                <div className="px-4 py-3 text-center text-sm text-slate-500">
+                  <p>{t("channelComments.premiumRequired")}</p>
+                  <button
+                    type="button"
+                    onClick={openPremiumModal}
+                    className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                  >
+                    {t("premiumModal.cta")}
+                  </button>
+                </div>
+              )
             ) : (
               <div className="px-4 py-3 text-center text-sm text-slate-500">{t("channelComments.disabled")}</div>
             )}
@@ -5129,8 +5176,19 @@ export default function ChatPage({
           <div
             className="chat-composer-surface shrink-0 relative border-t backdrop-blur"
           >
-            {channelId && !canPostToChannel ? (
+            {channelId && !hasChannelAuthorRole ? (
               <div className="px-4 py-3 text-center text-slate-500 text-sm">{t("channelPage.onlyAuthorCanPost")}</div>
+            ) : channelId && !canPostToChannel ? (
+              <div className="px-4 py-3 text-center text-slate-500 text-sm">
+                <p>{t("channelPage.premiumRequiredToPost")}</p>
+                <button
+                  type="button"
+                  onClick={openPremiumModal}
+                  className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                >
+                  {t("premiumModal.cta")}
+                </button>
+              </div>
             ) : (
             <>
             {editingMessageId && (
@@ -5851,10 +5909,17 @@ export default function ChatPage({
                             Изменить фон
                           </button>
                         )}
-                        {channelId && canPostToChannel && (
+                        {channelId && hasChannelAuthorRole && (
                           <button
                             type="button"
-                            onClick={() => { setShowInfoMenu(false); setShowImportTelegramModal(true); }}
+                            onClick={() => {
+                              setShowInfoMenu(false);
+                              if (canPostToChannel) {
+                                setShowImportTelegramModal(true);
+                                return;
+                              }
+                              openPremiumModal();
+                            }}
                             className={btnCls}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>

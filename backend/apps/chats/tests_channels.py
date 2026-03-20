@@ -1,13 +1,17 @@
 """
-Тесты системы каналов: открытый/закрытый канал, посты, комментарии, реакции.
+Tests for channels: join flow, posts, comments, reactions, and premium restrictions.
 """
 from django.test import TestCase
 
-from apps.common.test_helpers import create_user, auth_client, create_file
+from apps.common.test_helpers import auth_client, create_file, create_user
 from apps.chats.models import (
-    Channel, ChannelMember, ChannelPost, ChannelPostComment, ChannelPostReaction,
+    Channel,
+    ChannelMember,
+    ChannelPost,
+    ChannelPostComment,
+    ChannelPostReaction,
 )
-from apps.chats.utils import generate_slug, make_verification_code, verify_invite_code
+from apps.chats.utils import generate_slug, make_verification_code
 from apps.payments.services import create_subscription_for_user
 
 
@@ -40,10 +44,8 @@ def add_channel_subscriber(channel, user, role=ChannelMember.Role.SUBSCRIBER):
 
 
 class ChannelCRUDTest(TestCase):
-    """Создание, чтение, обновление канала."""
-
     def setUp(self):
-        self.user = create_user()
+        self.user = create_user(username="channel_owner")
         create_subscription_for_user(self.user)
         self.client = auth_client(self.user)
 
@@ -59,6 +61,17 @@ class ChannelCRUDTest(TestCase):
         self.assertTrue(res.data["is_public"])
         self.assertEqual(res.data["my_role"], "owner")
         self.assertIn("invite_link", res.data)
+
+    def test_free_user_cannot_create_channel(self):
+        free_user = create_user(phone="+79990009991", username="free_owner")
+        free_client = auth_client(free_user)
+        res = free_client.post(
+            "/api/channels/",
+            {"title": "Free channel", "is_public": True, "username": "free_channel"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
 
     def test_create_channel_username_required(self):
         res = self.client.post(
@@ -98,8 +111,19 @@ class ChannelCRUDTest(TestCase):
         self.assertEqual(ch.title, "New title")
         self.assertFalse(ch.comments_enabled)
 
+    def test_free_owner_cannot_manage_channel(self):
+        free_owner = create_user(phone="+79990009992", username="free_manage_owner")
+        ch = create_channel(free_owner, "Managed")
+        free_client = auth_client(free_owner)
+        res = free_client.patch(
+            f"/api/channels/{ch.id}/",
+            {"title": "Blocked"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
+
     def test_create_channel_reserved_username_rejected(self):
-        """Reserved usernames (e.g. support) cannot be used when creating a channel via API."""
         res = self.client.post(
             "/api/channels/",
             {"title": "Channel", "username": "support"},
@@ -112,13 +136,10 @@ class ChannelCRUDTest(TestCase):
 
 
 class ChannelJoinTest(TestCase):
-    """Вступление в открытый и закрытый канал по ссылке."""
-
     def setUp(self):
-        self.owner = create_user(phone="+79990001111")
+        self.owner = create_user(phone="+79990001111", username="join_owner")
         create_subscription_for_user(self.owner)
-        self.user = create_user(phone="+79990002222")
-        create_subscription_for_user(self.user)
+        self.user = create_user(phone="+79990002222", username="join_user")
         self.owner_client = auth_client(self.owner)
         self.user_client = auth_client(self.user)
 
@@ -168,17 +189,17 @@ class ChannelJoinTest(TestCase):
 
 
 class ChannelPostsTest(TestCase):
-    """Посты: создание, типы контента, редактирование, удаление."""
-
     def setUp(self):
-        self.owner = create_user()
+        self.owner = create_user(username="posts_owner")
         create_subscription_for_user(self.owner)
-        self.sub = create_user(phone="+79990003333")
-        create_subscription_for_user(self.sub)
+        self.sub = create_user(phone="+79990003333", username="posts_sub")
+        self.admin = create_user(phone="+79990003334", username="posts_admin")
         self.channel = create_channel(self.owner, "Posts Channel")
         add_channel_subscriber(self.channel, self.sub)
+        add_channel_subscriber(self.channel, self.admin, role=ChannelMember.Role.ADMIN)
         self.owner_client = auth_client(self.owner)
         self.sub_client = auth_client(self.sub)
+        self.admin_client = auth_client(self.admin)
 
     def test_owner_can_create_post(self):
         res = self.owner_client.post(
@@ -191,6 +212,15 @@ class ChannelPostsTest(TestCase):
         self.assertEqual(res.data["author"]["id"], str(self.owner.id))
         self.assertEqual(res.data["comments_count"], 0)
 
+    def test_free_admin_cannot_create_post(self):
+        res = self.admin_client.post(
+            f"/api/channels/{self.channel.id}/posts/",
+            {"msg_type": "text", "content": "Admin post"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
+
     def test_subscriber_cannot_create_post(self):
         res = self.sub_client.post(
             f"/api/channels/{self.channel.id}/posts/",
@@ -199,7 +229,7 @@ class ChannelPostsTest(TestCase):
         )
         self.assertEqual(res.status_code, 403)
 
-    def test_list_posts(self):
+    def test_list_posts_available_without_premium(self):
         ChannelPost.objects.create(channel=self.channel, author=self.owner, msg_type="text", content="A")
         ChannelPost.objects.create(channel=self.channel, author=self.owner, msg_type="text", content="B")
         res = self.sub_client.get(f"/api/channels/{self.channel.id}/posts/")
@@ -233,6 +263,18 @@ class ChannelPostsTest(TestCase):
         self.assertEqual(post.content, "New")
         self.assertIsNotNone(post.edited_at)
 
+    def test_free_admin_cannot_edit_post(self):
+        post = ChannelPost.objects.create(
+            channel=self.channel, author=self.owner, msg_type="text", content="Old",
+        )
+        res = self.admin_client.patch(
+            f"/api/channels/{self.channel.id}/posts/{post.id}/",
+            {"content": "Blocked"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
+
     def test_delete_post(self):
         post = ChannelPost.objects.create(
             channel=self.channel, author=self.owner, msg_type="text", content="To delete",
@@ -242,25 +284,47 @@ class ChannelPostsTest(TestCase):
         post.refresh_from_db()
         self.assertTrue(post.is_deleted)
 
+    def test_free_owner_cannot_import_telegram_history(self):
+        free_owner = create_user(phone="+79990003335", username="free_import_owner")
+        channel = create_channel(free_owner, "Importable")
+        free_client = auth_client(free_owner)
+        res = free_client.post(
+            f"/api/channels/{channel.id}/import-telegram/",
+            {},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
+
 
 class ChannelCommentsTest(TestCase):
-    """Комментарии к постам."""
-
     def setUp(self):
-        self.owner = create_user()
+        self.owner = create_user(username="comments_owner")
         create_subscription_for_user(self.owner)
-        self.sub = create_user(phone="+79990004444")
-        create_subscription_for_user(self.sub)
+        self.free_sub = create_user(phone="+79990004444", username="free_commenter")
+        self.premium_sub = create_user(phone="+79990004445", username="premium_commenter")
+        create_subscription_for_user(self.premium_sub)
         self.channel = create_channel(self.owner, "Comments Channel")
-        add_channel_subscriber(self.channel, self.sub)
+        add_channel_subscriber(self.channel, self.free_sub)
+        add_channel_subscriber(self.channel, self.premium_sub)
         self.post = ChannelPost.objects.create(
             channel=self.channel, author=self.owner, msg_type="text", content="Post",
         )
         self.owner_client = auth_client(self.owner)
-        self.sub_client = auth_client(self.sub)
+        self.free_sub_client = auth_client(self.free_sub)
+        self.premium_sub_client = auth_client(self.premium_sub)
 
-    def test_subscriber_can_comment(self):
-        res = self.sub_client.post(
+    def test_free_subscriber_cannot_comment(self):
+        res = self.free_sub_client.post(
+            f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/",
+            {"msg_type": "text", "content": "Мой комментарий"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")
+
+    def test_premium_subscriber_can_comment(self):
+        res = self.premium_sub_client.post(
             f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/",
             {"msg_type": "text", "content": "Мой комментарий"},
             format="json",
@@ -271,9 +335,9 @@ class ChannelCommentsTest(TestCase):
 
     def test_comment_reply(self):
         c1 = ChannelPostComment.objects.create(
-            post=self.post, author=self.sub, msg_type="text", content="First",
+            post=self.post, author=self.premium_sub, msg_type="text", content="First",
         )
-        res = self.sub_client.post(
+        res = self.premium_sub_client.post(
             f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/",
             {"msg_type": "text", "content": "Reply", "reply_to_id": str(c1.id)},
             format="json",
@@ -281,11 +345,21 @@ class ChannelCommentsTest(TestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.data["reply_to"]["id"], str(c1.id))
 
+    def test_list_comments_available_without_premium(self):
+        ChannelPostComment.objects.create(
+            post=self.post, author=self.premium_sub, msg_type="text", content="Visible",
+        )
+        res = self.free_sub_client.get(
+            f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+
     def test_edit_own_comment(self):
         comment = ChannelPostComment.objects.create(
-            post=self.post, author=self.sub, msg_type="text", content="Original",
+            post=self.post, author=self.premium_sub, msg_type="text", content="Original",
         )
-        res = self.sub_client.patch(
+        res = self.premium_sub_client.patch(
             f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/{comment.id}/",
             {"content": "Edited"},
             format="json",
@@ -296,9 +370,9 @@ class ChannelCommentsTest(TestCase):
 
     def test_delete_own_comment(self):
         comment = ChannelPostComment.objects.create(
-            post=self.post, author=self.sub, msg_type="text", content="To delete",
+            post=self.post, author=self.premium_sub, msg_type="text", content="To delete",
         )
-        res = self.sub_client.delete(
+        res = self.premium_sub_client.delete(
             f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/{comment.id}/",
         )
         self.assertEqual(res.status_code, 204)
@@ -307,14 +381,14 @@ class ChannelCommentsTest(TestCase):
 
 
 class ChannelReactionsTest(TestCase):
-    """Реакции на посты."""
-
     def setUp(self):
-        self.user = create_user()
-        create_subscription_for_user(self.user)
-        self.channel = create_channel(self.user, "Reactions")
+        self.owner = create_user(username="reaction_owner")
+        create_subscription_for_user(self.owner)
+        self.user = create_user(phone="+79990005550", username="reaction_user")
+        self.channel = create_channel(self.owner, "Reactions")
+        add_channel_subscriber(self.channel, self.user)
         self.post = ChannelPost.objects.create(
-            channel=self.channel, author=self.user, msg_type="text", content="Post",
+            channel=self.channel, author=self.owner, msg_type="text", content="Post",
         )
         self.client = auth_client(self.user)
 
@@ -340,19 +414,27 @@ class ChannelReactionsTest(TestCase):
 
 
 class ChannelMembersTest(TestCase):
-    """Участники: одобрение заявок, исключение."""
-
     def setUp(self):
-        self.owner = create_user()
+        self.owner = create_user(username="members_owner")
         create_subscription_for_user(self.owner)
-        self.user = create_user(phone="+79990005555")
-        create_subscription_for_user(self.user)
+        self.free_owner = create_user(phone="+79990005556", username="members_free_owner")
+        self.user = create_user(phone="+79990005555", username="members_user")
         self.channel = create_channel(self.owner, "Closed", is_public=False)
+        self.free_channel = create_channel(self.free_owner, "Free Closed", is_public=False)
         self.pending = ChannelMember.objects.create(
-            channel=self.channel, user=self.user,
-            role=ChannelMember.Role.SUBSCRIBER, status=ChannelMember.Status.PENDING,
+            channel=self.channel,
+            user=self.user,
+            role=ChannelMember.Role.SUBSCRIBER,
+            status=ChannelMember.Status.PENDING,
+        )
+        self.free_pending = ChannelMember.objects.create(
+            channel=self.free_channel,
+            user=self.user,
+            role=ChannelMember.Role.SUBSCRIBER,
+            status=ChannelMember.Status.PENDING,
         )
         self.owner_client = auth_client(self.owner)
+        self.free_owner_client = auth_client(self.free_owner)
 
     def test_approve_pending(self):
         res = self.owner_client.post(
@@ -373,3 +455,12 @@ class ChannelMembersTest(TestCase):
         self.assertEqual(res.status_code, 204)
         self.pending.refresh_from_db()
         self.assertEqual(self.pending.status, ChannelMember.Status.KICKED)
+
+    def test_free_owner_cannot_approve_pending(self):
+        res = self.free_owner_client.post(
+            f"/api/channels/{self.free_channel.id}/members/approve-reject/",
+            {"member_id": str(self.free_pending.id), "action": "approve"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["code"], "plan_restriction")

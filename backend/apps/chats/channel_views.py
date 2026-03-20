@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,8 +23,7 @@ from .serializers import (
 )
 from .utils import generate_slug, make_verification_code, verify_invite_code
 from .telegram_import import import_telegram_export
-from apps.payments.permissions import HasActiveSubscription
-from apps.payments.plan_limits import can_create_channels, RESTRICTION_CODE
+from apps.payments.plan_limits import can_create_channels, can_import_telegram, RESTRICTION_CODE
 from apps.common.image_utils import compress_uploaded_image, create_avatar_thumbnails, delete_avatar_thumbnails, AVATAR_MAX_DIM
 
 
@@ -49,6 +49,42 @@ def _can_comment(channel, request):
     return role is not None  # любой активный участник
 
 
+def _premium_restriction_response(detail: str):
+    return Response(
+        {"detail": detail, "code": RESTRICTION_CODE},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _ensure_channel_management_allowed(request, channel, detail: str):
+    role = _channel_member_role(request, channel)
+    if role not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
+        return Response({"detail": "Нет прав."}, status=status.HTTP_403_FORBIDDEN)
+    if not can_create_channels(request.user):
+        return _premium_restriction_response(detail)
+    return None
+
+
+def _ensure_channel_posting_allowed(request, channel):
+    role = _channel_member_role(request, channel)
+    if role not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
+        return Response({"detail": "Публиковать посты могут только владелец и администраторы."}, status=status.HTTP_403_FORBIDDEN)
+    if not can_create_channels(request.user):
+        return _premium_restriction_response("Публикация в канале доступна только с Premium.")
+    return None
+
+
+def _ensure_channel_commenting_allowed(request, channel):
+    role = _channel_member_role(request, channel)
+    if role is None:
+        return Response({"detail": "Нет доступа к каналу."}, status=status.HTTP_403_FORBIDDEN)
+    if not channel.comments_enabled:
+        return Response({"detail": "Комментарии отключены."}, status=status.HTTP_403_FORBIDDEN)
+    if not can_create_channels(request.user):
+        return _premium_restriction_response("Комментарии в каналах доступны только с Premium.")
+    return None
+
+
 def _check_channel_subscriber(request, channel_id):
     """Проверка доступа: пользователь должен быть подписчиком (active)."""
     channel = get_object_or_404(Channel, id=channel_id, is_active=True)
@@ -59,7 +95,7 @@ def _check_channel_subscriber(request, channel_id):
 
 class ChannelViewSet(viewsets.ModelViewSet):
     serializer_class = ChannelSerializer
-    permission_classes = [HasActiveSubscription]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return (
@@ -95,8 +131,13 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         channel = self.get_object()
-        if _channel_member_role(request, channel) not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
-            return Response({"detail": "Только владелец или администратор могут редактировать канал."}, status=status.HTTP_403_FORBIDDEN)
+        restriction = _ensure_channel_management_allowed(
+            request,
+            channel,
+            "Управление каналом доступно только с Premium.",
+        )
+        if restriction is not None:
+            return restriction
         if channel.owner_id != request.user.id and _channel_member_role(request, channel) != ChannelMember.Role.OWNER:
             # только владелец может менять is_public и т.д.
             pass
@@ -108,6 +149,13 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         channel = self.get_object()
+        restriction = _ensure_channel_management_allowed(
+            request,
+            channel,
+            "Удаление канала доступно только с Premium.",
+        )
+        if restriction is not None:
+            return restriction
         if channel.owner_id != request.user.id:
             return Response({"detail": "Только владелец может удалить канал."}, status=status.HTTP_403_FORBIDDEN)
         channel.is_active = False
@@ -146,6 +194,13 @@ class ChannelViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="avatar", parser_classes=[MultiPartParser, FormParser, JSONParser])
     def upload_avatar(self, request, pk=None):
         channel = self.get_object()
+        restriction = _ensure_channel_management_allowed(
+            request,
+            channel,
+            "Настройки канала доступны только с Premium.",
+        )
+        if restriction is not None:
+            return restriction
         if channel.owner_id != request.user.id:
             return Response({"detail": "Только владелец может менять аватар."}, status=status.HTTP_403_FORBIDDEN)
         avatar_file = request.FILES.get("avatar")
@@ -174,7 +229,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
 class ResolveChannelUsernameView(APIView):
     """Resolve @username to channel for authenticated users (member-only)."""
-    permission_classes = [HasActiveSubscription]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         username = (request.query_params.get("username") or "").strip().lstrip("@")
@@ -204,7 +259,7 @@ class ResolveChannelUsernameView(APIView):
 
 class JoinChannelPreviewView(APIView):
     """Превью канала по ссылке (без вступления)."""
-    permission_classes = [HasActiveSubscription]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         ser = JoinChannelSerializer(data=request.data)
@@ -244,7 +299,7 @@ class JoinChannelPreviewView(APIView):
 
 class JoinChannelView(APIView):
     """Вступить в канал по ссылке (открытый — сразу, закрытый — запрос на одобрение)."""
-    permission_classes = [HasActiveSubscription]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         ser = JoinChannelSerializer(data=request.data)
@@ -286,7 +341,7 @@ class JoinChannelView(APIView):
 class ChannelImportTelegramView(APIView):
     """POST: импорт истории канала из ZIP-архива экспорта Telegram Desktop."""
     parser_classes = (MultiPartParser, FormParser)
-    permission_classes = [HasActiveSubscription]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, channel_id):
         channel = get_object_or_404(Channel, id=channel_id, is_active=True)
@@ -294,6 +349,8 @@ class ChannelImportTelegramView(APIView):
             return Response({"detail": "Нет доступа к каналу."}, status=status.HTTP_403_FORBIDDEN)
         if not _can_post(channel, request):
             return Response({"detail": "Импорт доступен только владельцу и администраторам канала."}, status=status.HTTP_403_FORBIDDEN)
+        if not can_import_telegram(request.user):
+            return _premium_restriction_response("Импорт из Telegram доступен только с Premium.")
 
         file_obj = request.FILES.get("file")
         if not file_obj:
@@ -379,8 +436,9 @@ class ChannelPostListCreateView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
-        if not _can_post(channel, request):
-            return Response({"detail": "Публиковать посты могут только владелец и администраторы."}, status=status.HTTP_403_FORBIDDEN)
+        restriction = _ensure_channel_posting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         ser = ChannelPostSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         ser.save(channel=channel, author=request.user)
@@ -401,6 +459,9 @@ class ChannelPostDetailView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
+        restriction = _ensure_channel_posting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         post = get_object_or_404(ChannelPost, id=post_id, channel=channel, is_deleted=False)
         if post.author_id != request.user.id and not _can_post(channel, request):
             return Response({"detail": "Нет прав на редактирование."}, status=status.HTTP_403_FORBIDDEN)
@@ -418,6 +479,9 @@ class ChannelPostDetailView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
+        restriction = _ensure_channel_posting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         post = get_object_or_404(ChannelPost, id=post_id, channel=channel, is_deleted=False)
         if post.author_id != request.user.id and not _can_post(channel, request):
             return Response({"detail": "Нет прав на удаление."}, status=status.HTTP_403_FORBIDDEN)
@@ -474,8 +538,9 @@ class ChannelPostCommentListCreateView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
-        if not _can_comment(channel, request):
-            return Response({"detail": "Комментарии отключены или нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        restriction = _ensure_channel_commenting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         post = get_object_or_404(ChannelPost, id=post_id, channel=channel, is_deleted=False)
         ser = ChannelPostCommentSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
@@ -498,6 +563,9 @@ class ChannelPostCommentDetailView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
+        restriction = _ensure_channel_commenting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         post = get_object_or_404(ChannelPost, id=post_id, channel=channel)
         comment = get_object_or_404(ChannelPostComment, id=comment_id, post=post, is_deleted=False)
         if comment.author_id != request.user.id:
@@ -514,6 +582,9 @@ class ChannelPostCommentDetailView(APIView):
         channel, err = _check_channel_subscriber(request, channel_id)
         if err is not None:
             return err
+        restriction = _ensure_channel_commenting_allowed(request, channel)
+        if restriction is not None:
+            return restriction
         post = get_object_or_404(ChannelPost, id=post_id, channel=channel)
         comment = get_object_or_404(ChannelPostComment, id=comment_id, post=post, is_deleted=False)
         if comment.author_id != request.user.id:
@@ -528,8 +599,13 @@ class ChannelMemberApproveRejectView(APIView):
 
     def post(self, request, channel_id):
         channel = get_object_or_404(Channel, id=channel_id, is_active=True)
-        if _channel_member_role(request, channel) not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
-            return Response({"detail": "Нет прав."}, status=status.HTTP_403_FORBIDDEN)
+        restriction = _ensure_channel_management_allowed(
+            request,
+            channel,
+            "Управление участниками канала доступно только с Premium.",
+        )
+        if restriction is not None:
+            return restriction
         member_id = request.data.get("member_id")
         if not member_id:
             return Response({"detail": "member_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)
@@ -551,8 +627,13 @@ class ChannelMemberKickView(APIView):
 
     def post(self, request, channel_id):
         channel = get_object_or_404(Channel, id=channel_id, is_active=True)
-        if _channel_member_role(request, channel) not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
-            return Response({"detail": "Нет прав."}, status=status.HTTP_403_FORBIDDEN)
+        restriction = _ensure_channel_management_allowed(
+            request,
+            channel,
+            "Управление участниками канала доступно только с Premium.",
+        )
+        if restriction is not None:
+            return restriction
         member_id = request.data.get("member_id")
         if not member_id:
             return Response({"detail": "member_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)

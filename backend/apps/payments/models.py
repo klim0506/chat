@@ -32,6 +32,11 @@ class UserSubscription(models.Model):
         help_text="Пробный период получен по реферальной ссылке",
     )
     yookassa_payment_method_id = models.CharField(max_length=255, blank=True)
+    intro_offer_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Когда пользователь впервые использовал платный intro-offer",
+    )
     current_period_start = models.DateTimeField(null=True, blank=True)
     current_period_end = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -54,6 +59,14 @@ class UserSubscription(models.Model):
         if self.current_period_end and self.current_period_end < timezone.now():
             return False
         return True
+
+    @property
+    def is_intro_offer_active(self) -> bool:
+        return bool(
+            self.intro_offer_used_at
+            and self.status == self.Status.TRIAL
+            and self.is_valid
+        )
 
 
 class StarTransaction(models.Model):
