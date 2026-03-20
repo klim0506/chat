@@ -460,8 +460,7 @@ function SubscriptionPlansBlock({
               <p className="mt-1 text-sm text-emerald-800">
                 {t("sub.introOfferDesc")
                   .replace("%price%", String(introOffer.price_rub))
-                  .replace("%days%", String(introOffer.duration_days))
-                  .replace("%renew%", String(introOffer.renew_price_rub))}
+                  .replace("%days%", String(introOffer.duration_days))}
               </p>
             </div>
             <span className="shrink-0 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">

@@ -66,6 +66,14 @@ class ReferralFlowTest(TestCase):
         user = User.objects.get(phone=self.inviter.phone)
         self.assertIsNone(user.referred_by_id)
 
+    def test_new_user_registration_creates_no_subscription(self):
+        """Plain registration (no ref) does not create UserSubscription."""
+        res = self._verify("+79990000099", ref=None, username="plain_user")
+        self.assertEqual(res.status_code, 200)
+        user = User.objects.get(phone="+79990000099")
+        self.assertIsNone(user.referred_by_id)
+        self.assertFalse(UserSubscription.objects.filter(user=user).exists())
+
 
 class ReferralMilestoneTest(TestCase):
     def setUp(self):

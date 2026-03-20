@@ -324,8 +324,8 @@ const translations = {
   "subscription_required": { en: "Subscription required", ru: "Необходима подписка" },
   "dashboard.needsSub": { en: "Subscription required", ru: "Необходима подписка" },
   "dashboard.needsSubDesc": {
-    en: "Subscribe to Premium to access the messenger.",
-    ru: "Для доступа к мессенджеру оформите подписку Premium.",
+    en: "Subscribe to Premium for this feature. Try 7 days for 11 RUB, then from 119 RUB/month. You can unlink the card to stop auto-renewal.",
+    ru: "Для этой функции нужен Premium. Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес. Карту можно отвязать, чтобы остановить автопродление.",
   },
   "dashboard.goToPayment": { en: "Go to payment", ru: "Перейти к оплате" },
   "dashboard.personalChat": { en: "Personal chat", ru: "Личный чат" },
@@ -825,10 +825,10 @@ const translations = {
   "sub.planRestriction": { en: "This feature requires a subscription. Subscribe in settings.", ru: "Эта функция доступна по подписке. Оформите подписку в настройках." },
   "sub.subscribe": { en: "Subscribe", ru: "Оформить подписку" },
 
-  "premiumModal.title": { en: "Pingy Premium", ru: "Pingy Premium" },
+  "premiumModal.title": { en: "Try full access", ru: "Попробуй полный доступ" },
   "premiumModal.subtitle": {
-    en: "Try Premium for 7 days at 11 RUB, then 299 RUB/month. Auto-renewal can be stopped by unlinking the card.",
-    ru: "Попробуйте Premium на 7 дней за 11 ₽, затем 299 ₽/мес. Автопродление можно остановить, отвязав карту.",
+    en: "Support Pingy — your support keeps secure communication available to everyone. Try 7 days for 11 RUB, then from 119 RUB/month. You can unlink the card anytime.",
+    ru: "Поддержи Pingy — и безопасное общение останется доступным каждому. Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес. Карту можно отвязать в любой момент.",
   },
   "premiumModal.benefitFiles": { en: "Files up to 4 GB", ru: "Файлы до 4 ГБ" },
   "premiumModal.benefitFileUploads": { en: "Unlimited document uploads (instead of 20 per day)", ru: "Безлимитная загрузка документов (вместо 20 в день)" },
@@ -842,18 +842,18 @@ const translations = {
   "premiumModal.benefitChannels": { en: "Channels and import from Telegram", ru: "Каналы и импорт из Telegram" },
   "premiumModal.benefitStickers": { en: "Custom sticker packs", ru: "Свои наборы стикеров" },
   "premiumModal.benefitBio": { en: "Extended bio up to 150 characters", ru: "Расширенное «О себе» до 150 символов" },
-  "premiumModal.cta": { en: "Try for 11 RUB", ru: "Попробовать за 11 ₽" },
+  "premiumModal.cta": { en: "Try 7 days for 11 RUB, then from 119 RUB/month", ru: "Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес" },
   "premiumPrompt.generic": {
-    en: "This feature is available with Pingy Premium: 7 days for 11 RUB, then 299 RUB/month.",
-    ru: "Эта возможность доступна с Pingy Premium: 7 дней за 11 ₽, затем 299 ₽/мес.",
+    en: "To keep using this feature, support Pingy so secure communication stays available to everyone. Try 7 days for 11 RUB, then from 119 RUB/month.",
+    ru: "Чтобы продолжать пользоваться — поддержите Pingy, и безопасное общение останется доступным каждому. Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес.",
   },
   "premiumPrompt.folders": {
-    en: "Chat folders are available with Pingy Premium: 7 days for 11 RUB, then 299 RUB/month.",
-    ru: "Папки с чатами доступны с Pingy Premium: 7 дней за 11 ₽, затем 299 ₽/мес.",
+    en: "To keep using folders, support Pingy so secure communication stays available to everyone. Try 7 days for 11 RUB, then from 119 RUB/month.",
+    ru: "Чтобы продолжать пользоваться папками — поддержите Pingy, и безопасное общение останется доступным каждому. Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес.",
   },
   "premiumPrompt.videoCircles": {
-    en: "Send more video messages with Pingy Premium: 7 days for 11 RUB, then 299 RUB/month.",
-    ru: "Отправляйте больше видео-сообщений с Pingy Premium: 7 дней за 11 ₽, затем 299 ₽/мес.",
+    en: "To send more video messages, support Pingy so secure communication stays available to everyone. Try 7 days for 11 RUB, then from 119 RUB/month.",
+    ru: "Чтобы отправлять больше видео — поддержите Pingy, и безопасное общение останется доступным каждому. Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес.",
   },
   "sub.buyOrGift": { en: "Buy or gift", ru: "Купить или подарить" },
   "sub.buy": { en: "Buy", ru: "Купить" },
@@ -862,9 +862,12 @@ const translations = {
   "sub.searchUser": { en: "Search by name or username…", ru: "Поиск по имени или @username…" },
   "sub.giftingTo": { en: "Gifting to", ru: "Дарим" },
   "sub.giftSubscribe": { en: "Pay and gift", ru: "Оплатить и подарить" },
-  "sub.introOfferTitle": { en: "Trial week for new Premium users", ru: "Пробная неделя для первого входа в Premium" },
-  "sub.introOfferDesc": { en: "%days% days for %price% RUB, then %renew% RUB/month with auto-renewal.", ru: "%days% дней за %price% ₽, затем %renew% ₽/мес с автопродлением." },
-  "sub.introOfferCta": { en: "Start trial for 11 RUB", ru: "Начать пробную неделю за 11 ₽" },
+  "sub.introOfferTitle": { en: "Try full access", ru: "Попробуй полный доступ" },
+  "sub.introOfferDesc": {
+    en: "%days% days for %price% RUB, then from 119 RUB/month with auto-renewal. Unlink the card in settings to stop auto-renewal.",
+    ru: "%days% дней за %price% ₽, затем от 119 ₽/мес с автопродлением. Карту можно отвязать в настройках, чтобы остановить автопродление.",
+  },
+  "sub.introOfferCta": { en: "Try 7 days for 11 RUB, then from 119 RUB/month", ru: "Попробуй 7 дней за 11 ₽, затем от 119 ₽/мес" },
   "sub.invitedCount": { en: "Invited", ru: "Приглашено" },
 
   // ─── Misc / dynamic pieces ───────────────────────────────
