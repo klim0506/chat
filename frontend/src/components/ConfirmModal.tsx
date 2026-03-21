@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 export interface ConfirmModalProps {
   open: boolean;
@@ -47,15 +48,12 @@ export default function ConfirmModal({
   const isDanger = variant === "danger";
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-modal-title"
-      aria-describedby="confirm-modal-desc"
-    >
+    <ModalViewportLayer onBackdropClick={onClose} className="backdrop-blur-sm">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-modal-title"
+        aria-describedby="confirm-modal-desc"
         className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-200/80 animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -92,6 +90,6 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

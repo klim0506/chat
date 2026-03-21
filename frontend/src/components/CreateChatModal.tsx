@@ -6,6 +6,7 @@ import { chatsApi } from "../api/client";
 import { useTranslation, type TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
 import { StickerGifPanel } from "./StickerGifPanel";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const TITLE_MAX = 50;
 const DESCRIPTION_MAX = 300;
@@ -140,19 +141,16 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
   if (!isOpen) return null;
 
   return (
-    <div
-      className="ui-overlay fixed inset-0 z-[150] flex items-center justify-center p-4 overflow-y-auto"
-      onClick={() => { if (!loading) onClose(); }}
-    >
+    <ModalViewportLayer onBackdropClick={loading ? undefined : onClose}>
       <div
-        className="ui-modal-surface max-w-md w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150"
+        className="ui-modal-surface max-h-[85vh] max-w-lg w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-2">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 pt-5 pb-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-800">{t("createChat.title")}</h2>
-            <p className="text-slate-500 text-xs mt-0.5">
+            <p className="mt-1 text-sm text-slate-500">
               {t("createChat.afterCreateHint")}
             </p>
           </div>
@@ -170,7 +168,8 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit(onSubmit)} className="px-6 pb-5 pt-3 space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="flex max-h-[85vh] flex-col">
+          <div className="space-y-4 overflow-y-auto px-6 py-4">
           <div className="flex gap-4 items-start">
             <input
               ref={avatarInputRef}
@@ -193,7 +192,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
                 </svg>
               )}
             </button>
-            <div className="flex-1 min-w-0 flex gap-2 items-end">
+            <div className="flex-1 min-w-0">
               <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.chatName")}</label>
                 <div ref={emojiPanelRef} className="relative flex">
@@ -241,7 +240,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
             <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.description")}</label>
             <textarea
               className="w-full border border-slate-300 rounded-lg px-3 py-2 resize-none text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-              rows={2}
+              rows={3}
               maxLength={DESCRIPTION_MAX}
               placeholder={t("createChat.descPlaceholder")}
               {...register("description")}
@@ -265,8 +264,9 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
           </div>
 
           {error && <p className="text-red-500 text-sm">{error}</p>}
+          </div>
 
-          <div className="flex gap-2 justify-end pt-1">
+          <div className="flex gap-2 justify-end border-t border-slate-200 px-6 py-4">
             <button
               type="button"
               onClick={onClose}
@@ -285,6 +285,6 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
           </div>
         </form>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

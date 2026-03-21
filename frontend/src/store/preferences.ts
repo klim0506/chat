@@ -68,7 +68,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       soundReceive: true,
       soundMention: true,
       folderLayout: "left",
-      foldersEnabled: true,
+      foldersEnabled: false,
       showFolderPersonal: true,
       showFolderUnread: true,
       showFolderArchive: true,

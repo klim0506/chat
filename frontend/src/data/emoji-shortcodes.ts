@@ -1,8 +1,10 @@
 /**
  * Emoji shortcodes for autocomplete (:thumbsup: → 👍).
- * Subset of common gemoji-style shortcodes.
+ * Only emoji from the Telegram pack — no custom/drawn graphics.
  */
-export const EMOJI_SHORTCODES: Array<{ shortcode: string; emoji: string }> = [
+import { TELEGRAM_EMOJI_SRC_BY_EMOJI } from "./telegram-emojis";
+
+const EMOJI_SHORTCODES_RAW: Array<{ shortcode: string; emoji: string }> = [
   { shortcode: "thumbsup", emoji: "👍" },
   { shortcode: "thumbsdown", emoji: "👎" },
   { shortcode: "thumbs_up", emoji: "👍" },
@@ -112,6 +114,11 @@ export const EMOJI_SHORTCODES: Array<{ shortcode: string; emoji: string }> = [
   { shortcode: "purple_circle", emoji: "🟣" },
   { shortcode: "orange_circle", emoji: "🟠" },
 ];
+
+/** Only shortcodes for emoji that exist in the Telegram pack */
+export const EMOJI_SHORTCODES = EMOJI_SHORTCODES_RAW.filter((s) =>
+  TELEGRAM_EMOJI_SRC_BY_EMOJI.has(s.emoji)
+);
 
 /** All shortcodes with colons, sorted by length descending for prefix matching */
 export const SHORTCODES_SORTED = [...EMOJI_SHORTCODES]

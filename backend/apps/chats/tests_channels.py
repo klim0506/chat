@@ -62,7 +62,7 @@ class ChannelCRUDTest(TestCase):
         self.assertEqual(res.data["my_role"], "owner")
         self.assertIn("invite_link", res.data)
 
-    def test_free_user_cannot_create_channel(self):
+    def test_free_user_can_create_channel(self):
         free_user = create_user(phone="+79990009991", username="free_owner")
         free_client = auth_client(free_user)
         res = free_client.post(
@@ -70,8 +70,9 @@ class ChannelCRUDTest(TestCase):
             {"title": "Free channel", "is_public": True, "username": "free_channel"},
             format="json",
         )
-        self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.data["code"], "plan_restriction")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["title"], "Free channel")
+        self.assertEqual(res.data["my_role"], "owner")
 
     def test_create_channel_username_required(self):
         res = self.client.post(
@@ -111,17 +112,17 @@ class ChannelCRUDTest(TestCase):
         self.assertEqual(ch.title, "New title")
         self.assertFalse(ch.comments_enabled)
 
-    def test_free_owner_cannot_manage_channel(self):
+    def test_free_owner_can_manage_channel(self):
         free_owner = create_user(phone="+79990009992", username="free_manage_owner")
         ch = create_channel(free_owner, "Managed")
         free_client = auth_client(free_owner)
         res = free_client.patch(
             f"/api/channels/{ch.id}/",
-            {"title": "Blocked"},
+            {"title": "Updated"},
             format="json",
         )
-        self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.data["code"], "plan_restriction")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["title"], "Updated")
 
     def test_create_channel_reserved_username_rejected(self):
         res = self.client.post(

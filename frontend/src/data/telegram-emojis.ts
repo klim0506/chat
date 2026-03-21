@@ -14,9 +14,7 @@ function normalizeTelegramEmojiSrc(src: string): string {
   return src;
 }
 
-export const TOP_REACTION_EMOJIS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F602}", "\u{1F970}", "\u{1F44F}", "\u{1F601}", "\u{1F914}", "\u{1F62D}", "\u{1F64F}", "\u{1F618}", "\u{1F44C}", "\u{1F60D}", "\u{1F389}", "\u{1F92F}"] as const;
-
-export const TELEGRAM_EMOJI_CATEGORIES: TelegramEmojiCategory[] = [
+const TELEGRAM_EMOJI_CATEGORIES_BASE: TelegramEmojiCategory[] = [
   {
     id: "smileys-people",
     label: "Smileys & People",
@@ -3838,6 +3836,28 @@ export const TELEGRAM_EMOJI_CATEGORIES: TelegramEmojiCategory[] = [
       { emoji: "\u{1F1FF}\u{1F1FC}", src: "/telegram-emoji/telegram_emoji_png/1f1ff-1f1fc.png" },
     ],
   },
+];
+
+/** First faces in the Telegram smileys pack (😀 …), same order as in `smileys-people`. */
+const POPULAR_EMOJI_FACE_START = "\u{1F600}";
+const POPULAR_EMOJI_COUNT = 16;
+
+function popularEmojiItemsFromSmileys(base: TelegramEmojiCategory[]): TelegramEmojiItem[] {
+  const smileys = base.find((c) => c.id === "smileys-people");
+  if (!smileys) return [];
+  const start = smileys.items.findIndex((item) => item.emoji === POPULAR_EMOJI_FACE_START);
+  if (start < 0) return [];
+  return smileys.items.slice(start, start + POPULAR_EMOJI_COUNT);
+}
+
+const POPULAR_EMOJI_ITEMS = popularEmojiItemsFromSmileys(TELEGRAM_EMOJI_CATEGORIES_BASE);
+
+/** Popular strip (Telegram smiley order), then standard category order. */
+export const TELEGRAM_EMOJI_CATEGORIES: TelegramEmojiCategory[] = [
+  ...(POPULAR_EMOJI_ITEMS.length > 0
+    ? [{ id: "popular", label: "Popular", items: POPULAR_EMOJI_ITEMS } satisfies TelegramEmojiCategory]
+    : []),
+  ...TELEGRAM_EMOJI_CATEGORIES_BASE,
 ];
 
 export const TELEGRAM_EMOJIS = TELEGRAM_EMOJI_CATEGORIES.flatMap((category) =>

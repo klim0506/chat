@@ -7,7 +7,6 @@ import { isStandalone } from "./lib/pwa";
 import { isMarketingSite, APP_BASE_URL } from "./lib/host";
 import { AlphaBannerModal } from "./components/AlphaBannerModal";
 import PremiumRequiredModal from "./components/PremiumRequiredModal";
-import PremiumPromptPopup from "./components/PremiumPromptPopup";
 
 function FullscreenSpinner() {
   return (
@@ -269,7 +268,6 @@ function App() {
       {!isMarketingSite() && (
         <>
           <PremiumRequiredModal />
-          <PremiumPromptPopup />
         </>
       )}
       <Routes>

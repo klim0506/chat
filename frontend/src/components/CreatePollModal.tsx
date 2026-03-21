@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 import { usePremiumModalStore } from "../store/premiumModal";
 
 export interface CreatePollModalProps {
@@ -78,14 +78,12 @@ export default function CreatePollModal({ isOpen, onClose, onCreate }: CreatePol
 
   if (!isOpen) return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !sending) onClose();
-      }}
+  return (
+    <ModalViewportLayer
+      onBackdropClick={sending ? undefined : onClose}
+      className="!bg-black/40 backdrop-blur-sm"
     >
-      <div className="bg-white rounded-2xl shadow-xl w-[90vw] max-w-md max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl w-[90vw] max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <h3 className="text-sm font-semibold text-slate-800">{t("chat.pollCreate")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600" disabled={sending}>
@@ -190,7 +188,6 @@ export default function CreatePollModal({ isOpen, onClose, onCreate }: CreatePol
           </div>
         </form>
       </div>
-    </div>,
-    document.body,
+    </ModalViewportLayer>
   );
 }

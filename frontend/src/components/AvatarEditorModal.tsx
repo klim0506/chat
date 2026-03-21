@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const CANVAS_SIZE = 320;
 const EXPORT_SIZE = 256;
@@ -310,7 +311,7 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
   const isCropActive = mode === "crop" && imageUrl && baseDataUrl;
 
   return (
-    <div className="ui-overlay fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onCancel}>
+    <ModalViewportLayer onBackdropClick={onCancel}>
       <div className="ui-modal-surface max-w-lg w-full overflow-hidden rounded-2xl flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-3 flex items-center justify-between border-b border-slate-200">
           <h3 className="font-semibold text-slate-800">Редактирование аватарки</h3>
@@ -446,6 +447,6 @@ export function AvatarEditorModal({ imageUrl, onSave, onCancel }: AvatarEditorMo
           </div>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import time
 import random
 import string
@@ -7,6 +8,31 @@ import logging
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+# #region agent log
+def _agent_debug_log_services(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        with open("/root/.cursor/debug-d69873.log", "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "d69873",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
+# #endregion
 
 REDIS_OTP_TTL = 300
 REDIS_SMS_RATE_TTL = 60
@@ -147,11 +173,11 @@ PINGY_VERIFICATION_DEFAULT_PHONE = "+70000000101"
 # TTL for sendVerificationMessage: 30–3600 seconds (API docs)
 TELEGRAM_GATEWAY_TTL = max(30, min(3600, REDIS_OTP_TTL))
 
-# User-facing messages for common API errors
+# User-facing messages for common API errors (RU — ответ уходит в detail на фронт)
 TELEGRAM_GATEWAY_ERROR_MESSAGES = {
-    "ACCESS_TOKEN_INVALID": "Invalid or expired Telegram Gateway token. Get a new one at https://gateway.telegram.org/account/api",
-    "PHONE_NUMBER_INVALID": "Phone number must be in E.164 format (e.g. +79001234567).",
-    "PHONE_NUMBER_NOT_REGISTERED": "This number is not linked to Telegram. Install Telegram and link your number, or use another sign-in method.",
+    "ACCESS_TOKEN_INVALID": "Токен Telegram Gateway недействителен или истёк. Обновите ключ в кабинете gateway.telegram.org.",
+    "PHONE_NUMBER_INVALID": "Неверный формат номера. Укажите телефон в формате E.164 (например +79001234567).",
+    "PHONE_NUMBER_NOT_REGISTERED": "Этот номер не привязан к Telegram. Установите Telegram и привяжите номер.",
 }
 
 
@@ -180,7 +206,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
 
     last_error: str | None = None
     api_error_code: str | None = None  # error code from data["error"] for 503
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         try:
             resp = requests.post(
                 "https://gatewayapi.telegram.org/sendVerificationMessage",
@@ -190,13 +216,16 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
                     "Accept": "application/json",
                 },
                 json=payload,
-                timeout=(10, 15),
+                # Keep total worst-case under frontend send-code timeout (connect + read per attempt).
+                timeout=(8, 15),
             )
             try:
                 data = resp.json()
             except ValueError:
                 last_error = f"non-JSON response status={resp.status_code} body={(resp.text or '')[:200]}"
                 logger.warning("Telegram Gateway %s", last_error)
+                if attempt < 3:
+                    time.sleep(0.5)
                 continue
 
             if resp.status_code == 200 and data.get("ok"):
@@ -205,15 +234,27 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
                     dest,
                     data.get("result", {}).get("request_id"),
                 )
+                # #region agent log
+                _agent_debug_log_services(
+                    "TG",
+                    "services.send_telegram_verification",
+                    "tg_finished",
+                    {"success": True, "has_api_error_code": False, "api_error_code": ""},
+                )
+                # #endregion
                 return (data.get("result") or {}, None)
 
             # API returned an error — capture the code to return 503 with a user-friendly message
             api_error_code = data.get("error") if isinstance(data.get("error"), str) else None
             last_error = f"status={resp.status_code} error={api_error_code} body={str(data)[:200]}"
-            logger.warning("Telegram Gateway error (attempt %s/2): %s", attempt, last_error)
+            logger.warning("Telegram Gateway error (attempt %s/3): %s", attempt, last_error)
+            if attempt < 3:
+                time.sleep(0.5)
         except Exception as e:
             last_error = str(e)
-            logger.warning("Telegram Gateway request failed (attempt %s/2): %s", attempt, last_error)
+            logger.warning("Telegram Gateway request failed (attempt %s/3): %s", attempt, last_error)
+            if attempt < 3:
+                time.sleep(0.5)
             continue
 
     if last_error:
@@ -223,8 +264,20 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
     if api_error_code:
         user_message = TELEGRAM_GATEWAY_ERROR_MESSAGES.get(
             api_error_code,
-            f"Telegram Gateway: {api_error_code}.",
+            f"Ошибка Telegram Gateway: {api_error_code}.",
         )
+    # #region agent log
+    _agent_debug_log_services(
+        "TG",
+        "services.send_telegram_verification",
+        "tg_finished",
+        {
+            "success": False,
+            "has_api_error_code": bool(api_error_code),
+            "api_error_code": api_error_code or "",
+        },
+    )
+    # #endregion
     return (None, user_message)
 
 

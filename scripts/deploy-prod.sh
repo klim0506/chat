@@ -10,7 +10,26 @@ echo "=== PingyChat prod deploy ==="
 echo "Repo root: $REPO_ROOT"
 echo "Frontend dest: $FRONTEND_DEST"
 
-# 0. На проде: БД (если нет), миграции, перезапуск backend/celery
+cd "$REPO_ROOT"
+USE_DOCKER_STACK=0
+if [ -f "$REPO_ROOT/docker-compose.yml" ] && [ -f "$REPO_ROOT/postgres.docker.env" ] && command -v docker &>/dev/null; then
+  USE_DOCKER_STACK=1
+fi
+
+if [ "$USE_DOCKER_STACK" = "1" ]; then
+  echo "--- Docker stack: rebuild backend/celery, миграции в entrypoint при старте backend ---"
+  ln -sf postgres.docker.env .env
+  docker compose build backend celery celery-beat
+  docker compose up -d db redis backend celery celery-beat
+  echo "--- Frontend (Docker build → $FRONTEND_DEST) ---"
+  # Важно: всегда пересобирать образ фронта — иначе run использует старый dist из кэша Docker
+  docker compose --profile frontend build frontend-build
+  docker compose --profile frontend run --rm frontend-build
+  echo "=== Deploy done (Docker) ==="
+  exit 0
+fi
+
+# 0. На проде: БД (если нет), миграции, перезапуск backend/celery (systemd)
 if [ -f "$REPO_ROOT/scripts/ensure-prod-db.sh" ] && [ -f "$REPO_ROOT/backend/.env" ] && command -v systemctl &>/dev/null && systemctl list-units --type=service --all 2>/dev/null | grep -q pingychat-backend; then
   echo "--- Ensuring prod DB and migrations ---"
   sudo bash "$REPO_ROOT/scripts/ensure-prod-db.sh"

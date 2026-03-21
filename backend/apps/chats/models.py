@@ -621,3 +621,43 @@ class RecentSticker(models.Model):
         ordering = ["-used_at"]
         verbose_name = "Недавний стикер"
         verbose_name_plural = "Недавние стикеры"
+
+
+# --- System assets (emojis, stickers) — хранятся в chat_uploads/system/ ---
+
+
+class SystemEmoji(models.Model):
+    """Системный эмодзи (редактируемый админом). Файл в chat_uploads/system/emojis/."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    emoji = models.CharField(max_length=32, db_index=True)  # Unicode, напр. "👍"
+    file = models.ForeignKey(
+        "files.FileAttachment", on_delete=models.CASCADE, related_name="system_emojis"
+    )
+    shortcode = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    category = models.CharField(max_length=64, default="smileys-people")  # для группировки
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["category", "position", "created_at"]
+        verbose_name = "Системный эмодзи"
+        verbose_name_plural = "Системные эмодзи"
+
+
+class SystemSticker(models.Model):
+    """Системный стикер (редактируемый админом). Файл в chat_uploads/system/stickers/."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    file = models.ForeignKey(
+        "files.FileAttachment", on_delete=models.CASCADE, related_name="system_stickers"
+    )
+    emoji = models.CharField(max_length=16, blank=True, default="")
+    label = models.CharField(max_length=64, blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "created_at"]
+        verbose_name = "Системный стикер"
+        verbose_name_plural = "Системные стикеры"

@@ -98,20 +98,33 @@ export default function SupportModal({ isOpen, onClose, initialTopic }: SupportM
   const attachLabel = isFeedback ? t("feedback.attachPhotos") : t("support.attachPhotos");
 
   const modalContent = (
-    <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/50" style={{ zIndex: TOP_LAYER_Z_INDEX }} onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-slate-800 mb-1">{modalTitle}</h2>
-        <p className="text-sm text-slate-500 mb-4">{desc}</p>
+    <div className="fixed inset-0 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[2px]" style={{ zIndex: TOP_LAYER_Z_INDEX }} onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.2)] md:p-7" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold leading-tight text-slate-900">{modalTitle}</h2>
+            <p className="mt-2 text-base text-slate-500">{desc}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            aria-label={t("common.close")}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="text-2xl leading-none">×</span>
+          </button>
+        </div>
         {sent ? (
-          <p className="text-green-600 text-sm py-4">{t("feedback.sent")}</p>
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{t("feedback.sent")}</p>
         ) : (
           <form onSubmit={handleSubmit}>
-            <div className="mb-3">
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t("support.topic")}</label>
+            <div className="mb-4">
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">{t("support.topic")}</label>
               <select
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 transition focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
                 disabled={loading}
               >
                 <option value={TOPIC_FEEDBACK}>{t("feedback.title")}</option>
@@ -120,16 +133,21 @@ export default function SupportModal({ isOpen, onClose, initialTopic }: SupportM
                 <option value={SUPPORT_TOPIC_RESERVED_USERNAME}>{t("support.topicReservedUsername")}</option>
               </select>
             </div>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder={placeholder}
-              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 resize-none min-h-[120px] ${error ? "border-red-500 focus:ring-red-500" : "border-slate-300 focus:ring-amber-400"}`}
-              maxLength={2000}
-              disabled={loading}
-              autoFocus
-            />
-            <div className="mt-2 flex flex-wrap gap-2 items-center">
+            <div className="mb-2">
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder={placeholder}
+                className={`w-full resize-none rounded-2xl border bg-slate-50/70 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 transition focus:bg-white focus:outline-none focus:ring-2 min-h-[170px] ${error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-slate-300 focus:border-amber-400 focus:ring-amber-200"}`}
+                maxLength={2000}
+                disabled={loading}
+                autoFocus
+              />
+              <div className="mt-1.5 flex justify-end">
+                <span className="text-xs text-slate-400">{message.length}/2000</span>
+              </div>
+            </div>
+            <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -142,40 +160,40 @@ export default function SupportModal({ isOpen, onClose, initialTopic }: SupportM
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading || files.length >= MAX_IMAGES}
-                className="text-sm text-amber-600 hover:text-amber-800 disabled:opacity-50"
+                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {attachLabel} {files.length > 0 && `(${files.length}/${MAX_IMAGES})`}
               </button>
               {files.map((_, i) => (
-                <div key={i} className="relative group">
+                <div key={i} className="group relative">
                   <img
                     src={previewUrls[i]}
                     alt=""
-                    className="w-12 h-12 object-cover rounded border"
+                    className="h-14 w-14 rounded-lg border border-slate-200 object-cover"
                   />
                   <button
                     type="button"
                     onClick={() => removeFile(i)}
-                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600"
+                    className="absolute -right-1 -top-1 h-5 w-5 rounded-full bg-red-500 text-xs leading-none text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100"
                   >
                     ×
                   </button>
                 </div>
               ))}
             </div>
-            {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-            <div className="flex gap-2 justify-end mt-4">
+            {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2.5 border-t border-slate-200 pt-4">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium"
+                className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
               >
                 {t("common.cancel")}
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm font-medium"
+                className="rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? t("common.loading") : t("common.send")}
               </button>

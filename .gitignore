@@ -11,6 +11,9 @@ __pycache__/
 .env
 .env.local
 backend/.env
+backend/env
+postgres.docker.env
+/.env
 frontend/.env.local
 frontend/.env.production
 

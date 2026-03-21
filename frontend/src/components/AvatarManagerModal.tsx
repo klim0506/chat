@@ -3,6 +3,7 @@ import { authApi, type UserAvatar } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { AvatarCropConfirmModal } from "./AvatarCropConfirmModal";
 import { MediaImage } from "./MediaImage";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const MAX_AVATARS = 30;
 
@@ -112,15 +113,12 @@ export function AvatarManagerModal({
   };
 
   return (
-    <div
-      className="ui-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className="ui-modal-surface max-w-lg w-full max-h-[85vh] overflow-hidden rounded-2xl flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <>
+      <ModalViewportLayer onBackdropClick={onClose}>
+        <div
+          className="ui-modal-surface max-w-lg w-full max-h-[85vh] overflow-hidden rounded-2xl flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
         <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">Аватарки</h2>
           <button type="button" onClick={onClose} className="ui-icon-button rounded-lg p-2" title={t("avatar.close")} aria-label={t("avatar.close")}>
@@ -190,6 +188,7 @@ export function AvatarManagerModal({
           <p className="text-slate-500 text-xs mt-3">{avatars.length} / {MAX_AVATARS} аватарок</p>
         </div>
       </div>
+      </ModalViewportLayer>
 
       {pendingFile && (
         <AvatarCropConfirmModal
@@ -198,6 +197,6 @@ export function AvatarManagerModal({
           onCancel={() => setPendingFile(null)}
         />
       )}
-    </div>
+    </>
   );
 }

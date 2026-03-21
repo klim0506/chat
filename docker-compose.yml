@@ -1,0 +1,118 @@
+# Полный стек PingyChat: Postgres, Redis, Daphne, Celery, Celery Beat.
+# Переменные: export $(grep -v '^#' postgres.docker.env | xargs) перед docker compose up
+# Фронт в /var/www: docker compose run --rm frontend-build
+name: pingychat
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - postgres.docker.env
+    environment:
+      POSTGRES_USER: pingychat
+      POSTGRES_DB: pingychat_db
+    volumes:
+      - pingychat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pingychat -d pingychat_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Опционально: доступ с хоста (pg_dump, IDE) без конфликта с системным Postgres на :5432
+    ports:
+      - "127.0.0.1:5433:5432"
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@db:5432/pingychat_db
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -o /dev/null http://127.0.0.1:8000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks: [internal]
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@db:5432/pingychat_db
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config", "worker", "-l", "INFO"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@db:5432/pingychat_db
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config", "beat", "-l", "INFO"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+  frontend-build:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    profiles: [frontend]
+    volumes:
+      - /var/www/pingychat.com/frontend:/out:rw
+    command: ["sh", "-c", "cp -a /app/dist/. /out/ && echo OK: frontend copied to /out"]
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pingychat_pgdata:
+    name: pingychat_pgdata
+    external: true

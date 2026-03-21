@@ -3,6 +3,7 @@ from .models import (
     Chat, ChatMember, Message, MessageReaction, ScheduledMessage, UserPinnedMessage,
     Channel, ChannelMember, ChannelPost, ChannelPostComment, ChannelPostReaction,
     StickerSet, Sticker, UserStickerSet, RecentSticker,
+    SystemEmoji, SystemSticker,
 )
 
 
@@ -83,3 +84,19 @@ class UserStickerSetAdmin(admin.ModelAdmin):
 @admin.register(RecentSticker)
 class RecentStickerAdmin(admin.ModelAdmin):
     list_display = ("user", "sticker", "used_at")
+
+
+@admin.register(SystemEmoji)
+class SystemEmojiAdmin(admin.ModelAdmin):
+    list_display = ("emoji", "shortcode", "category", "position", "created_at")
+    list_editable = ("shortcode", "category", "position")
+    search_fields = ("emoji", "shortcode", "category")
+    ordering = ("category", "position")
+
+
+@admin.register(SystemSticker)
+class SystemStickerAdmin(admin.ModelAdmin):
+    list_display = ("id", "emoji", "label", "position", "created_at")
+    list_editable = ("emoji", "label", "position")
+    search_fields = ("emoji", "label")
+    ordering = ("position",)

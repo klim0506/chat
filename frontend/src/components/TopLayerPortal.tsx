@@ -32,6 +32,32 @@ export function TopLayerPortal({ children }: TopLayerPortalProps) {
   return createPortal(children, document.body);
 }
 
+/**
+ * Full-screen modal shell portaled to document.body with TOP_LAYER_Z_INDEX.
+ * Use for any dialog opened from nested layouts (e.g. settings inside messenger columns):
+ * without this, `position:fixed` can be clipped to the main column and the left sidebar stays undimmed.
+ */
+type ModalViewportLayerProps = {
+  children: ReactNode;
+  className?: string;
+  onBackdropClick?: () => void;
+};
+
+export function ModalViewportLayer({ children, className = "", onBackdropClick }: ModalViewportLayerProps) {
+  return (
+    <TopLayerPortal>
+      <div
+        className={`fixed inset-0 flex min-h-0 items-center justify-center overflow-y-auto p-4 bg-black/50 ${className}`}
+        style={{ zIndex: TOP_LAYER_Z_INDEX }}
+        onClick={onBackdropClick}
+        role="presentation"
+      >
+        {children}
+      </div>
+    </TopLayerPortal>
+  );
+}
+
 export function AnchoredPortal({
   anchorRef,
   children,

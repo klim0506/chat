@@ -21,6 +21,7 @@ import JoinChatPreviewModal from "../components/JoinChatPreviewModal";
 import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
 import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
 import { usePreferencesStore } from "../store/preferences";
+import { usePremiumModalStore } from "../store/premiumModal";
 import type { AppLanguage } from "../store/preferences";
 import { MediaImage } from "../components/MediaImage";
 import { buildUserInfoHref } from "../lib/user-info-link";
@@ -859,7 +860,26 @@ export default function MessengerPage() {
   const unreadCount = chats.filter((c) => !c.is_archived && (c.unread_count || 0) > 0).length;
   const personalCount = chats.filter((c) => !c.is_archived && !!c.is_personal && (c.unread_count || 0) > 0).length;
 
-  const hasFolderTabs = foldersEnabled && (sub?.has_subscription === true || sub?.is_valid === true);
+  const premiumOk = sub?.is_valid === true;
+  /** Папки в сайдбаре только при активной подписке и включённом переключателе в настройках. */
+  const hasFolderTabs = premiumOk && foldersEnabled;
+  const showFolderTabPersonal = premiumOk && foldersEnabled && showFolderPersonal;
+  const showFolderTabUnread = premiumOk && foldersEnabled && showFolderUnread;
+  const showFolderTabArchive = premiumOk && foldersEnabled && showFolderArchive;
+
+  useEffect(() => {
+    if (selectedFolderId !== null && (!premiumOk || !foldersEnabled)) {
+      setSelectedFolderId(null);
+    }
+  }, [premiumOk, foldersEnabled, selectedFolderId]);
+
+  const selectFolderOrPremium = useCallback((id: string | null) => {
+    if (!premiumOk && id !== null) {
+      usePremiumModalStore.getState().openModal();
+      return;
+    }
+    setSelectedFolderId(id);
+  }, [premiumOk]);
 
   let baseChats: typeof sortedChats;
   if (selectedFolderId === ARCHIVE_FOLDER_ID) {
@@ -1473,10 +1493,10 @@ export default function MessengerPage() {
               {t("messenger.chats")}
             </FolderTabLabel>
           </button>
-          {foldersEnabled && showFolderPersonal && (
+          {showFolderTabPersonal && (
             <button
               type="button"
-              onClick={() => setSelectedFolderId(PERSONAL_FOLDER_ID)}
+              onClick={() => selectFolderOrPremium(PERSONAL_FOLDER_ID)}
               className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === PERSONAL_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
             >
               <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
@@ -1492,10 +1512,10 @@ export default function MessengerPage() {
               <FolderTabLabel className="ui-text-title">{t("folders.standardPersonal")}</FolderTabLabel>
             </button>
           )}
-          {foldersEnabled && showFolderUnread && (
+          {showFolderTabUnread && (
             <button
               type="button"
-              onClick={() => setSelectedFolderId(UNREAD_FOLDER_ID)}
+              onClick={() => selectFolderOrPremium(UNREAD_FOLDER_ID)}
               className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === UNREAD_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
             >
               <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
@@ -1511,11 +1531,11 @@ export default function MessengerPage() {
               <FolderTabLabel className="ui-text-title">{t("folders.standardUnread")}</FolderTabLabel>
             </button>
           )}
-          {foldersEnabled && showFolderArchive && (
+          {showFolderTabArchive && (
             <div className="flex flex-col">
               <button
                 type="button"
-                onClick={() => setSelectedFolderId(ARCHIVE_FOLDER_ID)}
+                onClick={() => selectFolderOrPremium(ARCHIVE_FOLDER_ID)}
               className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === ARCHIVE_FOLDER_ID ? folderTabActiveClass : folderTabInactiveClass}`}
             >
                 <span className="relative flex items-center justify-center w-11 h-11 shrink-0">
@@ -1539,7 +1559,7 @@ export default function MessengerPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedFolderId(f.id);
+                    selectFolderOrPremium(f.id);
                     setExpandedFolderId((prev) => (prev === f.id ? null : f.id));
                   }}
                   className={`flex h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 rounded-[24px] ${folderTabBaseClass} ${selectedFolderId === f.id ? folderTabActiveClass : folderTabInactiveClass}`}
@@ -1592,6 +1612,10 @@ export default function MessengerPage() {
                 <button
                   type="button"
                   onClick={() => setShowCreateMenu((v) => !v)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setShowCreateMenu((v) => !v);
+                  }}
                   className="ui-accent-strong flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.98]"
                   title={t("dashboard.createChat")}
                 >
@@ -1635,6 +1659,10 @@ export default function MessengerPage() {
                 <button
                   type="button"
                   onClick={() => setMenuOpen((open) => !open)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenuOpen((open) => !open);
+                  }}
                   className="soft-chip flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-3 text-sm font-medium text-slate-500 transition-[transform,background-color,color] hover:text-slate-800 active:scale-[0.98]"
                   title={t("messenger.menu")}
                   aria-label={t("messenger.menu")}
@@ -1671,7 +1699,7 @@ export default function MessengerPage() {
                       type="button"
                       onClick={() => {
                         setMenuOpen(false);
-                        setSelectedFolderId(ARCHIVE_FOLDER_ID);
+                        selectFolderOrPremium(ARCHIVE_FOLDER_ID);
                         navigate("/chats", { replace: true });
                       }}
                       className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
@@ -1689,10 +1717,17 @@ export default function MessengerPage() {
                       }}
                       className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3c0 .89.2 1.73.57 2.49A7 7 0 0 0 18.5 12c.76.37 1.6.57 2.5.57z"/>
-                      </svg>
-                      {t(theme === "dark" ? "messenger.nightTheme" : "messenger.dayTheme")}
+                      {theme === "dark" ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                          <circle cx="12" cy="12" r="4" />
+                          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400">
+                          <path d="M21 12.79A9 9 0 1 1 11.21 3c0 .89.2 1.73.57 2.49A7 7 0 0 0 18.5 12c.76.37 1.6.57 2.5.57z" />
+                        </svg>
+                      )}
+                      {t(theme === "dark" ? "messenger.dayTheme" : "messenger.nightTheme")}
                     </button>
                     <button
                       type="button"
@@ -1782,10 +1817,10 @@ export default function MessengerPage() {
               </span>
               <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("messenger.chats"))}</span>
             </button>
-            {foldersEnabled && showFolderPersonal && (
+            {showFolderTabPersonal && (
               <button
                 type="button"
-                onClick={() => setSelectedFolderId(PERSONAL_FOLDER_ID)}
+                onClick={() => selectFolderOrPremium(PERSONAL_FOLDER_ID)}
                 title={t("folders.standardPersonal")}
                 className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-1.5 rounded-2xl px-3 text-left ${
                   folderTabBaseClass
@@ -1804,10 +1839,10 @@ export default function MessengerPage() {
                 <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("folders.standardPersonal"))}</span>
               </button>
             )}
-            {foldersEnabled && showFolderUnread && (
+            {showFolderTabUnread && (
               <button
                 type="button"
-                onClick={() => setSelectedFolderId(UNREAD_FOLDER_ID)}
+                onClick={() => selectFolderOrPremium(UNREAD_FOLDER_ID)}
                 title={t("folders.standardUnread")}
                 className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-1.5 rounded-2xl px-3 text-left ${
                   folderTabBaseClass
@@ -1826,10 +1861,10 @@ export default function MessengerPage() {
                 <span className="text-[0.75rem] leading-tight font-medium truncate text-left">{short(t("folders.standardUnread"))}</span>
               </button>
             )}
-            {foldersEnabled && showFolderArchive && (
+            {showFolderTabArchive && (
               <button
                 type="button"
-                onClick={() => setSelectedFolderId(ARCHIVE_FOLDER_ID)}
+                onClick={() => selectFolderOrPremium(ARCHIVE_FOLDER_ID)}
                 title={t("folders.standardArchive")}
                 className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-1.5 rounded-2xl px-3 text-left ${
                   folderTabBaseClass
@@ -1853,7 +1888,7 @@ export default function MessengerPage() {
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => setSelectedFolderId(f.id)}
+                  onClick={() => selectFolderOrPremium(f.id)}
                   title={folderDisplayName(f.name)}
                   className={`flex h-11 min-w-[6.25rem] shrink-0 items-center justify-start gap-1.5 rounded-2xl px-3 text-left ${
                     folderTabBaseClass

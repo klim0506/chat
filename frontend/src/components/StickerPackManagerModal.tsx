@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { stickersApi, filesApi, type StickerPack } from "../api/client";
 import { LottieSticker } from "./LottieSticker";
 import { MediaImage } from "./MediaImage";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 interface StickerPackManagerModalProps {
   isOpen: boolean;
@@ -186,10 +187,7 @@ export function StickerPackManagerModal({ isOpen, onClose, onPacksUpdated }: Sti
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-    >
+    <ModalViewportLayer onBackdropClick={onClose}>
       <div
         className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -396,6 +394,6 @@ export function StickerPackManagerModal({ isOpen, onClose, onPacksUpdated }: Sti
           )}
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

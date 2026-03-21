@@ -220,6 +220,8 @@ def _user_can_access_file(user, att: FileAttachment) -> bool:
 
     if att.external_url:
         return True
+    if att.file_path and att.file_path.startswith("chat_uploads/system/"):
+        return user.is_authenticated
     if att.uploader_id == user.id:
         return True
     file_q = Q(file=att) | Q(files=att)
@@ -407,17 +409,31 @@ class FileUploadView(APIView):
                 return Response({"detail": "Неподдерживаемый тип файла."}, status=status.HTTP_400_BAD_REQUEST)
         chat_id_raw = request.data.get("chat_id")
         chat_id = None
-        if chat_id_raw:
+        storage_context = (request.data.get("storage_context") or "").strip().lower()
+        if storage_context:
+            if not request.user.is_staff:
+                return Response({"detail": "Только администраторы могут загружать системные файлы."}, status=status.HTTP_403_FORBIDDEN)
+            if storage_context == "system_emoji":
+                subdir = "system/emojis"
+            elif storage_context == "system_sticker":
+                subdir = "system/stickers"
+            else:
+                return Response({"detail": "Недопустимый storage_context."}, status=status.HTTP_400_BAD_REQUEST)
+            rel_dir = os.path.join("chat_uploads", subdir)
+        elif chat_id_raw:
             try:
                 chat_id = UUID(str(chat_id_raw))
             except (ValueError, TypeError):
                 return Response({"detail": "Некорректный chat_id."}, status=status.HTTP_400_BAD_REQUEST)
             if not ChatMember.objects.filter(chat_id=chat_id, user=request.user, status=ChatMember.Status.ACTIVE).exists():
                 return Response({"detail": "Нет доступа к чату."}, status=status.HTTP_403_FORBIDDEN)
+            subdir = f"chat_{chat_id}"
+            rel_dir = os.path.join("chat_uploads", subdir)
+        else:
+            subdir = "uploads"
+            rel_dir = os.path.join("chat_uploads", subdir)
 
         try:
-            subdir = f"chat_{chat_id}" if chat_id else "uploads"
-            rel_dir = os.path.join("chat_uploads", subdir)
             save_dir = os.path.join(settings.MEDIA_ROOT, rel_dir)
             os.makedirs(save_dir, exist_ok=True)
             ext = os.path.splitext(clean_original_name)[1] or ""

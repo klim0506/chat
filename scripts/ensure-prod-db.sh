@@ -27,15 +27,20 @@ fi
 
 echo "=== Ensure prod DB: user=$DB_USER db=$DB_NAME ==="
 
-# 1) Создать БД, если нет (от postgres)
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || {
-  echo "Creating database $DB_NAME (owner postgres)..."
-  sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER postgres;"
-}
+# БД в Docker (см. docker-compose.db.yml) — создаётся контейнером, host postgres не трогаем
+if echo "$DATABASE_URL" | grep -qE '(127\.0\.0\.1|localhost):5433'; then
+  echo "--- PostgreSQL в Docker на :5433 — шаги через системного postgres пропущены ---"
+else
+  # 1) Создать БД, если нет (от postgres на хосте)
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || {
+    echo "Creating database $DB_NAME (owner postgres)..."
+    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER postgres;"
+  }
 
-# 2) Выдать владение и права на schema public пользователю приложения
-sudo -u postgres psql -c "ALTER DATABASE $DB_NAME OWNER TO $DB_USER;" 2>/dev/null || true
-sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO $DB_USER; GRANT CREATE ON SCHEMA public TO $DB_USER;" 2>/dev/null || true
+  # 2) Выдать владение и права на schema public пользователю приложения
+  sudo -u postgres psql -c "ALTER DATABASE $DB_NAME OWNER TO $DB_USER;" 2>/dev/null || true
+  sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO $DB_USER; GRANT CREATE ON SCHEMA public TO $DB_USER;" 2>/dev/null || true
+fi
 
 # 3) Миграции (от пользователя pingychat, т.к. .env и venv от него)
 echo "Running migrations..."

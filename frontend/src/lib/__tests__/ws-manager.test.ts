@@ -46,13 +46,15 @@ let WsManager: typeof import("../ws-manager").WsManager;
 
 describe("WsManager", () => {
   beforeEach(async () => {
-    vi.useFakeTimers();
+    // Only stub WS timers — faking Date/nextTick in Vitest 4 can hang advanceTimersByTimeAsync.
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"] });
     vi.resetModules();
     const mod = await import("../ws-manager");
     WsManager = mod.WsManager;
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

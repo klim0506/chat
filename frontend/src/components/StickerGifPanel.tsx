@@ -1,8 +1,18 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { gifApi, stickersApi, type GifResult, type Sticker as ApiSticker, type StickerPack } from "../api/client";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  gifApi,
+  stickersApi,
+  systemAssetsApi,
+  type GifResult,
+  type Sticker as ApiSticker,
+  type StickerPack,
+  type SystemEmojiItem,
+  type SystemStickerItem,
+} from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { LottieSticker } from "./LottieSticker";
 import { TELEGRAM_EMOJI_CATEGORIES } from "../data/telegram-emojis";
+import type { TelegramEmojiCategory } from "../data/telegram-emojis";
 import { EmojiCategoryList } from "./EmojiCategoryList";
 import { MediaImage } from "./MediaImage";
 
@@ -60,7 +70,7 @@ function StickerGrid({
               }
               if (sticker.path) onSelectSticker(sticker.path);
             }}
-            className="ui-picker-tile flex h-14 w-14 items-center justify-center rounded-lg p-1"
+            className="ui-picker-tile ui-picker-tile-borderless flex h-14 w-14 items-center justify-center rounded-lg p-1"
             title={title}
           >
             {sticker.animationUrl ? (
@@ -97,6 +107,8 @@ export function StickerGifPanel({
   const [packStickersById, setPackStickersById] = useState<Record<string, ApiSticker[]>>({});
   const [stickersLoading, setStickersLoading] = useState(false);
   const [packLoadingId, setPackLoadingId] = useState<string | null>(null);
+  const [systemEmojis, setSystemEmojis] = useState<SystemEmojiItem[]>([]);
+  const [systemStickers, setSystemStickers] = useState<SystemStickerItem[]>([]);
 
   const fetchStickers = useCallback(async () => {
     setStickersLoading(true);
@@ -139,6 +151,22 @@ export function StickerGifPanel({
       fetchStickers();
     }
   }, [tab, fetchStickers, refreshToken]);
+
+  useEffect(() => {
+    if (tab === "emoji" || emojiOnly) {
+      systemAssetsApi.listEmojis()
+        .then((res) => setSystemEmojis(Array.isArray(res.data) ? res.data : []))
+        .catch(() => setSystemEmojis([]));
+    }
+  }, [tab, emojiOnly, refreshToken]);
+
+  useEffect(() => {
+    if (tab === "stickers") {
+      systemAssetsApi.listStickers()
+        .then((res) => setSystemStickers(Array.isArray(res.data) ? res.data : []))
+        .catch(() => setSystemStickers([]));
+    }
+  }, [tab, refreshToken]);
 
   useEffect(() => {
     if (tab !== "stickers") return;
@@ -191,6 +219,40 @@ export function StickerGifPanel({
     };
   }, [tab, gifQuery, fetchGifs]);
 
+  const emojiCategories = useMemo((): TelegramEmojiCategory[] => {
+    const customItems = systemEmojis
+      .filter((e) => e.file?.access_handle)
+      .sort((a, b) => a.position - b.position)
+      .map((e) => ({ emoji: e.emoji, src: e.file!.access_handle }));
+    if (customItems.length === 0) return TELEGRAM_EMOJI_CATEGORIES;
+    return [{ id: "custom", label: "Custom", items: customItems }, ...TELEGRAM_EMOJI_CATEGORIES];
+  }, [systemEmojis]);
+
+  const defaultStickerCards = useMemo(() => {
+    const sys = systemStickers
+      .filter((s) => s.file?.access_handle)
+      .sort((a, b) => a.position - b.position)
+      .map((s) => {
+        const url = s.file!.access_handle;
+        const isLottie = (s.file!.mime_type || "").includes("application/json");
+        return {
+          id: `sys-${s.id}`,
+          label: s.label || s.emoji || "Sticker",
+          emoji: s.emoji,
+          fileId: s.file!.id,
+          url,
+          animationUrl: isLottie ? url : undefined,
+        };
+      });
+    const bundled = BUNDLED_STICKERS.map((b) => ({
+      id: b.id,
+      path: b.path,
+      label: b.label,
+      animationUrl: b.animationUrl,
+    }));
+    return [...sys, ...bundled];
+  }, [systemStickers]);
+
   const currentPackStickers = stickerSubTab !== "recent" && stickerSubTab !== "default"
     ? packStickersById[stickerSubTab] ?? []
     : [];
@@ -224,7 +286,7 @@ export function StickerGifPanel({
   if (emojiOnly) {
     return (
       <div className={`ui-popover-surface overflow-hidden rounded-xl ${className}`} style={{ width: "320px" }}>
-        <EmojiCategoryList categories={TELEGRAM_EMOJI_CATEGORIES} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
+        <EmojiCategoryList categories={emojiCategories} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
       </div>
     );
   }
@@ -256,7 +318,7 @@ export function StickerGifPanel({
       </div>
 
       {tab === "emoji" && (
-        <EmojiCategoryList categories={TELEGRAM_EMOJI_CATEGORIES} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
+        <EmojiCategoryList categories={emojiCategories} onSelectEmoji={onSelectEmoji} height={CONTENT_HEIGHT_PX} />
       )}
 
       {tab === "stickers" && (
@@ -288,7 +350,7 @@ export function StickerGifPanel({
               </button>
             ))}
           </div>
-          <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-2">
+          <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto pl-0 pr-2 pt-2 pb-2">
             {stickersLoading ? (
               <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading...</div>
             ) : stickerSubTab === "recent" ? (
@@ -298,7 +360,7 @@ export function StickerGifPanel({
                 <StickerGrid stickers={recentStickerCards} onSelectSticker={onSelectSticker} />
               )
             ) : stickerSubTab === "default" ? (
-              <StickerGrid stickers={BUNDLED_STICKERS} onSelectSticker={onSelectSticker} />
+              <StickerGrid stickers={defaultStickerCards} onSelectSticker={onSelectSticker} />
             ) : packLoadingId === stickerSubTab ? (
               <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading pack...</div>
             ) : currentPackCards.length === 0 ? (
@@ -335,7 +397,7 @@ export function StickerGifPanel({
               className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
           </div>
-          <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-2">
+          <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto pl-0 pr-2 pt-2 pb-2">
             {gifLoading && gifResults.length === 0 ? (
               <div className="flex items-center justify-center py-8 text-sm text-slate-500">Loading...</div>
             ) : gifResults.length === 0 ? (
@@ -347,7 +409,7 @@ export function StickerGifPanel({
                     key={gif.id}
                     type="button"
                     onClick={() => onSelectGif?.(gif.url)}
-                    className="ui-picker-tile aspect-square overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    className="ui-picker-tile ui-picker-tile-borderless aspect-square overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
                   >
                     <img src={gif.preview_url || gif.url} alt="" className="h-full w-full object-cover" loading="lazy" />
                   </button>

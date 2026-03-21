@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type CSSProperties } from "react";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -17,7 +17,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authApi, paymentsApi, sessionsApi, foldersApi, channelsApi, type User, type SubscriptionStatus, type SubscriptionPlan, type ReferralProgress, type UserSessionInfo, type ChatFolder, type Channel, type Chat } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
-import { usePreferencesStore, MESSAGE_TEXT_SCALE_MIN, MESSAGE_TEXT_SCALE_MAX, MESSAGE_TEXT_SCALES, type MessageTextScale } from "../store/preferences";
+import { usePreferencesStore, MESSAGE_TEXT_SCALE_MIN, MESSAGE_TEXT_SCALE_MAX, type MessageTextScale } from "../store/preferences";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { AvatarManagerModal } from "../components/AvatarManagerModal";
 import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
@@ -42,9 +42,8 @@ import { EmojiPickerPopover } from "../components/EmojiPickerPopover";
 import QrLoginModal from "../components/QrLoginModal";
 
 type SettingsSection = "account" | "chats" | "privacy" | "folders" | "devices" | "premium";
-import { useTranslation, t as tFn, getLocale, type AppLanguage } from "../lib/i18n";
+import { useTranslation, t as tFn, getLocale, type AppLanguage, type TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
-import { usePremiumPromptStore } from "../store/premiumPrompt";
 
 function copyToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -81,16 +80,16 @@ export const SETTINGS_NAV = [
 const SETTINGS_PANEL_CLASS = "rounded-[28px] border border-slate-200/80 bg-white/82 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur overflow-hidden";
 const SETTINGS_PANEL_HEADER_CLASS = "flex items-start justify-between gap-3 border-b border-slate-100/80 px-6 py-5";
 const SETTINGS_PANEL_BODY_CLASS = "px-6 py-5";
+/** Единая обводка для карточек внутри «Настройки чатов» (масштаб, выравнивание/язык/тема, звуки). */
+const SETTINGS_CHATS_SUBCARD_CLASS =
+  "rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]";
 const SETTINGS_NAV_SHELL_CLASS = "flex h-full min-h-0 flex-col p-2";
 const SETTINGS_NAV_ACTION_CLASS = "flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-sm transition-colors";
 const SETTINGS_DESKTOP_NAV_WIDTH = 272;
 const SETTINGS_DESKTOP_NAV_OVERLAY_BREAKPOINT = SETTINGS_DESKTOP_NAV_WIDTH * 2 + 56;
 
-function SettingsNav({ section, onSection, t, hasSubscription }: { section: SettingsSection; onSection: (s: SettingsSection) => void; t: ReturnType<typeof useTranslation>["t"]; hasSubscription: boolean }) {
-  const navItems = SETTINGS_NAV.filter((item) => {
-    if (item.id === "privacy" || item.id === "folders") return hasSubscription;
-    return true;
-  });
+function SettingsNav({ section, onSection, t }: { section: SettingsSection; onSection: (s: SettingsSection) => void; t: ReturnType<typeof useTranslation>["t"] }) {
+  const navItems = SETTINGS_NAV;
   const getItemSubtitle = (id: SettingsSection) => {
     switch (id) {
       case "account":
@@ -229,7 +228,6 @@ function ReferralProgressCard({
     ? `Уровень ${currentTierIndex + 1} из ${orderedTiers.length}`
     : `Level ${currentTierIndex + 1} of ${orderedTiers.length}`;
   const rewardLabel = formatRewardLabel(currentTier.rewardMonths);
-  const goalLabel = formatGoalLabel(currentTarget);
   const shortGoalLabel = lang === "ru"
     ? `${progressValue}/${currentTarget}`
     : `${progressValue}/${currentTarget}`;
@@ -247,78 +245,92 @@ function ReferralProgressCard({
   const levelDoneLabel = lang === "ru" ? "Получен" : "Done";
   const levelNextLabel = lang === "ru" ? "Далее" : "Next";
   const rewardCardLabel = lang === "ru" ? "Награда" : "Reward";
-  const rewardCardHint = lang === "ru" ? "за текущий уровень" : "for this level";
+
+  const cardSurfaceStyle: CSSProperties = {
+    borderColor: "var(--border-subtle)",
+    background:
+      "linear-gradient(135deg, var(--accent-soft-bg) 0%, var(--surface-1) 42%, var(--surface-2) 100%)",
+    boxShadow: "var(--shadow-1)",
+  };
+
+  const innerTileStyle: CSSProperties = {
+    borderColor: "var(--border-subtle)",
+    background: "var(--surface-2)",
+  };
 
   return (
     <>
-      <div className="space-y-4 rounded-[28px] border border-slate-200/80 bg-gradient-to-br from-sky-50/80 via-white to-blue-50/40 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+      <div className="space-y-4 rounded-[28px] border p-5" style={cardSurfaceStyle}>
+        <div className="space-y-1">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-xl font-semibold" style={{ color: "var(--text-0)" }}>
+              {t("settings.referralHeroTitle")}
+            </h3>
             <button
               type="button"
               onClick={() => setShowLevelsModal(true)}
-              className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-sky-700 shadow-sm transition-colors hover:bg-white"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] shadow-sm transition-opacity hover:opacity-90"
+              style={{
+                background: "var(--accent-soft-bg)",
+                borderColor: "var(--accent-soft-border)",
+                color: "var(--accent-soft-text)",
+              }}
             >
               {levelLabel}
               <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            <h3 className="mt-3 text-xl font-semibold text-slate-900">{t("settings.referralHeroTitle")}</h3>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              {rewardSummary}
-              {remaining > 0 && (
-                <>
-                  {" - "}
-                  <button
-                    type="button"
-                    onClick={onCopy}
-                    className={`inline max-w-full truncate align-baseline text-sky-700 transition-colors hover:text-sky-800 hover:underline ${shake ? "animate-username-shake" : ""}`}
-                    title={referralLink}
-                  >
-                    {referralLink}
-                  </button>
-                </>
-              )}
-            </p>
           </div>
+          <p className="text-sm leading-6" style={{ color: "var(--text-2)" }}>
+            {rewardSummary}
+            {remaining > 0 && (
+              <>
+                {" - "}
+                <button
+                  type="button"
+                  onClick={onCopy}
+                  className={`inline max-w-full truncate align-baseline underline-offset-2 transition-opacity hover:opacity-90 hover:underline ${shake ? "animate-username-shake" : ""}`}
+                  style={{ color: "var(--accent-soft-text)" }}
+                  title={referralLink}
+                >
+                  {referralLink}
+                </button>
+              </>
+            )}
+          </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-4">
-            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <div className="rounded-2xl border px-4 py-4" style={innerTileStyle}>
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--text-2)" }}>
               {rewardCardLabel}
             </p>
-            <p className="mt-2 text-lg font-semibold text-slate-900">{rewardLabel}</p>
-            <p className="mt-1 text-sm text-slate-600">{rewardCardHint}</p>
+            <p className="mt-2 text-lg font-semibold leading-snug" style={{ color: "var(--text-0)" }}>
+              {rewardLabel}
+            </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-4">
+          <div className="rounded-2xl border px-4 py-4" style={innerTileStyle}>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">{progressTitle}</p>
+              <p className="text-lg font-semibold leading-snug" style={{ color: "var(--text-0)" }}>
+                {progressTitle}
+              </p>
               <button
                 type="button"
                 onClick={() => setShowLevelsModal(true)}
-                className="text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
+                className="text-sm font-medium transition-opacity hover:opacity-90"
+                style={{ color: "var(--accent-soft-text)" }}
               >
                 {levelsCta}
               </button>
             </div>
-            <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-200">
+            <div className="mt-3 h-2.5 overflow-hidden rounded-full" style={{ background: "var(--border-subtle)" }}>
               <div
                 className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-all duration-300"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <p className="mt-2 text-sm text-slate-600">
-              {lang === "ru"
-                ? remaining === 0
-                  ? "Награда уже доступна"
-                  : `Осталось ${remaining}`
-                : remaining === 0
-                  ? "Reward available"
-                  : `${remaining} left`}
-            </p>
           </div>
         </div>
 
@@ -339,18 +351,27 @@ function ReferralProgressCard({
             onClick={() => setShowLevelsModal(false)}
           >
             <div
-              className="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)]"
+              className="w-full max-w-lg rounded-[28px] border p-5"
+              style={{
+                borderColor: "var(--border-subtle)",
+                background: "var(--surface-1)",
+                boxShadow: "var(--shadow-2)",
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{levelsCta}</p>
-                  <h4 className="mt-1 text-lg font-semibold text-slate-900">{levelsModalTitle}</h4>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--text-2)" }}>
+                    {levelsCta}
+                  </p>
+                  <h4 className="mt-1 text-lg font-semibold" style={{ color: "var(--text-0)" }}>
+                    {levelsModalTitle}
+                  </h4>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowLevelsModal(false)}
-                  className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded-full p-2 text-[color:var(--text-2)] transition-colors hover:bg-[var(--surface-2)] hover:text-[color:var(--text-0)]"
                   aria-label={t("common.close")}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -365,32 +386,51 @@ function ReferralProgressCard({
                   const isDone = invited_count >= tier.target;
                   const tierRewardLabel = formatRewardLabel(tier.rewardMonths);
                   const tierGoalLabel = formatGoalLabel(tier.target);
+                  const rowStyle: CSSProperties = isCurrent
+                    ? {
+                        borderColor: "var(--accent-soft-border)",
+                        background: "var(--accent-soft-bg)",
+                      }
+                    : isDone
+                      ? {
+                          borderColor: "rgba(52, 211, 153, 0.45)",
+                          background: "rgba(16, 185, 129, 0.14)",
+                        }
+                      : {
+                          borderColor: "var(--border-subtle)",
+                          background: "var(--surface-2)",
+                        };
+                  const badgeStyle: CSSProperties = isCurrent
+                    ? {
+                        background: "var(--accent-soft-bg)",
+                        color: "var(--accent-soft-text)",
+                        border: "1px solid var(--accent-soft-border)",
+                      }
+                    : isDone
+                      ? {
+                          background: "rgba(16, 185, 129, 0.18)",
+                          color: "var(--text-0)",
+                          border: "1px solid rgba(52, 211, 153, 0.35)",
+                        }
+                      : {
+                          background: "var(--surface-0)",
+                          color: "var(--text-2)",
+                        };
                   return (
                     <div
                       key={tier.target}
-                      className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
-                        isCurrent
-                          ? "border-sky-200 bg-sky-50/70"
-                          : isDone
-                            ? "border-emerald-200 bg-emerald-50/60"
-                            : "border-slate-200/80 bg-white"
-                      }`}
+                      className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3"
+                      style={rowStyle}
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">
+                        <p className="text-sm font-semibold" style={{ color: "var(--text-0)" }}>
                           {lang === "ru" ? `Уровень ${index + 1}` : `Level ${index + 1}`}
                         </p>
-                        <p className="mt-0.5 text-sm text-slate-600">
+                        <p className="mt-0.5 text-sm" style={{ color: "var(--text-2)" }}>
                           {tierGoalLabel} • {tierRewardLabel}
                         </p>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                        isCurrent
-                          ? "bg-sky-100 text-sky-700"
-                          : isDone
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-slate-100 text-slate-500"
-                      }`}>
+                      <span className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium" style={badgeStyle}>
                         {isCurrent ? levelCurrentLabel : isDone ? levelDoneLabel : levelNextLabel}
                       </span>
                     </div>
@@ -407,28 +447,36 @@ function ReferralProgressCard({
 
 function SubscriptionPlansBlock({
   plans,
-  introOffer,
   subLoading,
   onSubscribe,
-  onIntroOffer,
   paymentError,
+  initialGiftRecipient,
+  subscriptionSummary,
+  onOpenPaymentMethods,
   t,
   lang,
 }: {
   plans: SubscriptionPlan[];
-  introOffer?: SubscriptionStatus["intro_offer"] | null;
   subLoading: boolean;
   onSubscribe: (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) => void;
-  onIntroOffer: () => void;
   paymentError?: string;
+  initialGiftRecipient?: { id: string; display_name: string } | null;
+  /** Показывается компактно над списком тарифов (правая колонка). */
+  subscriptionSummary?: {
+    status: string;
+    is_valid: boolean;
+    current_period_end?: string | null;
+  };
+  /** Ссылка «Способы оплаты» справа от строки статуса. */
+  onOpenPaymentMethods?: () => void;
   t: ReturnType<typeof useTranslation>["t"];
   lang: AppLanguage;
 }) {
-  const [mode, setMode] = useState<"buy" | "gift">("buy");
+  const [mode, setMode] = useState<"buy" | "gift">(initialGiftRecipient ? "gift" : "buy");
   const [selectedPlan, setSelectedPlan] = useState<1 | 6 | 12 | 24>(1);
-  const [giftQuery, setGiftQuery] = useState("");
+  const [giftQuery, setGiftQuery] = useState(initialGiftRecipient?.display_name ?? "");
   const [giftResults, setGiftResults] = useState<{ id: string; display_name: string; username?: string | null }[]>([]);
-  const [giftRecipient, setGiftRecipient] = useState<{ id: string; display_name: string } | null>(null);
+  const [giftRecipient, setGiftRecipient] = useState<{ id: string; display_name: string } | null>(initialGiftRecipient ?? null);
 
   useEffect(() => {
     if (mode !== "gift" || !giftQuery.trim() || giftQuery.length < 2) {
@@ -451,97 +499,93 @@ function SubscriptionPlansBlock({
     { months: 24, total_rub: 2856, per_month_rub: 119, original_rub: 7176, discount_pct: 60, savings_rub: 4320 },
   ];
 
-  return (
-    <div className="space-y-4">
-      {mode === "buy" && introOffer?.available && (
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-emerald-900">{t("sub.introOfferTitle")}</p>
-              <p className="mt-1 text-sm text-emerald-800">
-                {t("sub.introOfferDesc")
-                  .replace("%price%", String(introOffer.price_rub))
-                  .replace("%days%", String(introOffer.duration_days))}
-              </p>
-            </div>
-            <span className="shrink-0 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">
-              {lang === "ru" ? "Старт" : "Start"}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onIntroOffer}
-            disabled={subLoading}
-            className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {subLoading ? t("settings.goToPayment") : t("sub.introOfferCta")}
-          </button>
-        </div>
-      )}
+  const SUB_BENEFIT_KEYS: TranslationKey[] = [
+    "premiumModal.benefitFiles",
+    "premiumModal.benefitFileUploads",
+    "premiumModal.benefitFolders",
+    "premiumModal.benefitPins",
+    "premiumModal.benefitVideoCircles",
+    "premiumModal.benefitReactions",
+    "premiumModal.benefitScheduled",
+    "premiumModal.benefitChannels",
+    "premiumModal.benefitAvatars",
+    "premiumModal.benefitPolls",
+    "premiumModal.benefitStickers",
+    "premiumModal.benefitBio",
+  ];
 
-      <p className="text-sm font-medium text-slate-700">{t("sub.buyOrGift")}</p>
-      <div className="flex gap-2">
+  const benefitItem = (key: TranslationKey) => (
+    <li key={key} className="flex items-start gap-2">
+      <span className="shrink-0 w-4 h-4 mt-0.5 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      </span>
+      <span>{t(key)}</span>
+    </li>
+  );
+
+  const giftModeRow = (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <button
+        type="button"
+        onClick={() => { setMode("gift"); setGiftRecipient(null); setGiftQuery(""); }}
+        className="text-sm font-medium text-blue-600 hover:text-blue-700"
+      >
+        {t("sub.gift")}
+      </button>
+      {mode === "gift" && (
         <button
           type="button"
           onClick={() => { setMode("buy"); setGiftRecipient(null); setGiftQuery(""); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-            mode === "buy"
-              ? "bg-slate-200 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
-              : "bg-transparent border border-slate-300 text-slate-600 hover:bg-slate-50/80 hover:border-slate-400"
-          }`}
+          className="text-sm text-slate-500 hover:text-slate-700"
         >
           {t("sub.buy")}
         </button>
-        <button
-          type="button"
-          onClick={() => { setMode("gift"); setGiftRecipient(null); setGiftQuery(""); }}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-            mode === "gift"
-              ? "bg-slate-200 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
-              : "bg-transparent border border-slate-300 text-slate-600 hover:bg-slate-50/80 hover:border-slate-400"
-          }`}
-        >
-          {t("sub.gift")}
-        </button>
-      </div>
-
-      {mode === "gift" && (
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-slate-600">{t("sub.giftRecipient")}</label>
-          <input
-            type="text"
-            value={giftQuery}
-            onChange={(e) => setGiftQuery(e.target.value)}
-            placeholder={t("sub.searchUser")}
-            className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
-            style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
-          />
-          {giftResults.length > 0 && !giftRecipient && (
-            <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-32 overflow-y-auto">
-              {giftResults.map((u) => (
-                <li key={u.id}>
-                  <button
-                    type="button"
-                    onClick={() => { setGiftRecipient({ id: u.id, display_name: u.display_name }); setGiftQuery(u.display_name); setGiftResults([]); }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    {u.display_name}{u.username ? ` @${u.username}` : ""}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {giftRecipient && (
-            <p className="text-sm text-slate-600">
-              {t("sub.giftingTo")}: <strong>{giftRecipient.display_name}</strong>
-              <button type="button" onClick={() => setGiftRecipient(null)} className="ml-2 text-red-600 text-xs">
-                {t("common.cancel")}
-              </button>
-            </p>
-          )}
-        </div>
       )}
+    </div>
+  );
 
+  const giftRecipientBlock =
+    mode === "gift" ? (
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-slate-600">{t("sub.giftRecipient")}</label>
+        <input
+          type="text"
+          value={giftQuery}
+          onChange={(e) => setGiftQuery(e.target.value)}
+          placeholder={t("sub.searchUser")}
+          className="w-full px-3 py-2.5 text-sm rounded-2xl border backdrop-blur focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+          style={{ background: "var(--surface-2)", borderColor: "var(--border-subtle)", color: "var(--text-0)" }}
+        />
+        {giftResults.length > 0 && !giftRecipient && (
+          <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-32 overflow-y-auto">
+            {giftResults.map((u) => (
+              <li key={u.id}>
+                <button
+                  type="button"
+                  onClick={() => { setGiftRecipient({ id: u.id, display_name: u.display_name }); setGiftQuery(u.display_name); setGiftResults([]); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                >
+                  {u.display_name}{u.username ? ` @${u.username}` : ""}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {giftRecipient && (
+          <p className="text-sm text-slate-600">
+            {t("sub.giftingTo")}: <strong>{giftRecipient.display_name}</strong>
+            <button type="button" onClick={() => setGiftRecipient(null)} className="ml-2 text-red-600 text-xs">
+              {t("common.cancel")}
+            </button>
+          </p>
+        )}
+      </div>
+    ) : null;
+
+  const plansBlock = (
+    <>
       <div className="space-y-2">
         {defaultPlans.map((p) => {
           const discount = p.discount_pct ?? 0;
@@ -600,6 +644,68 @@ function SubscriptionPlansBlock({
           {paymentError}
         </p>
       )}
+    </>
+  );
+
+  return (
+    <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start">
+      {/* Benefits: single column */}
+      <div className="space-y-4 mb-6 lg:mb-0">
+        <p className="text-2xl font-semibold text-slate-800 mb-2">{t("sub.benefitsTitle")}</p>
+        <ul className="space-y-1.5 text-sm text-slate-700">
+          {SUB_BENEFIT_KEYS.map((key) => benefitItem(key))}
+        </ul>
+        {giftModeRow}
+        {giftRecipientBlock}
+      </div>
+
+      {/* Plans and CTA: right column on desktop */}
+      <div className="space-y-4 lg:sticky lg:top-6">
+        {subscriptionSummary ? (
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm font-medium">
+                <span className="text-slate-600">{t("settings.status")}</span>
+                <span
+                  className={subscriptionSummary.is_valid ? "text-green-600" : "text-red-600"}
+                >
+                  {getStatusLabel(subscriptionSummary.status, lang)}
+                </span>
+              </div>
+              {subscriptionSummary.current_period_end && (
+                <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-slate-600">
+                  <span>{t("settings.validUntil")}</span>
+                  <span className="font-medium text-slate-800">
+                    {new Date(subscriptionSummary.current_period_end).toLocaleDateString(getLocale(lang))}
+                  </span>
+                </div>
+              )}
+            </div>
+            {onOpenPaymentMethods && (
+              <button
+                type="button"
+                onClick={onOpenPaymentMethods}
+                className="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                {t("settings.paymentMethods")}
+              </button>
+            )}
+          </div>
+        ) : (
+          onOpenPaymentMethods && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onOpenPaymentMethods}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                {t("settings.paymentMethods")}
+              </button>
+            </div>
+          )
+        )}
+        {plansBlock}
+      </div>
     </div>
   );
 }
@@ -730,116 +836,51 @@ function SoundsSection() {
     enabled ? "bg-blue-600" : "bg-slate-300"
   }`;
 
+  const soundRow = (
+    title: string,
+    hint: string,
+    enabled: boolean,
+    onClick: () => void,
+    disabled?: boolean
+  ) => (
+    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 border-b border-slate-100 last:border-b-0">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-800">{title}</p>
+        <p className="mt-0.5 text-xs text-slate-500">{hint}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={`${toggleClass(enabled)} shrink-0 disabled:cursor-not-allowed disabled:opacity-70`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 m-0.5 ${
+            enabled ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3">
-      <div className="flex items-center justify-between rounded-2xl bg-white/85 px-3 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
-        <div>
-          <p className="text-sm font-medium text-slate-800">{t("settings.enableSounds")}</p>
-          <p className="mt-0.5 text-xs text-slate-500">{t("settings.sounds")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          className={toggleClass(soundEnabled)}
-        >
-          <span
-            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-              soundEnabled ? "translate-x-5" : "translate-x-0"
-            }`}
-          />
-        </button>
-      </div>
-      <div className={`mt-3 space-y-2 ${!soundEnabled ? "opacity-50 pointer-events-none" : ""}`}>
-        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
-          <div>
-            <span className="text-sm font-medium text-slate-700">{t("settings.soundSend")}</span>
-            <p className="mt-0.5 text-xs text-slate-500">{t("settings.enableSounds")}</p>
-          </div>
-          <button
-            type="button"
-            disabled={!soundEnabled}
-            onClick={() => setSoundSend(!soundSend)}
-            className={`${toggleClass(soundSend)} disabled:cursor-not-allowed`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                soundSend ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
-        </div>
-        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
-          <div>
-            <span className="text-sm font-medium text-slate-700">{t("settings.soundReceive")}</span>
-            <p className="mt-0.5 text-xs text-slate-500">{t("settings.notifications")}</p>
-          </div>
-          <button
-            type="button"
-            disabled={!soundEnabled}
-            onClick={() => setSoundReceive(!soundReceive)}
-            className={`${toggleClass(soundReceive)} disabled:cursor-not-allowed`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                soundReceive ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
-        </div>
-        <div className="flex items-center justify-between rounded-2xl bg-white/72 px-3 py-3">
-          <div>
-            <span className="text-sm font-medium text-slate-700">{t("settings.soundMention")}</span>
-            <p className="mt-0.5 text-xs text-slate-500">@ mention</p>
-          </div>
-          <button
-            type="button"
-            disabled={!soundEnabled}
-            onClick={() => setSoundMention(!soundMention)}
-            className={`${toggleClass(soundMention)} disabled:cursor-not-allowed`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                soundMention ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
-        </div>
-      </div>
+    <div className={!soundEnabled ? "opacity-50" : ""}>
+      {soundRow(t("settings.enableSounds"), t("settings.sounds"), soundEnabled, () => setSoundEnabled(!soundEnabled))}
+      {soundRow(t("settings.soundSend"), t("settings.enableSounds"), soundSend, () => setSoundSend(!soundSend), !soundEnabled)}
+      {soundRow(t("settings.soundReceive"), t("settings.notifications"), soundReceive, () => setSoundReceive(!soundReceive), !soundEnabled)}
+      {soundRow(t("settings.soundMention"), "@ mention", soundMention, () => setSoundMention(!soundMention), !soundEnabled)}
     </div>
   );
 }
-
-const MESSAGE_PREVIEW_BASE_REM = 13 / 16;
-
-const SCALE_PRESET_KEYS = ["settings.scaleSmall", "settings.scaleReduced", "settings.scaleNormal", "settings.scaleLarge", "settings.scaleExtraLarge"] as const;
 
 function MessageScaleSlider() {
   const { t } = useTranslation();
   const scale = usePreferencesStore((s) => s.messageTextScale);
   const setScale = usePreferencesStore((s) => s.setMessageTextScale);
-  const currentPresetIndex = MESSAGE_TEXT_SCALES.reduce((best, s, i) =>
-    Math.abs(s - scale) < Math.abs(MESSAGE_TEXT_SCALES[best] - scale) ? i : best
-  , 0);
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {MESSAGE_TEXT_SCALES.map((value, i) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setScale(value as MessageTextScale)}
-            className={`px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
-              currentPresetIndex === i
-                ? "bg-blue-600 text-white shadow-[0_12px_28px_rgba(37,99,235,0.22)]"
-                : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            {t(SCALE_PRESET_KEYS[i])}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+    <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span className="shrink-0 text-sm font-semibold text-slate-700">{t("settings.messageTextScale")}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:max-w-md sm:justify-end">
         <input
           type="range"
           min={MESSAGE_TEXT_SCALE_MIN}
@@ -847,33 +888,12 @@ function MessageScaleSlider() {
           step={0.01}
           value={scale}
           onChange={(e) => setScale(parseFloat(e.target.value) as MessageTextScale)}
-          className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer"
+          className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-blue-600 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow"
+          aria-label={t("settings.messageTextScale")}
         />
-        <span className="w-14 shrink-0 rounded-full bg-slate-100 px-2 py-1 text-center text-sm font-semibold text-slate-700 tabular-nums">{Math.round(scale * 100)}%</span>
-      </div>
-
-      <div
-        className="rounded-[22px] border border-slate-200/80 bg-slate-50/50 px-5 py-4"
-        style={{ minHeight: 132 }}
-      >
-        <p className="mb-3 text-[0.625rem] font-medium uppercase tracking-[0.18em] text-slate-400">{t("settings.scalePreview")}</p>
-        <div className="flex items-end gap-3">
-          <div className="h-9 w-9 rounded-full bg-slate-300/80 shrink-0" />
-          <div className="flex min-w-0 flex-col gap-2">
-            <div
-              className="max-w-[200px] break-words rounded-[20px] rounded-bl-md bg-blue-500 px-3 py-2 text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_REM}rem` }}
-            >
-              {t("settings.scalePreviewMessage1")}
-            </div>
-            <div
-              className="max-w-[156px] break-words rounded-[20px] rounded-bl-md bg-slate-100 px-3 py-2 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
-              style={{ fontSize: `${MESSAGE_PREVIEW_BASE_REM * 0.95}rem` }}
-            >
-              {t("settings.scalePreviewMessage2")}
-            </div>
-          </div>
-        </div>
+        <span className="w-14 shrink-0 rounded-full bg-slate-100 px-2 py-1 text-center text-sm font-semibold text-slate-700 tabular-nums">
+          {Math.round(scale * 100)}%
+        </span>
       </div>
     </div>
   );
@@ -894,8 +914,11 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
   const setFolderColorUnread = usePreferencesStore((s) => s.setFolderColorUnread);
   const folderColorArchive = usePreferencesStore((s) => s.folderColorArchive);
   const setFolderColorArchive = usePreferencesStore((s) => s.setFolderColorArchive);
-  const foldersEnabled = usePreferencesStore((s) => s.foldersEnabled);
+  const foldersEnabledRaw = usePreferencesStore((s) => s.foldersEnabled);
   const setFoldersEnabled = usePreferencesStore((s) => s.setFoldersEnabled);
+  /** Без Premium папки всегда считаются выключенными (даже если в localStorage было true). */
+  const foldersEnabledEffective = hasSubscription && foldersEnabledRaw;
+  const [foldersPremiumToast, setFoldersPremiumToast] = useState(false);
   const [folders, setFolders] = useState<ChatFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null);
@@ -940,6 +963,12 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
   useEffect(() => {
     loadFolders();
   }, [loadFolders]);
+
+  useEffect(() => {
+    if (!hasSubscription && foldersEnabledRaw) {
+      setFoldersEnabled(false);
+    }
+  }, [hasSubscription, foldersEnabledRaw, setFoldersEnabled]);
 
   const handleUpdateFolderColor = async (folder: ChatFolder, color: string) => {
     try {
@@ -995,11 +1024,13 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
   };
 
   const handleToggleFolders = () => {
-    if (!foldersEnabled && !hasSubscription) {
-      usePremiumPromptStore.getState().openPrompt("folders");
+    if (!hasSubscription) {
+      usePremiumModalStore.getState().openModal();
+      setFoldersPremiumToast(true);
+      window.setTimeout(() => setFoldersPremiumToast(false), 4000);
       return;
     }
-    setFoldersEnabled(!foldersEnabled);
+    setFoldersEnabled(!foldersEnabledRaw);
   };
 
   const renderFolderVisibilityToggle = (enabled: boolean, onToggle: () => void) => (
@@ -1028,17 +1059,20 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
           type="button"
           onClick={handleToggleFolders}
           className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-            foldersEnabled ? "bg-blue-600 cursor-pointer" : hasSubscription ? "bg-slate-200 cursor-pointer" : "bg-slate-200 cursor-not-allowed opacity-80"
+            foldersEnabledEffective ? "bg-blue-600 cursor-pointer" : "bg-slate-200 cursor-pointer"
           }`}
+          aria-pressed={foldersEnabledEffective}
         >
           <span
             className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-              foldersEnabled ? "translate-x-5" : "translate-x-0"
+              foldersEnabledEffective ? "translate-x-5" : "translate-x-0"
             }`}
           />
         </button>
       </div>
-      <div className={`space-y-6 ${!foldersEnabled ? "opacity-50 pointer-events-none select-none" : ""}`}>
+      <div
+        className={`space-y-6 ${!foldersEnabledEffective ? "opacity-50 pointer-events-none select-none" : ""}`}
+      >
       {loading ? (
         <p className="text-sm text-slate-500">{t("common.loading")}</p>
       ) : (
@@ -1249,6 +1283,17 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
       </>
       )}
       </div>
+      {foldersPremiumToast && (
+        <TopLayerPortal>
+          <div
+            role="status"
+            className="fixed bottom-6 left-1/2 max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-slate-800 px-4 py-3 text-center text-sm text-white shadow-lg"
+            style={{ zIndex: TOP_LAYER_Z_INDEX }}
+          >
+            {t("folders.premiumRequiredToast")}
+          </div>
+        </TopLayerPortal>
+      )}
     </div>
   );
 }
@@ -1269,6 +1314,11 @@ export default function SettingsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const sectionParam = searchParams.get("section") as SettingsSection | null;
   const setSection = (s: SettingsSection) => setSearchParams({ section: s });
+  const giftRecipientIdParam = searchParams.get("gift_user_id");
+  const giftRecipientNameParam = searchParams.get("gift_name");
+  const initialGiftRecipient = giftRecipientIdParam
+    ? { id: giftRecipientIdParam, display_name: giftRecipientNameParam || `@${giftRecipientIdParam}` }
+    : null;
   const [mobileShowContent, setMobileShowContent] = useState(false);
   const [desktopShowContent, setDesktopShowContent] = useState(false);
   const [desktopUseOverlay, setDesktopUseOverlay] = useState(false);
@@ -1322,23 +1372,8 @@ export default function SettingsPage({
   const [copied, setCopied] = useState(false);
   const [referralShake, setReferralShake] = useState(false);
   const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
-  const [showSubscriptionMenu, setShowSubscriptionMenu] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const subscriptionPlansRef = useRef<HTMLDivElement>(null);
-  const subscriptionMenuButtonRef = useRef<HTMLDivElement | null>(null);
-  const subscriptionMenuPopoverRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!showSubscriptionMenu) return;
-    const onClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const insideButton = subscriptionMenuButtonRef.current?.contains(target);
-      const insideMenu = subscriptionMenuPopoverRef.current?.contains(target);
-      if (!insideButton && !insideMenu) setShowSubscriptionMenu(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [showSubscriptionMenu]);
 
   useEffect(() => {
     if (!showPersonalChannelMenu) return;
@@ -1531,43 +1566,50 @@ export default function SettingsPage({
   };
 
   const [paymentError, setPaymentError] = useState("");
-  const startSubscriptionCheckout = async (params: {
-    plan_months?: 1 | 6 | 12 | 24;
-    recipient_user_id?: string;
-    offer_code?: string;
-  }) => {
-    setPaymentError("");
-    setSubLoading(true);
-    try {
-      const returnUrl = window.location.origin + window.location.pathname + "?paid=1";
-      const { data } = await paymentsApi.subscribe({
-        return_url: returnUrl,
-        ...params,
-      });
-      if (data.confirmation_url) {
-        window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
-        return;
+  const startSubscriptionCheckout = useCallback(
+    async (params: {
+      plan_months?: 1 | 6 | 12 | 24;
+      recipient_user_id?: string;
+      offer_code?: string;
+    }) => {
+      setPaymentError("");
+      setSubLoading(true);
+      try {
+        const returnUrl = window.location.origin + window.location.pathname + "?paid=1";
+        const { data } = await paymentsApi.subscribe({
+          return_url: returnUrl,
+          ...params,
+        });
+        if (data.confirmation_url) {
+          window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+          return;
+        }
+        const subRes = await paymentsApi.getSubscription();
+        setSub(subRes.data);
+      } catch (e: unknown) {
+        const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        const msg = detail || t("settings.paymentError");
+        setPaymentError(msg);
+        setErrorToast(msg);
+      } finally {
+        setSubLoading(false);
       }
-      const subRes = await paymentsApi.getSubscription();
-      setSub(subRes.data);
-    } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      const msg = detail || t("settings.paymentError");
-      setPaymentError(msg);
-      setErrorToast(msg);
-    } finally {
-      setSubLoading(false);
-    }
-  };
+    },
+    [t],
+  );
   const handleSubscribe = async (planMonths: 1 | 6 | 12 | 24, recipientUserId?: string) =>
     startSubscriptionCheckout({
       plan_months: planMonths,
       ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
     });
-  const handleIntroOffer = async () =>
-    startSubscriptionCheckout({
-      offer_code: "intro_week",
-    });
+  /** Из модалки Premium: ?checkout=intro — сразу запускаем оплату пробной недели (привязка карты). */
+  useEffect(() => {
+    if (searchParams.get("checkout") !== "intro") return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("checkout");
+    setSearchParams(next, { replace: true });
+    void startSubscriptionCheckout({ offer_code: "intro_week" });
+  }, [searchParams, setSearchParams, startSubscriptionCheckout]);
 
   const handleCopyReferral = () => {
     const code = user?.referral_code;
@@ -1709,28 +1751,39 @@ export default function SettingsPage({
                           <p className="font-semibold text-slate-800 truncate">
                             {u.display_name || t("settings.noName")}
                           </p>
-                          <EmojiPickerPopover
-                            value={u.status_emoji ?? ""}
-                            onChange={async (emoji) => {
-                              try {
-                                const res = await authApi.updateMe({ status_emoji: emoji || undefined });
-                                setUser(res.data);
-                              } catch {
-                                // keep previous
-                              }
-                            }}
-                            emptyLabel={t("settings.statusEmojiNone")}
-                          >
+                          {sub?.is_valid ? (
+                            <EmojiPickerPopover
+                              value={u.status_emoji ?? ""}
+                              onChange={async (emoji) => {
+                                try {
+                                  const res = await authApi.updateMe({ status_emoji: emoji || undefined });
+                                  setUser(res.data);
+                                } catch {
+                                  // keep previous
+                                }
+                              }}
+                              emptyLabel={t("settings.statusEmojiNone")}
+                            >
+                              <button
+                                type="button"
+                                className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg border transition-colors ${
+                                  u.status_emoji ? "bg-slate-100 border-slate-200 text-slate-700" : "border-dashed border-slate-200 text-slate-400 hover:border-slate-300"
+                                }`}
+                                title={t("settings.statusEmoji")}
+                              >
+                                {u.status_emoji || "😊"}
+                              </button>
+                            </EmojiPickerPopover>
+                          ) : (
                             <button
                               type="button"
-                              className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg border transition-colors ${
-                                u.status_emoji ? "bg-slate-100 border-slate-200 text-slate-700" : "border-dashed border-slate-200 text-slate-400 hover:border-slate-300"
-                              }`}
+                              onClick={() => usePremiumModalStore.getState().openModal()}
+                              className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-base text-slate-400 border border-dashed border-slate-200 hover:border-slate-300 hover:text-slate-500 transition-colors"
                               title={t("settings.statusEmoji")}
                             >
-                              {u.status_emoji || "😊"}
+                              —
                             </button>
-                          </EmojiPickerPopover>
+                          )}
                           <button
                             type="button"
                             onClick={() => setEditing(true)}
@@ -2098,14 +2151,11 @@ export default function SettingsPage({
                 </div>
               </div>
               <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-5"}>
-                <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-                  <label className="mb-3 block text-sm font-semibold text-slate-700">
-                    {t("settings.messageTextScale")}
-                  </label>
+                <div className={SETTINGS_CHATS_SUBCARD_CLASS}>
                   <MessageScaleSlider />
                 </div>
 
-                <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                <div className={SETTINGS_CHATS_SUBCARD_CLASS}>
                   <div className="grid gap-4 lg:grid-cols-3">
                     <div>
                       <label className="mb-3 block text-sm font-semibold text-slate-700">
@@ -2189,7 +2239,7 @@ export default function SettingsPage({
 
                 {/* Sounds */}
                 <div className="grid gap-4 lg:grid-cols-[1fr]">
-                  <div className="rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                  <div className={SETTINGS_CHATS_SUBCARD_CLASS}>
                     <label className="mb-3 block text-sm font-semibold text-slate-700">
                       {t("settings.sounds")}
                     </label>
@@ -2209,15 +2259,6 @@ export default function SettingsPage({
                 </div>
               </div>
               <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
-                {!sub?.is_valid ? (
-                  <div className="py-6 text-center">
-                    <p className="text-slate-600 mb-4">{t("settings.privacyPremiumOnly")}</p>
-                    <button type="button" onClick={() => { setSection("premium"); if (isMobile) setMobileShowContent(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                      {t("settings.goToPremium")}
-                    </button>
-                  </div>
-                ) : (
-                <>
                 {saveMsg && (
                   <p className={`text-sm ${saveMsg === t("common.saved") ? "text-green-600" : "text-red-500"}`}>{saveMsg}</p>
                 )}
@@ -2268,6 +2309,10 @@ export default function SettingsPage({
                         <select
                           value={value}
                           onChange={async (e) => {
+                            if (sub?.is_valid !== true) {
+                              usePremiumModalStore.getState().openModal();
+                              return;
+                            }
                             const val = e.target.value as "everyone" | "nobody" | "contacts";
                             const payload: Partial<typeof user> = {};
                             if (field === "show_last_seen" || field === "show_phone") {
@@ -2296,8 +2341,6 @@ export default function SettingsPage({
                     ))}
                   </div>
                 </div>
-                </>
-                )}
               </div>
             </div>
               )}
@@ -2340,16 +2383,7 @@ export default function SettingsPage({
                 </div>
               </div>
               <div className={SETTINGS_PANEL_BODY_CLASS}>
-                {!sub?.is_valid ? (
-                  <div className="py-6 text-center">
-                    <p className="text-slate-600 mb-4">{t("settings.foldersPremiumOnly")}</p>
-                    <button type="button" onClick={() => { setSection("premium"); if (isMobile) setMobileShowContent(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                      {t("settings.goToPremium")}
-                    </button>
-                  </div>
-                ) : (
-                  <FoldersSection t={t} onFoldersUpdated={onFoldersUpdated} hasSubscription={true} />
-                )}
+                <FoldersSection t={t} onFoldersUpdated={onFoldersUpdated} hasSubscription={sub?.is_valid === true} />
               </div>
             </div>
               )}
@@ -2368,71 +2402,26 @@ export default function SettingsPage({
                 />
               )}
 
-              {/* Subscription: status + buy/gift */}
+              {/* Subscription: status + buy/gift (без отдельной шапки панели) */}
               <div className={SETTINGS_PANEL_CLASS}>
-                <div className={SETTINGS_PANEL_HEADER_CLASS}>
-                  <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-slate-800">{t("settings.subscription")}</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-500">{currentSectionMeta.description}</p>
-                  </div>
-                  <div className="relative shrink-0" ref={subscriptionMenuButtonRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowSubscriptionMenu((v) => !v)}
-                      className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                      aria-label={t("settings.paymentMethods")}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                      </svg>
-                    </button>
-                    {showSubscriptionMenu && (
-                      <AnchoredPortal
-                        anchorRef={subscriptionMenuButtonRef}
-                        portalRef={subscriptionMenuPopoverRef}
-                        align="right"
-                        minWidth={192}
-                        className="py-1 bg-white rounded-lg border border-slate-200 shadow-lg"
-                      >
-                          <button
-                            type="button"
-                            onClick={() => { setShowSubscriptionMenu(false); setShowPaymentMethodsModal(true); }}
-                            className="w-full text-left px-4 py-2.5 text-sm text-slate-800 hover:bg-slate-50"
-                          >
-                            {t("settings.paymentMethods")}
-                          </button>
-                      </AnchoredPortal>
-                    )}
-                  </div>
-                </div>
                 <div className={SETTINGS_PANEL_BODY_CLASS + " space-y-4"}>
-                  {sub && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-slate-600">{t("settings.status")}</span>
-                        <span className={`text-sm font-medium ${sub.is_valid ? "text-green-600" : "text-red-500"}`}>
-                          {getStatusLabel(sub.status || "", lang)}
-                        </span>
-                      </div>
-                      {sub.current_period_end && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-slate-600">{t("settings.validUntil")}</span>
-                          <span className="text-sm text-slate-800">
-                            {new Date(sub.current_period_end).toLocaleDateString(getLocale(lang))}
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Buy or gift */}
+                  {/* Buy or gift; статус + «Способы оплаты» в одной строке */}
                   <SubscriptionPlansBlock
                     plans={plans}
-                    introOffer={sub?.intro_offer ?? null}
                     subLoading={subLoading}
                     onSubscribe={handleSubscribe}
-                    onIntroOffer={handleIntroOffer}
                     paymentError={paymentError}
+                    initialGiftRecipient={initialGiftRecipient}
+                    onOpenPaymentMethods={() => setShowPaymentMethodsModal(true)}
+                    subscriptionSummary={
+                      sub
+                        ? {
+                            status: sub.status || "",
+                            is_valid: sub.is_valid,
+                            current_period_end: sub.current_period_end,
+                          }
+                        : undefined
+                    }
                     t={t}
                     lang={lang}
                   />
@@ -2525,7 +2514,7 @@ export default function SettingsPage({
                   </div>
                   <div className="h-4" />
                   <div className={SETTINGS_NAV_SHELL_CLASS}>
-                    <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
+                    <SettingsNav section={section} onSection={handleSectionSelect} t={t} />
                   {user?.is_staff && (
                     <div className="mt-4 border-t border-slate-100 px-1 pt-4">
                       <Link
@@ -2591,7 +2580,7 @@ export default function SettingsPage({
             {/* ===== Desktop: two columns ===== */}
             <aside className={`hidden md:flex shrink-0 ${desktopUseOverlay ? "border-r-0" : "border-r"} ui-border-subtle ui-surface-1 flex-col ${embed ? "w-[17rem] p-3.5" : "w-[18rem] p-4"}`}>
               <div className={SETTINGS_NAV_SHELL_CLASS}>
-                <SettingsNav section={section} onSection={handleSectionSelect} t={t} hasSubscription={sub?.is_valid === true} />
+                <SettingsNav section={section} onSection={handleSectionSelect} t={t} />
                 {user?.is_staff && (
                   <div className="mt-4 border-t border-slate-100 px-1 pt-4">
                   <Link

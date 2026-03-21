@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import QRCode from "qrcode";
 import { authApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 function copyToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -70,8 +71,8 @@ export default function QrLoginModal({ isOpen, onClose }: QrLoginModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 overflow-hidden">
+    <ModalViewportLayer>
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h2 className="text-lg font-semibold text-slate-800">{t("settings.qrLoginTitle")}</h2>
           <p className="text-sm text-slate-500 mt-0.5">{t("settings.qrLoginHint")}</p>
@@ -132,6 +133,6 @@ export default function QrLoginModal({ isOpen, onClose }: QrLoginModalProps) {
           )}
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

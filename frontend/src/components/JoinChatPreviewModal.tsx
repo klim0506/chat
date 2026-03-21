@@ -3,6 +3,7 @@ import { chatsApi, type JoinChatPreview } from "../api/client";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import { useTranslation, formatMembersCount } from "../lib/i18n";
 import { MediaImage } from "./MediaImage";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 interface JoinChatPreviewModalProps {
   isOpen: boolean;
@@ -99,10 +100,7 @@ export default function JoinChatPreviewModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
-      onClick={() => { if (!previewLoading && !joinLoading) onClose(); }}
-    >
+    <ModalViewportLayer onBackdropClick={previewLoading || joinLoading ? undefined : onClose}>
       <div
         className="bg-white rounded-xl shadow-xl max-w-md w-full my-auto animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
@@ -217,6 +215,6 @@ export default function JoinChatPreviewModal({
           ) : null}
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

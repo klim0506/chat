@@ -45,7 +45,7 @@ FREE_DAILY_FILE_UPLOADS = 20
 FREE_DAILY_VIDEO_CIRCLES = 3
 # Scheduled messages: Free — нет; Premium — да
 # Folders: Free — нет; Premium — да
-# Channels: Free — нет; Premium — да
+# Каналы: создать канал и настройки — доступны всем; публиковать посты — только Premium
 # Import TG: Free — нет; Premium — да
 # Custom stickers: Free — нет (только базовый набор pingy); Premium — да
 # Privacy (dm, add_to_group, phone, last_seen): Free — нет; Premium — да
@@ -124,7 +124,8 @@ def can_create_folders(user) -> bool:
     return _user_has_subscription(user)
 
 
-def can_create_channels(user) -> bool:
+def can_post_channel_content(user) -> bool:
+    """Публикация и редактирование постов в канале (owner/admin) — только с подпиской."""
     return _user_has_subscription(user)
 
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { authApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const MAX_IMAGES = 5;
 
@@ -77,7 +78,7 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    <ModalViewportLayer onBackdropClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-slate-800 mb-1">{t("feedback.title")}</h2>
         <p className="text-sm text-slate-500 mb-4">{t("feedback.desc")}</p>
@@ -148,6 +149,6 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
           </form>
         )}
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

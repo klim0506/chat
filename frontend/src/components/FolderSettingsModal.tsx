@@ -4,7 +4,7 @@ import { useChatListStore } from "../store/chatList";
 import { useTranslation } from "../lib/i18n";
 import { getAvatarInitials } from "../lib/avatar-initials";
 import type { Chat } from "../api/client";
-import { AnchoredPortal } from "./TopLayerPortal";
+import { AnchoredPortal, ModalViewportLayer } from "./TopLayerPortal";
 
 const FOLDER_EMOJIS = ["📁", "📂", "💼", "⭐", "🏠", "👥", "💬", "❤️", "🔔", "📢", "🎯", "📱", "🌟", "🔥", "📣", "💡", "🎬", "✅", "📎", "🔒"];
 const FOLDER_COLORS = ["#3B82F6", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#6B7280", "#EC4899", "#14B8A6"];
@@ -131,7 +131,7 @@ export default function FolderSettingsModal({ isOpen, folder, onClose, onUpdated
   if (!isOpen || !folder) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    <ModalViewportLayer onBackdropClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-slate-100">
           <h2 className="text-lg font-semibold text-slate-800">{t("folders.settings")}</h2>
@@ -250,6 +250,6 @@ export default function FolderSettingsModal({ isOpen, folder, onClose, onUpdated
           </button>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "../lib/i18n";
 import type { TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 /** По приоритету для пользователя: от самых востребованных к менее критичным */
 const BENEFIT_KEYS: TranslationKey[] = [
@@ -14,7 +15,6 @@ const BENEFIT_KEYS: TranslationKey[] = [
   "premiumModal.benefitReactions",
   "premiumModal.benefitScheduled",
   "premiumModal.benefitChannels",
-  "premiumModal.benefitTelegramImport",
   "premiumModal.benefitAvatars",
   "premiumModal.benefitPolls",
   "premiumModal.benefitStickers",
@@ -38,20 +38,18 @@ export default function PremiumRequiredModal() {
 
   const handleCta = () => {
     closeModal();
-    navigate("/chats/settings?section=premium");
+    // Открываем настройки Premium и сразу запускаем оплату пробной недели (страница привязки карты YooKassa).
+    navigate("/chats/settings?section=premium&checkout=intro");
   };
 
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50"
-      onClick={closeModal}
-      role="dialog"
-      aria-labelledby="premium-modal-title"
-      aria-describedby="premium-modal-desc"
-    >
+    <ModalViewportLayer onBackdropClick={closeModal}>
       <div
+        role="dialog"
+        aria-labelledby="premium-modal-title"
+        aria-describedby="premium-modal-desc"
         className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col relative"
         onClick={(e) => e.stopPropagation()}
       >
@@ -99,6 +97,6 @@ export default function PremiumRequiredModal() {
           </button>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

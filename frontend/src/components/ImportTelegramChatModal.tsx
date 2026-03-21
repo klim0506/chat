@@ -3,6 +3,7 @@ import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { userDisplayName } from "../api/client";
 import { usePremiumModalStore } from "../store/premiumModal";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -134,10 +135,7 @@ export default function ImportTelegramChatModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
-      onClick={() => { if (!loading) handleClose(); }}
-    >
+    <ModalViewportLayer onBackdropClick={loading ? undefined : handleClose}>
       <div
         className="bg-white rounded-xl shadow-xl max-w-lg w-full my-auto animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -276,6 +274,6 @@ export default function ImportTelegramChatModal({
           </div>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

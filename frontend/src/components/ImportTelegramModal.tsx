@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { channelsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 interface ImportTelegramModalProps {
   channelId: string;
@@ -75,10 +76,7 @@ export default function ImportTelegramModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
-      onClick={() => { if (!loading) handleClose(); }}
-    >
+    <ModalViewportLayer onBackdropClick={loading ? undefined : handleClose}>
       <div
         className="bg-white rounded-xl shadow-xl max-w-md w-full my-auto animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
@@ -157,6 +155,6 @@ export default function ImportTelegramModal({
           </div>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

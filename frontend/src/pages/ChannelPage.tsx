@@ -236,7 +236,6 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
   }
 
   const hasChannelAuthorRole = channel.my_role === "owner" || channel.my_role === "admin";
-  const canPost = hasChannelAuthorRole && subscriptionState?.is_valid === true;
 
   const BackButton = embed && onBack ? (
     <button
@@ -278,10 +277,7 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
 
       {/* Лента постов — как сообщения в чате */}
       <main className="flex-1 min-h-0 overflow-y-auto px-4 py-3 bg-slate-50">
-        {posts.length === 0 && !canPost && (
-          <p className="text-slate-500 text-center py-12">{t("channelPage.noPosts")}</p>
-        )}
-        {posts.length === 0 && canPost && (
+        {posts.length === 0 && (
           <p className="text-slate-500 text-center py-12">{t("channelPage.noPosts")}</p>
         )}
         <div className="space-y-3">
@@ -339,59 +335,46 @@ export default function ChannelPage({ embed, onBack }: ChannelPageProps) {
       {/* Input — только для автора */}
       {hasChannelAuthorRole ? (
         <div className="shrink-0 border-t border-slate-200 bg-white p-3">
-          {canPost ? (
-            <div className="flex flex-col gap-2">
-              {imageFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {imageFiles.map((file, i) => (
-                    <PostImagePreview key={i} file={file} onRemove={() => removeImage(i)} />
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-2 items-end">
-                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0"
-                  title={t("channelPage.addPhotos")}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                    <circle cx="9" cy="9" r="2" />
-                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                  </svg>
-                </button>
-                <textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder={t("channelPage.contentPlaceholder")}
-                  className="flex-1 min-h-[44px] max-h-32 resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-                  rows={1}
-                />
-                <button
-                  type="button"
-                  onClick={handlePublish}
-                  disabled={publishing || (!content.trim() && imageFiles.length === 0)}
-                  className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 shrink-0"
-                >
-                  <SendIcon size={20} />
-                </button>
+          <div className="flex flex-col gap-2">
+            {imageFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {imageFiles.map((file, i) => (
+                  <PostImagePreview key={i} file={file} onRemove={() => removeImage(i)} />
+                ))}
               </div>
-              {publishError && <p className="text-red-600 text-sm">{publishError}</p>}
-            </div>
-          ) : (
-            <div className="text-center">
-              <p className="text-sm text-slate-500">{t("channelPage.premiumRequiredToPost")}</p>
+            )}
+            <div className="flex gap-2 items-end">
+              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
               <button
                 type="button"
-                onClick={openPremiumModal}
-                className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0"
+                title={t("channelPage.addPhotos")}
               >
-                {t("premiumModal.cta")}
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                  <circle cx="9" cy="9" r="2" />
+                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                </svg>
+              </button>
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={t("channelPage.contentPlaceholder")}
+                className="flex-1 min-h-[44px] max-h-32 resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                rows={1}
+              />
+              <button
+                type="button"
+                onClick={handlePublish}
+                disabled={publishing || (!content.trim() && imageFiles.length === 0)}
+                className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 shrink-0"
+              >
+                <SendIcon size={20} />
               </button>
             </div>
-          )}
+            {publishError && <p className="text-red-600 text-sm">{publishError}</p>}
+          </div>
         </div>
       ) : (
         <div className="shrink-0 border-t border-slate-200 bg-white p-3">

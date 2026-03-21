@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { foldersApi, userDisplayName, type Chat, type ChatFolder } from "../api/client";
 import { useTranslation } from "../lib/i18n";
-import { AnchoredPortal } from "./TopLayerPortal";
+import { AnchoredPortal, ModalViewportLayer } from "./TopLayerPortal";
 
 const FOLDER_EMOJIS = ["📁", "📂", "💼", "⭐", "🏠", "👥", "💬", "❤️", "🔔", "📢", "🎯", "📱", "🌟", "🔥", "📣", "💡", "🎬", "✅", "📎", "🔒"];
 const FOLDER_COLORS = ["#3B82F6", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#6B7280", "#EC4899", "#14B8A6"];
@@ -102,7 +102,7 @@ export default function CreateFolderModal({ isOpen, chats, onClose, onCreated }:
   if (!isOpen) return null;
 
   return (
-    <div className="ui-overlay fixed inset-0 z-[150] flex items-center justify-center p-4" onClick={onClose}>
+    <ModalViewportLayer onBackdropClick={onClose}>
       <div className="ui-modal-surface max-h-[85vh] w-full max-w-lg overflow-hidden rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit} className="flex max-h-[85vh] flex-col">
           <div className="border-b border-slate-200 px-6 py-4">
@@ -231,6 +231,6 @@ export default function CreateFolderModal({ isOpen, chats, onClose, onCreated }:
           </div>
         </form>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

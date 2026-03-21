@@ -23,7 +23,7 @@ from .serializers import (
 )
 from .utils import generate_slug, make_verification_code, verify_invite_code
 from .telegram_import import import_telegram_export
-from apps.payments.plan_limits import can_create_channels, can_import_telegram, RESTRICTION_CODE
+from apps.payments.plan_limits import can_post_channel_content, can_import_telegram, RESTRICTION_CODE
 from apps.common.image_utils import compress_uploaded_image, create_avatar_thumbnails, delete_avatar_thumbnails, AVATAR_MAX_DIM
 
 
@@ -60,8 +60,6 @@ def _ensure_channel_management_allowed(request, channel, detail: str):
     role = _channel_member_role(request, channel)
     if role not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
         return Response({"detail": "Нет прав."}, status=status.HTTP_403_FORBIDDEN)
-    if not can_create_channels(request.user):
-        return _premium_restriction_response(detail)
     return None
 
 
@@ -69,7 +67,7 @@ def _ensure_channel_posting_allowed(request, channel):
     role = _channel_member_role(request, channel)
     if role not in (ChannelMember.Role.OWNER, ChannelMember.Role.ADMIN):
         return Response({"detail": "Публиковать посты могут только владелец и администраторы."}, status=status.HTTP_403_FORBIDDEN)
-    if not can_create_channels(request.user):
+    if not can_post_channel_content(request.user):
         return _premium_restriction_response("Публикация в канале доступна только с Premium.")
     return None
 
@@ -113,11 +111,6 @@ class ChannelViewSet(viewsets.ModelViewSet):
         return ChannelSerializer
 
     def create(self, request, *args, **kwargs):
-        if not can_create_channels(request.user):
-            return Response(
-                {"detail": "Для создания канала нужна активная подписка.", "code": RESTRICTION_CODE},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         data = request.data if request.data is not None else {}
         ser = ChannelCreateSerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)

@@ -32,6 +32,7 @@ urlpatterns = [
     path("api/e2ee/", include("apps.e2ee.urls")),
     path("api/gif/", include("apps.chats.gif_urls")),
     path("api/stickers/", include("apps.chats.sticker_urls")),
+    path("api/system-assets/", include("apps.chats.system_assets_urls")),
     path("chat/join/<path:_rest>", redirect_join_to_frontend),
 ]
 

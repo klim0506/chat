@@ -333,6 +333,26 @@ select {
   color: #0c4a6e;
   box-shadow: 0 10px 24px rgba(14, 165, 233, 0.14);
 }
+.ui-picker-tile-borderless,
+.ui-picker-tile-borderless:hover {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.ui-picker-tile-borderless:hover {
+  background: rgba(241, 245, 249, 0.5) !important;
+}
+.ui-picker-tile-borderless.ui-picker-tile-active {
+  background: rgba(224, 242, 254, 0.7) !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+:root[data-theme="dark"] .ui-picker-tile-borderless:hover {
+  background: rgba(27, 41, 62, 0.8) !important;
+}
+:root[data-theme="dark"] .ui-picker-tile-borderless.ui-picker-tile-active {
+  background: rgba(8, 47, 73, 0.7) !important;
+}
 .ui-icon-button {
   background: rgba(248, 250, 252, 0.88);
   border: 1px solid rgba(203, 213, 225, 0.66);
@@ -447,12 +467,12 @@ select {
 }
 
 .chat-entity-card--mine {
-  background: linear-gradient(180deg, rgba(238, 247, 255, 0.98), rgba(228, 241, 255, 0.94));
+  background: #eaf4ff;
   border-color: rgba(147, 197, 253, 0.5);
 }
 
 .chat-entity-card--other {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+  background: #ffffff;
 }
 
 :root[data-theme="dark"] .app-shell-backdrop {
@@ -856,31 +876,31 @@ select {
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
 }
 
+/* Верх чата и поле ввода — лёгкий градиент; сами пузырьки сообщений — сплошной фон */
 :root[data-theme="dark"] .chat-topbar-surface,
-:root[data-theme="dark"] .chat-composer-surface,
-:root[data-theme="dark"] .chat-bubble-surface--other,
-:root[data-theme="dark"] .chat-bubble-footer--other,
-:root[data-theme="dark"] .chat-entity-card--other {
+:root[data-theme="dark"] .chat-composer-surface {
   background:
     linear-gradient(180deg, rgba(11, 20, 35, 0.94), rgba(9, 17, 30, 0.9));
   border-color: rgba(61, 87, 124, 0.82) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 10px 28px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme="dark"] .chat-bubble-surface--other,
+:root[data-theme="dark"] .chat-bubble-footer--other,
+:root[data-theme="dark"] .chat-entity-card--other {
+  background: rgba(10, 18, 31, 0.97);
+  border-color: rgba(61, 87, 124, 0.82) !important;
+  box-shadow: none;
 }
 
 :root[data-theme="dark"] .chat-bubble-surface--mine,
 :root[data-theme="dark"] .chat-bubble-footer--mine,
 :root[data-theme="dark"] .chat-entity-card--mine {
-  background:
-    radial-gradient(circle at 16% 0%, rgba(56, 189, 248, 0.12), transparent 30%),
-    linear-gradient(180deg, rgba(17, 46, 75, 0.96), rgba(12, 34, 58, 0.96));
+  background: rgba(13, 38, 64, 0.98);
   border-color: rgba(73, 186, 255, 0.34) !important;
-  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.24);
-}
-
-:root[data-theme="dark"] .chat-topbar-surface,
-:root[data-theme="dark"] .chat-composer-surface {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    0 10px 28px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.2);
 }
 
 /* Landing animations */

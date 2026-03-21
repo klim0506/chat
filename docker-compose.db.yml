@@ -1,0 +1,25 @@
+# Устарело: используйте корневой docker-compose.yml (сеть internal, Postgres без публикации порта).
+# Продакшен PostgreSQL в Docker (порт 5433 — не конфликтует с системным Postgres на 5432).
+# Пароль в postgres.docker.env (не коммитить). Запуск: docker compose -f docker-compose.db.yml up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pingychat-postgres
+    restart: unless-stopped
+    env_file:
+      - postgres.docker.env
+    environment:
+      POSTGRES_USER: pingychat
+      POSTGRES_DB: pingychat_db
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pingychat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pingychat -d pingychat_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pingychat_pgdata:

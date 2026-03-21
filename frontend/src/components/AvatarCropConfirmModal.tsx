@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "../lib/i18n";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 const VIEW_SIZE = 280;
 const EXPORT_SIZE = 256;
@@ -119,14 +120,14 @@ export function AvatarCropConfirmModal({
 
   if (!image) {
     return (
-      <div className="ui-overlay fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <ModalViewportLayer>
         <div className="ui-modal-surface rounded-2xl p-8 text-slate-600">Загрузка фото…</div>
-      </div>
+      </ModalViewportLayer>
     );
   }
 
   return (
-    <div className="ui-overlay fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onCancel}>
+    <ModalViewportLayer onBackdropClick={onCancel}>
       <div
         className="ui-modal-surface max-w-sm w-full overflow-hidden rounded-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -204,6 +205,6 @@ export function AvatarCropConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

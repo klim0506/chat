@@ -10,6 +10,7 @@ import { useTranslation } from "../lib/i18n";
 import { requestPermission, NOTIFICATIONS_SUPPORTED } from "../lib/notifications";
 import { AvatarCropConfirmModal } from "../components/AvatarCropConfirmModal";
 import { PhoneInput } from "../components/PhoneInput";
+import { ModalViewportLayer } from "../components/TopLayerPortal";
 
 import { LOGO_URL } from "../lib/constants";
 
@@ -44,7 +45,6 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [step, setStep] = useState<"phone" | "code" | "username">("phone");
-  const [codeMethod, setCodeMethod] = useState<"sms" | "telegram" | "pingy" | "">("");
   const [isNewPhone, setIsNewPhone] = useState<boolean | null>(null); // null = not yet checked
   const [, setDeliveryInfo] = useState("");
   const [telegramRequesting, setTelegramRequesting] = useState(false);
@@ -53,6 +53,10 @@ export default function AuthPage() {
   const [pairingLoading, setPairingLoading] = useState(false);
   /** Seconds left before "Get code" can be requested again (429 throttle). */
   const [sendCodeCooldown, setSendCodeCooldown] = useState(0);
+  /** Сколько раз уже отправили код на этот номер в текущей сессии (1 — после телефона, 2 — после 1-го «в Telegram», 3 — после 2-го). */
+  const [codeSendCount, setCodeSendCount] = useState(0);
+  /** Секунды до следующей повторной отправки под кнопкой «Войти»: после 1-го кода — 60 с, перед 3-м — 180 с после 2-го. */
+  const [resendCooldownSec, setResendCooldownSec] = useState(0);
   /** После успешной установки username: показать модалку «включить уведомления», затем редирект. */
   const [showNotifyModal, setShowNotifyModal] = useState(false);
 
@@ -66,6 +70,14 @@ export default function AuthPage() {
     }, 1000);
     return () => clearInterval(t);
   }, [sendCodeCooldown]);
+
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return;
+    const id = setInterval(() => {
+      setResendCooldownSec((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [resendCooldownSec]);
 
   // If URL has ?pairing=token, exchange and redirect
   useEffect(() => {
@@ -172,30 +184,73 @@ export default function AuthPage() {
   }, [language]);
 
   const onSendCode = async (data: PhoneForm) => {
+    const submittedPhone = data.phone;
     setError("");
     setDeliveryInfo("");
     setLoading(true);
-    setCodeMethod("");
     try {
-      const res = await authApi.sendCode(data.phone);
+      const res = await authApi.sendCode(data.phone, "telegram");
+      // #region agent log
+      fetch("http://localhost:7918/ingest/77362a67-2cd9-4f4e-9a91-df1884063ee5", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d69873" },
+        body: JSON.stringify({
+          sessionId: "d69873",
+          location: "AuthPage.tsx:onSendCode",
+          message: "send_code_ok",
+          data: {
+            hypothesisId: "FE1",
+            phoneLen: data.phone.length,
+            phoneSuffix: data.phone.slice(-4),
+            status: res.status,
+            method: (res.data as { method?: string })?.method,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setPhone(data.phone);
       setStep("code");
+      setCodeSendCount(1);
+      setResendCooldownSec(60);
       const resData = res.data as { detail?: string; method?: string; is_new?: boolean };
-      setCodeMethod(resData.method === "sms" ? "sms" : resData.method === "pingy" ? "pingy" : "telegram");
       setIsNewPhone(resData.is_new ?? null);
       setDeliveryInfo(resData.detail || "");
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { detail?: string; wait?: number } } };
-      const data = err?.response?.data;
+      const err = e as {
+        response?: { status?: number; data?: { detail?: string; wait?: number } };
+        code?: string;
+      };
+      const errData = err?.response?.data;
       const statusCode = err?.response?.status;
+      // #region agent log
+      fetch("http://localhost:7918/ingest/77362a67-2cd9-4f4e-9a91-df1884063ee5", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d69873" },
+        body: JSON.stringify({
+          sessionId: "d69873",
+          location: "AuthPage.tsx:onSendCode",
+          message: "send_code_err",
+          data: {
+            hypothesisId: "FE1",
+            phoneLen: submittedPhone.length,
+            hasResponse: Boolean(err?.response),
+            status: statusCode,
+            detailPrefix: typeof errData?.detail === "string" ? errData.detail.slice(0, 80) : "",
+            isAxiosTimeout: err?.code === "ECONNABORTED",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const fallbackMessage = t("auth.sendCodeFailed");
       if (statusCode === 429) {
         setError("");
       } else {
-        setError(fallbackMessage);
+        setError((errData?.detail && String(errData.detail).trim()) || fallbackMessage);
       }
-      if (statusCode === 429 && typeof data?.wait === "number" && data.wait > 0) {
-        setSendCodeCooldown(data.wait);
+      if (statusCode === 429 && typeof errData?.wait === "number" && errData.wait > 0) {
+        setSendCodeCooldown(errData.wait);
       }
     } finally {
       setLoading(false);
@@ -204,18 +259,28 @@ export default function AuthPage() {
 
   const onRequestCodeVia = async (method: "telegram" | "sms" | "pingy") => {
     if (!phone) return;
+    if (codeSendCount >= 3 || resendCooldownSec > 0) return;
     setError("");
     setDeliveryInfo("");
     setTelegramRequesting(true);
     try {
       const res = await authApi.sendCode(phone, method, true);
       const resData = res.data as { detail?: string; method?: string };
-      setCodeMethod(resData.method === "sms" ? "sms" : resData.method === "pingy" ? "pingy" : "telegram");
       setDeliveryInfo(resData.detail || "");
       codeForm.reset({ code: "" });
+      setCodeSendCount((c) => {
+        const next = c + 1;
+        if (next === 2) setResendCooldownSec(180);
+        return next;
+      });
     } catch (e: unknown) {
-      const data = (e as { response?: { data?: { detail?: string } } })?.response?.data;
+      const err = e as { response?: { status?: number; data?: { detail?: string; wait?: number } } };
+      const data = err?.response?.data;
+      const statusCode = err?.response?.status;
       setError(data?.detail || t("common.error"));
+      if (statusCode === 429 && typeof data?.wait === "number" && data.wait > 0) {
+        setResendCooldownSec((s) => Math.max(s, data.wait!));
+      }
     } finally {
       setTelegramRequesting(false);
     }
@@ -245,6 +310,24 @@ export default function AuthPage() {
   const onVerifyCode = async (data: CodeForm) => {
     setError("");
     setLoading(true);
+    // #region agent log
+    fetch("http://localhost:7918/ingest/77362a67-2cd9-4f4e-9a91-df1884063ee5", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d69873" },
+      body: JSON.stringify({
+        sessionId: "d69873",
+        location: "AuthPage.tsx:onVerifyCode",
+        message: "verify_attempt",
+        data: {
+          hypothesisId: "FE2",
+          phoneStateLen: phone.length,
+          phoneSuffix: phone.slice(-4),
+          codeLen: data.code.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     try {
       const res = await authApi.verifyCode(phone, data.code, isNewPhone !== false ? (refCode || undefined) : undefined);
       setTokens(res.data.access, res.data.refresh, res.data.user);
@@ -255,7 +338,25 @@ export default function AuthPage() {
         navigate(target, { replace: true });
       }
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t("auth.invalidCode"));
+      const ve = e as { response?: { status?: number; data?: { detail?: string } } };
+      // #region agent log
+      fetch("http://localhost:7918/ingest/77362a67-2cd9-4f4e-9a91-df1884063ee5", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d69873" },
+        body: JSON.stringify({
+          sessionId: "d69873",
+          location: "AuthPage.tsx:onVerifyCode",
+          message: "verify_err",
+          data: {
+            hypothesisId: "FE2",
+            status: ve.response?.status,
+            detail: typeof ve.response?.data?.detail === "string" ? ve.response.data.detail.slice(0, 120) : "",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      setError(ve.response?.data?.detail || t("auth.invalidCode"));
     } finally {
       setLoading(false);
     }
@@ -371,7 +472,7 @@ export default function AuthPage() {
         subtitle: "Номер, код и короткая настройка профиля. Без разрозненных экранов и лишних решений.",
         stages: [
           { key: "phone" as const, label: "Номер", hint: "Введите телефон или код входа" },
-          { key: "verify" as const, label: "Код", hint: "Подтверждение через Pingy, Telegram или SMS" },
+          { key: "verify" as const, label: "Код", hint: "Подтверждение через Telegram" },
           { key: "profile" as const, label: "Профиль", hint: "Имя, username и фото по желанию" },
         ],
         flowBadges: { login: "Вход", create: "Новый аккаунт" },
@@ -381,10 +482,10 @@ export default function AuthPage() {
           profile: "Создайте аккаунт",
         },
         descriptions: {
-          phone: "Если у вас уже есть Pingy, код придёт туда.",
-          verifyPingy: "Мы отправили сообщение на другое устройство с Pingy. Если удобнее, ниже можно запросить это же сообщение в Telegram.",
+          phone: "Код входа приходит в Telegram.",
+          // verifyPingy: "Мы отправили сообщение на другое устройство с Pingy. Если удобнее, ниже можно запросить это же сообщение в Telegram.",
           verifyTelegram: "Код придёт в Telegram. Введите его и продолжайте без лишних шагов.",
-          verifySms: "Введите шестизначный код из SMS, чтобы продолжить.",
+          // verifySms: "Введите шестизначный код из SMS, чтобы продолжить.",
           profile: "",
           pairing: "Введите код с другого устройства, чтобы подтвердить вход вручную.",
         },
@@ -395,7 +496,7 @@ export default function AuthPage() {
         subtitle: "Phone, code, and a short profile step. No scattered screens and no extra friction.",
         stages: [
           { key: "phone" as const, label: "Phone", hint: "Enter your phone or pairing code" },
-          { key: "verify" as const, label: "Code", hint: "Pingy, Telegram, or SMS confirmation" },
+          { key: "verify" as const, label: "Code", hint: "Telegram confirmation" },
           { key: "profile" as const, label: "Profile", hint: "Name, username, and optional photo" },
         ],
         flowBadges: { login: "Log in", create: "New account" },
@@ -405,10 +506,10 @@ export default function AuthPage() {
           profile: "Create account",
         },
         descriptions: {
-          phone: "If you already have Pingy, the code will arrive there.",
-          verifyPingy: "We sent a message to your other active Pingy device. If you prefer, you can request the same code in Telegram below.",
+          phone: "The login code is sent to Telegram.",
+          // verifyPingy: "We sent a message to your other active Pingy device. If you prefer, you can request the same code in Telegram below.",
           verifyTelegram: "The code arrives in Telegram. Enter it and keep going without extra steps.",
-          verifySms: "Enter the six-digit SMS code to continue.",
+          // verifySms: "Enter the six-digit SMS code to continue.",
           profile: "",
           pairing: "Enter the code from another device to approve this sign-in manually.",
         },
@@ -518,13 +619,21 @@ export default function AuthPage() {
                     <div className="flex min-w-0 items-baseline gap-2 pt-2 text-sm leading-6 text-slate-600 whitespace-nowrap">
                       <span>
                         {language === "ru"
-                          ? `Отправили сообщение в ${codeMethod === "telegram" ? "Telegram" : codeMethod === "pingy" ? "Pingy" : "SMS"} на номер`
-                          : `Sent a message to ${codeMethod === "telegram" ? "Telegram" : codeMethod === "pingy" ? "Pingy" : "SMS"} for number`}
+                          ? "Отправили сообщение в Telegram на номер"
+                          : "Sent a message to Telegram for number"}
                       </span>
                       <span className="font-medium text-slate-900">{phone}</span>
                       <button
                         type="button"
-                        onClick={() => { setStep("phone"); setError(""); setDeliveryInfo(""); setIsNewPhone(null); codeForm.reset({ code: "" }); }}
+                        onClick={() => {
+                          setStep("phone");
+                          setError("");
+                          setDeliveryInfo("");
+                          setIsNewPhone(null);
+                          setCodeSendCount(0);
+                          setResendCooldownSec(0);
+                          codeForm.reset({ code: "" });
+                        }}
                         className="font-medium text-sky-700 transition-colors hover:text-sky-800"
                       >
                         {t("auth.changeNumber")}
@@ -747,8 +856,21 @@ export default function AuthPage() {
                   <p className="text-center text-sm text-slate-500">
                     {telegramRequesting ? (
                       t("auth.sending")
+                    ) : codeSendCount >= 3 ? (
+                      <span className="text-slate-400">
+                        {language === "ru"
+                          ? "Достигнут лимит повторных отправок кода"
+                          : "Maximum number of code requests reached"}
+                      </span>
+                    ) : resendCooldownSec > 0 ? (
+                      <span className="text-slate-400">
+                        {language === "ru"
+                          ? `Отправить снова через ${resendCooldownSec} сек.`
+                          : `Send again in ${resendCooldownSec} sec.`}
+                      </span>
                     ) : (
                       <>
+                        {/*
                         <button
                           type="button"
                           onClick={() => onRequestCodeVia("pingy")}
@@ -758,14 +880,16 @@ export default function AuthPage() {
                           {language === "ru" ? "Отправить в Pingy" : "Send to Pingy"}
                         </button>
                         {" · "}
+                        */}
                         <button
                           type="button"
                           onClick={() => onRequestCodeVia("telegram")}
-                          disabled={loading}
-                          className="font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline"
+                          disabled={loading || resendCooldownSec > 0 || codeSendCount >= 3}
+                          className="font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
                         >
                           {language === "ru" ? "Отправить в Telegram" : "Send to Telegram"}
                         </button>
+                        {/*
                         {" · "}
                         <button
                           type="button"
@@ -775,6 +899,7 @@ export default function AuthPage() {
                         >
                           {language === "ru" ? "Отправить по SMS" : "Send via SMS"}
                         </button>
+                        */}
                       </>
                     )}
                   </p>
@@ -796,8 +921,8 @@ export default function AuthPage() {
 
       {/* Рекомендация включить уведомления после регистрации; по кнопке — запрос разрешения у браузера */}
       {showNotifyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title">
-          <div className="auth-glass-card w-full max-w-sm rounded-[28px] p-6 shadow-[0_28px_80px_rgba(15,23,42,0.24)]">
+        <ModalViewportLayer>
+          <div className="auth-glass-card w-full max-w-sm rounded-[28px] p-6 shadow-[0_28px_80px_rgba(15,23,42,0.24)]" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"/>
@@ -827,7 +952,7 @@ export default function AuthPage() {
               </button>
             </div>
           </div>
-        </div>
+        </ModalViewportLayer>
       )}
     </div>
   );

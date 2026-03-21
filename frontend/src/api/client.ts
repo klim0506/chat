@@ -1,6 +1,6 @@
 import axios from "axios";
 import { useAuthStore } from "../store/auth";
-import { usePremiumPromptStore } from "../store/premiumPrompt";
+import { usePremiumModalStore } from "../store/premiumModal";
 
 const baseURL = import.meta.env.VITE_API_URL || "";
 
@@ -8,6 +8,8 @@ const baseURL = import.meta.env.VITE_API_URL || "";
 const clientType = (import.meta.env.VITE_CLIENT_TYPE as string) || "web";
 
 const API_TIMEOUT_MS = 12_000;
+/** Send-code: Telegram Gateway (up to 3 attempts) + optional RedSMS fallback — total server time must stay below this. */
+const AUTH_SEND_CODE_TIMEOUT_MS = 90_000;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -105,8 +107,7 @@ api.interceptors.response.use(
       const detail = data && typeof data === "object" && "detail" in data ? (data as { detail?: string | string[] }).detail : undefined;
       const msg = typeof detail === "string" ? detail : Array.isArray(detail) ? (detail[0] ?? "") : "";
       if (code === "plan_restriction" || (typeof msg === "string" && (msg.includes("подписк") || msg.includes("subscription")))) {
-        const reason = typeof msg === "string" && (msg.includes("кружк") || msg.includes("video")) ? "videoCircles" as const : "generic";
-        usePremiumPromptStore.getState().openPrompt(reason);
+        usePremiumModalStore.getState().openModal();
       }
     }
     return Promise.reject(error);
@@ -223,12 +224,16 @@ export interface StarsBalance {
 export type UserSearchResult = Pick<User, "id" | "username" | "display_name" | "avatar_url">;
 
 export const authApi = {
-  sendCode: (phone: string, method?: "sms" | "telegram", reuseExisting = false) =>
-    api.post<{ detail: string; method?: "sms" | "telegram" | "pingy" | "debug"; is_new?: boolean }>("/auth/send-code/", {
-      phone,
-      ...(method ? { method } : {}),
-      ...(reuseExisting ? { reuse_existing: true } : {}),
-    }),
+  sendCode: (phone: string, method?: "sms" | "telegram" | "pingy", reuseExisting = false) =>
+    api.post<{ detail: string; method?: "sms" | "telegram" | "pingy" | "debug"; is_new?: boolean }>(
+      "/auth/send-code/",
+      {
+        phone,
+        ...(method ? { method } : {}),
+        ...(reuseExisting ? { reuse_existing: true } : {}),
+      },
+      { timeout: AUTH_SEND_CODE_TIMEOUT_MS }
+    ),
   verifyCode: (phone: string, code: string, ref?: string, username?: string) =>
     api.post<{ access: string; refresh: string; user: User }>("/auth/verify-code/", {
       phone,
@@ -828,6 +833,40 @@ export const stickersApi = {
     api.post<{ ok: boolean }>("/stickers/save-recent/", { sticker_id: stickerId }),
 };
 
+export interface SystemEmojiItem {
+  id: string;
+  emoji: string;
+  shortcode: string;
+  category: string;
+  position: number;
+  file: { id: string; access_handle: string; url?: string; mime_type: string; original_name: string } | null;
+  created_at: string;
+}
+
+export interface SystemStickerItem {
+  id: string;
+  emoji: string;
+  label: string;
+  position: number;
+  file: { id: string; access_handle: string; url?: string; mime_type: string; original_name: string } | null;
+  created_at: string;
+}
+
+export const systemAssetsApi = {
+  listEmojis: () => api.get<SystemEmojiItem[]>("/system-assets/emojis/"),
+  addEmoji: (data: { file_id: string; emoji: string; shortcode?: string; category?: string }) =>
+    api.post<SystemEmojiItem>("/system-assets/emojis/", data),
+  patchEmoji: (id: string, data: Partial<{ emoji: string; shortcode: string; category: string; position: number }>) =>
+    api.patch<SystemEmojiItem>(`/system-assets/emojis/${id}/`, data),
+  deleteEmoji: (id: string) => api.delete(`/system-assets/emojis/${id}/`),
+  listStickers: () => api.get<SystemStickerItem[]>("/system-assets/stickers/"),
+  addSticker: (data: { file_id: string; emoji?: string; label?: string }) =>
+    api.post<SystemStickerItem>("/system-assets/stickers/", data),
+  patchSticker: (id: string, data: Partial<{ emoji: string; label: string; position: number }>) =>
+    api.patch<SystemStickerItem>(`/system-assets/stickers/${id}/`, data),
+  deleteSticker: (id: string) => api.delete(`/system-assets/stickers/${id}/`),
+};
+
 export const scheduledApi = {
   list: (chatId: string) => api.get<ScheduledMessage[]>(`/chats/${chatId}/scheduled/`),
   create: (
@@ -861,16 +900,22 @@ export const filesApi = {
     chatId?: string,
     isEncrypted?: boolean,
     options?: {
+      storageContext?: "system_emoji" | "system_sticker";
       onUploadProgress?: (loaded: number, total: number) => void;
       onChunkedUploadId?: (uploadId: string) => void;
       signal?: AbortSignal;
     }
   ) => {
-    const useChunked = file.size > CHUNKED_UPLOAD_THRESHOLD;
+    const storageContext = options?.storageContext;
+    const useChunked = file.size > CHUNKED_UPLOAD_THRESHOLD && !storageContext;
     if (!useChunked) {
       const form = new FormData();
       form.append("file", file);
-      if (chatId) form.append("chat_id", chatId);
+      if (storageContext) {
+        form.append("storage_context", storageContext);
+      } else if (chatId) {
+        form.append("chat_id", chatId);
+      }
       if (isEncrypted) form.append("is_encrypted", "true");
       return api.post<FileAttachment>("/files/upload/", form, {
         signal: options?.signal,

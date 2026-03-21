@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { userDisplayName } from "../api/client";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 interface Participant {
   display_name: string;
@@ -104,10 +105,7 @@ export default function ManageImportModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
-      onClick={() => { if (!loading) onClose(); }}
-    >
+    <ModalViewportLayer onBackdropClick={loading ? undefined : onClose}>
       <div
         className="bg-white rounded-xl shadow-xl max-w-lg w-full my-auto animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -201,6 +199,6 @@ export default function ManageImportModal({
           </div>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

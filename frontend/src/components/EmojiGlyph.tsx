@@ -1,17 +1,33 @@
 import { useState } from "react";
 import { TELEGRAM_EMOJI_SRC_BY_EMOJI } from "../data/telegram-emojis";
+import { MediaImage } from "./MediaImage";
+import { isOpaqueMediaHandle } from "../lib/media-url";
 
 interface EmojiGlyphProps {
   emoji: string;
   size?: number;
   className?: string;
   preferNative?: boolean;
+  /** Override: image URL or access handle (e.g. for system emojis from API) */
+  imageSource?: string;
 }
 
-export function EmojiGlyph({ emoji, size = 22, className = "", preferNative = false }: EmojiGlyphProps) {
-  const src = TELEGRAM_EMOJI_SRC_BY_EMOJI.get(emoji);
+export function EmojiGlyph({ emoji, size = 22, className = "", preferNative = false, imageSource }: EmojiGlyphProps) {
+  const src = imageSource ?? TELEGRAM_EMOJI_SRC_BY_EMOJI.get(emoji);
   const [useNativeFallback, setUseNativeFallback] = useState(preferNative);
+  const useMediaImage = imageSource && isOpaqueMediaHandle(imageSource);
   if (src && !useNativeFallback) {
+    if (useMediaImage) {
+      return (
+        <MediaImage
+          source={src}
+          alt={emoji}
+          width={size}
+          height={size}
+          className={`inline-block shrink-0 object-contain ${className}`}
+        />
+      );
+    }
     return (
       <img
         src={src}

@@ -39,6 +39,7 @@ import { MessageListSkeleton } from "../components/MessageListSkeleton";
 import { LottieSticker, getStickerAnimationUrl } from "../components/LottieSticker";
 import { StickerGifPanel } from "../components/StickerGifPanel";
 import ConfirmModal from "../components/ConfirmModal";
+import { ModalViewportLayer } from "../components/TopLayerPortal";
 import ImportTelegramModal from "../components/ImportTelegramModal";
 import ImportTelegramChatModal from "../components/ImportTelegramChatModal";
 import ManageImportModal from "../components/ManageImportModal";
@@ -1051,7 +1052,6 @@ export default function ChatPage({
     [channelRaw, myUserId],
   );
   const hasPremiumAccess = subscriptionState?.is_valid === true;
-  const canPostToChannel = hasChannelAuthorRole && hasPremiumAccess;
   const canCommentInChannel = !!(channelRaw?.comments_enabled && channelRaw?.my_role);
   const canPinForAll = useMemo(
     () => !!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"))),
@@ -1227,7 +1227,8 @@ export default function ChatPage({
   }, [channelId, openCommentsPost]);
   const handleSendComment = useCallback(async () => {
     if (!channelId || !openCommentsPost) return;
-    if (!canCommentInChannel) {
+    if (!canCommentInChannel) return;
+    if (!hasPremiumAccess) {
       openPremiumModal();
       return;
     }
@@ -1254,7 +1255,7 @@ export default function ChatPage({
     } finally {
       setCommentSubmitting(false);
     }
-  }, [canCommentInChannel, channelId, commentInput, openCommentsPost, openPremiumModal, replyToComment, t, updateChannelPostCommentsCount]);
+  }, [canCommentInChannel, channelId, commentInput, hasPremiumAccess, openCommentsPost, openPremiumModal, replyToComment, t, updateChannelPostCommentsCount]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   /** Только у одного сообщения может быть открыт пикер реакций; при открытии другого — предыдущий закрывается. */
@@ -1863,6 +1864,11 @@ export default function ChatPage({
 
     const doSendPlain = () => {
       if (channelId) {
+        if (!hasPremiumAccess) {
+          openPremiumModal();
+          sendTextInFlightRef.current = false;
+          return;
+        }
         sendViaRest({ msg_type: "text", content: trimmed, ...(replyId ? { reply_to_id: replyId } : {}) });
         return;
       }
@@ -1933,13 +1939,17 @@ export default function ChatPage({
     }
     doSendPlain();
     sendTextInFlightRef.current = false;
-  }, [conversationId, chatId, channelId, chat, replyToMessage, resetUndoStack, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage, t]);
+  }, [conversationId, chatId, channelId, chat, replyToMessage, resetUndoStack, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage, t, hasPremiumAccess, openPremiumModal]);
 
   const handleSelectGif = useCallback((url: string) => {
     if (!conversationId || !url) return;
     setShowStickerGifPanel(false);
     const replyId = replyToMessage?.id;
     if (channelId) {
+      if (!hasPremiumAccess) {
+        openPremiumModal();
+        return;
+      }
       createMessage({ msg_type: "gif", content: url, ...(replyId ? { reply_to_id: replyId } : {}) }).then((res) => {
         const msg = storeNormalizeMessage(res.data);
         storeUpsertMessage(conversationId, msg);
@@ -1966,7 +1976,7 @@ export default function ChatPage({
       });
     }
     setReplyToMessage(null);
-  }, [conversationId, chatId, channelId, replyToMessage, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage]);
+  }, [conversationId, chatId, channelId, replyToMessage, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage, hasPremiumAccess, openPremiumModal]);
 
   const handleSelectSticker = useCallback(
     (pathOrSticker: import("../components/StickerGifPanel").StickerSelection) => {
@@ -1992,6 +2002,10 @@ export default function ChatPage({
       };
 
       if (channelId) {
+        if (!hasPremiumAccess) {
+          openPremiumModal();
+          return;
+        }
         sendSticker();
       } else if (chatWsRef.current?.isConnected()) {
         chatWsRef.current.send({
@@ -2017,7 +2031,7 @@ export default function ChatPage({
       }
       setReplyToMessage(null);
     },
-    [conversationId, chatId, channelId, replyToMessage, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage]
+    [conversationId, chatId, channelId, replyToMessage, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage, createMessage, hasPremiumAccess, openPremiumModal]
   );
 
   const handleCreatePoll = useCallback((question: string, options: string[], multiple: boolean, anonymous: boolean, quiz?: boolean, correctIndex?: number) => {
@@ -4256,7 +4270,7 @@ export default function ChatPage({
         variant="danger"
       />
       {showContactPickerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowContactPickerModal(false)}>
+        <ModalViewportLayer onBackdropClick={() => setShowContactPickerModal(false)} className="!bg-black/40">
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full max-h-[70vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 py-3 border-b font-medium text-slate-800">{t("chat.pickContact")}</div>
             <div className="overflow-y-auto p-2">
@@ -4283,7 +4297,7 @@ export default function ChatPage({
               )}
             </div>
           </div>
-        </div>
+        </ModalViewportLayer>
       )}
       <div
         ref={chatAreaRef}
@@ -4681,7 +4695,7 @@ export default function ChatPage({
                     const layout = getChatMessageLayoutMeta(postComments, index);
                     const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
                     return (
-                      <div key={msg.id} className={layout.rowGapClass}>
+                      <div key={msg.id} className="bubbles-group transition-all duration-300" style={{ marginTop: `${layout.rowGapPx}px` }}>
                         {layout.showDateDivider && <DateDivider date={msg.created_at} lang={language} />}
                         <MessageBubble
                           message={msg}
@@ -4818,7 +4832,7 @@ export default function ChatPage({
                     const i = start + offset;
                     const isMine = channelId
                       ? ((msg as Message & { authorId?: string }).authorId === myUserId)
-                      : ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId);
+                      : (msg.id.startsWith("upload-") || ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId));
                     const layout = getChatMessageLayoutMeta(messages, i);
                     const msgTime = msg.created_at ? new Date(msg.created_at).getTime() : 0;
                     const isNewMessage = msgTime > 0 && Date.now() - msgTime < 2800;
@@ -5075,7 +5089,7 @@ export default function ChatPage({
         {/* Input bar — visible as soon as we're on a chat (conversationId) so layout doesn't jerk when chat loads */}
         {conversationId && (isCommentsView ? (
           <div
-            className="chat-composer-surface shrink-0 relative border-t backdrop-blur"
+            className="chat-composer-surface shrink-0 relative z-20 border-t backdrop-blur"
           >
             {commentsError && <div className="px-4 pt-3 text-sm text-red-600">{commentsError}</div>}
             {replyToComment && (
@@ -5123,14 +5137,7 @@ export default function ChatPage({
               </div>
               ) : (
                 <div className="px-4 py-3 text-center text-sm text-slate-500">
-                  <p>{t("channelComments.premiumRequired")}</p>
-                  <button
-                    type="button"
-                    onClick={openPremiumModal}
-                    className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-                  >
-                    {t("premiumModal.cta")}
-                  </button>
+                  <p>{t("channelComments.noAccess")}</p>
                 </div>
               )
             ) : (
@@ -5176,21 +5183,10 @@ export default function ChatPage({
           </div>
         ) : (
           <div
-            className="chat-composer-surface shrink-0 relative border-t backdrop-blur"
+            className="chat-composer-surface shrink-0 relative z-20 border-t backdrop-blur"
           >
             {channelId && !hasChannelAuthorRole ? (
               <div className="px-4 py-3 text-center text-slate-500 text-sm">{t("channelPage.onlyAuthorCanPost")}</div>
-            ) : channelId && !canPostToChannel ? (
-              <div className="px-4 py-3 text-center text-slate-500 text-sm">
-                <p>{t("channelPage.premiumRequiredToPost")}</p>
-                <button
-                  type="button"
-                  onClick={openPremiumModal}
-                  className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-                >
-                  {t("premiumModal.cta")}
-                </button>
-              </div>
             ) : (
             <>
             {editingMessageId && (
@@ -5299,7 +5295,7 @@ export default function ChatPage({
                 </button>
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} multiple />
                 {showAttachMenu && (
-                  <div className="ui-popover-surface absolute bottom-full left-0 z-50 mb-2 min-w-[11rem] overflow-hidden rounded-2xl py-1">
+                  <div className="ui-popover-surface absolute bottom-full left-0 z-[100] mb-2 min-w-[11rem] overflow-hidden rounded-2xl py-1">
                     <button type="button" onClick={() => openFileInput(true)} className="ui-list-row flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700">
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                       {t("chat.attachFile")}
@@ -5329,7 +5325,7 @@ export default function ChatPage({
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
               </button>
               {showStickerGifPanel && (
-                <div ref={stickerGifPickerRef} className="absolute bottom-full right-2 left-2 sm:left-auto sm:right-2 z-50 mb-1">
+                <div ref={stickerGifPickerRef} className="absolute bottom-full left-0 right-auto z-[100] mb-1">
                   <StickerGifPanel
                     onSelectEmoji={handleEmojiSelect}
                     onSelectGif={handleSelectGif}
@@ -8529,10 +8525,10 @@ const MessageBubble = memo(function MessageBubble({
         </div>
         </div>
         )}
-        {/* Reaction picker — left of bubbleColumn (for isMine), right (for !isMine) */}
+        {/* Reaction picker: own messages — справа от пузырька, если выравнивание слева; слева от пузырька, если свои сообщения прижаты вправо */}
         {isMine && pickerVisible && !editing && (
           <div
-            className="absolute bottom-1 left-full ml-0.5 z-20 flex items-center gap-1"
+            className={`absolute bottom-1 z-20 flex items-center gap-1 ${alignRight ? "right-full mr-0.5" : "left-full ml-0.5"}`}
             onMouseEnter={() => {
               if (pickerHideTimerRef.current) {
                 clearTimeout(pickerHideTimerRef.current);
@@ -8562,8 +8558,8 @@ const MessageBubble = memo(function MessageBubble({
         {/* Мост только при открытом пикере — чтобы не было нескольких активных зон наведения у разных сообщений */}
         {pickerVisible && (
           <div
-            className="absolute inset-y-0 left-full w-56 min-h-[3rem] z-10 pointer-events-auto"
-            style={{ marginLeft: 0 }}
+            className={`absolute inset-y-0 w-56 min-h-[3rem] z-10 pointer-events-auto ${isMine && alignRight ? "right-full" : "left-full"}`}
+            style={isMine && alignRight ? { marginRight: 0 } : { marginLeft: 0 }}
             aria-hidden
             onMouseEnter={() => {
               if (pickerHideTimerRef.current) {
@@ -10021,7 +10017,7 @@ function ScheduleMessageModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <ModalViewportLayer onBackdropClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-800">{t("chat.scheduledMessageTitle")}</h3>
@@ -10109,6 +10105,6 @@ function ScheduleMessageModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }

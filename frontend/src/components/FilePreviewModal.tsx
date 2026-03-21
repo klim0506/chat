@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject } from "react";
 import { useTranslation } from "../lib/i18n";
 import SendIcon from "./icons/SendIcon";
+import { ModalViewportLayer } from "./TopLayerPortal";
 
 export interface FilePreviewItem {
   file: File;
@@ -181,7 +182,7 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel, con
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={handleCancel}>
+    <ModalViewportLayer onBackdropClick={handleCancel}>
       <div
         className="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -311,6 +312,6 @@ export function FilePreviewModal({ files: initialFiles, onConfirm, onCancel, con
           </button>
         </div>
       </div>
-    </div>
+    </ModalViewportLayer>
   );
 }
