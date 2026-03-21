@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "../lib/i18n";
+import { usePremiumModalStore } from "../store/premiumModal";
 
 export interface CreatePollModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (question: string, options: string[], multiple: boolean, anonymous: boolean, quiz?: boolean, correctIndex?: number) => void;
+  onCreate: (question: string, options: string[], multiple: boolean, anonymous: boolean, quiz?: boolean, correctIndex?: number) => Promise<void> | void;
 }
 
 export default function CreatePollModal({ isOpen, onClose, onCreate }: CreatePollModalProps) {
@@ -42,13 +43,22 @@ export default function CreatePollModal({ isOpen, onClose, onCreate }: CreatePol
   const canCreate = question.trim().length > 0 && validOptions.length >= 2
     && (!quiz || (correctIndex >= 0 && correctIndex < validOptions.length));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate || sending) return;
     setSending(true);
-    onCreate(question.trim(), validOptions, quiz ? false : multiple, anonymous, quiz, quiz ? Math.min(correctIndex, validOptions.length - 1) : undefined);
-    onClose();
-    setSending(false);
+    try {
+      await onCreate(question.trim(), validOptions, quiz ? false : multiple, anonymous, quiz, quiz ? Math.min(correctIndex, validOptions.length - 1) : undefined);
+      onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: { code?: string } } };
+      if (e?.response?.status === 403 && e?.response?.data?.code === "plan_restriction") {
+        onClose();
+        usePremiumModalStore.getState().openModal();
+      }
+    } finally {
+      setSending(false);
+    }
   };
 
   const addOption = () => {

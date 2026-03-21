@@ -42,6 +42,14 @@ echo "Running migrations..."
 cd "$BACKEND"
 sudo -u pingychat .venv/bin/python manage.py migrate --no-input
 
+# Ensure MEDIA_ROOT exists (when set to external path, e.g. /var/media/pingychat.com)
+MEDIA_ROOT="$(grep -E '^MEDIA_ROOT=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+if [ -n "$MEDIA_ROOT" ] && [ ! -d "$MEDIA_ROOT" ]; then
+  echo "Creating media directory: $MEDIA_ROOT"
+  sudo mkdir -p "$MEDIA_ROOT"
+  sudo chown pingychat:pingychat "$MEDIA_ROOT"
+fi
+
 echo "Collecting static files..."
 sudo -u pingychat .venv/bin/python manage.py collectstatic --no-input
 

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import { chatsApi, messagesApi, filesApi, scheduledApi, authApi, contactsApi, channelsApi, channelPostsApi, channelPostCommentsApi, stickersApi, paymentsApi, userDisplayName, normalizeMediaPayload } from "../api/client";
 import type { Chat, ChatMember, Channel, ChannelPost, ChannelPostComment, Message, ReplyMessage, User, UserSearchResult, ScheduledMessage as ScheduledMessageType, Contact } from "../api/client";
 import { useAuthStore } from "../store/auth";
@@ -51,6 +52,7 @@ import { getChatMessageLayoutMeta } from "../lib/chat-layout";
 import { buildUserInfoHref } from "../lib/user-info-link";
 import { useMediaAccess } from "../hooks/useMediaAccess";
 import { resolveMediaAccess } from "../lib/media-access";
+import { stripTrailingNewlinesForDisplay } from "../lib/message-text-display";
 /* Default chat background: vector gradient (no image request) or custom background_url */
 
 /** Reaction emojis (from reaction-animations, matches backend) */
@@ -578,7 +580,8 @@ function MarkdownMessageContent({
 }) {
   const baseCls = "ui-text-body text-slate-800";
   const navigate = useNavigate();
-  const segments = splitContentWithMentions(content);
+  /** Drop trailing empty lines; keep internal Shift+Enter breaks (remark-breaks). */
+  const segments = splitContentWithMentions(stripTrailingNewlinesForDisplay(content));
   const Wrapper: React.ElementType = inline ? "span" : "div";
   const handleMentionClick = useCallback(async (raw: string) => {
     const username = raw.replace(/^@+/, "").trim();
@@ -614,11 +617,10 @@ function MarkdownMessageContent({
             </Link>
           );
         }
-        const mdContent = seg.value.replace(/\n/g, "  \n");
         return (
           <ReactMarkdown
             key={i}
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               p: ({ children }) => (inline ? <span className="inline">{children}</span> : <span className="block">{children}</span>),
               strong: ({ children }) => <strong className="font-bold">{children}</strong>,
@@ -647,7 +649,7 @@ function MarkdownMessageContent({
               },
             }}
           >
-            {mdContent}
+            {seg.value}
           </ReactMarkdown>
         );
       })}
@@ -1050,7 +1052,7 @@ export default function ChatPage({
   );
   const hasPremiumAccess = subscriptionState?.is_valid === true;
   const canPostToChannel = hasChannelAuthorRole && hasPremiumAccess;
-  const canCommentInChannel = !!(channelRaw?.comments_enabled && channelRaw?.my_role && hasPremiumAccess);
+  const canCommentInChannel = !!(channelRaw?.comments_enabled && channelRaw?.my_role);
   const canPinForAll = useMemo(
     () => !!(chat && (chat.owner?.id === myUserId || members.some((m) => m.user.id === myUserId && m.role === "admin"))),
     [chat, members, myUserId],
@@ -2019,13 +2021,13 @@ export default function ChatPage({
   );
 
   const handleCreatePoll = useCallback((question: string, options: string[], multiple: boolean, anonymous: boolean, quiz?: boolean, correctIndex?: number) => {
-    if (!chatId || channelId) return; // Polls not supported in channels
+    if (!chatId || channelId) return Promise.resolve(); // Polls not supported in channels
     const pollData: { options: string[]; multiple: boolean; anonymous: boolean; quiz?: boolean; correct_index?: number } = { options, multiple, anonymous };
     if (quiz && typeof correctIndex === "number") {
       pollData.quiz = true;
       pollData.correct_index = correctIndex;
     }
-    messagesApi.create(chatId, {
+    return messagesApi.create(chatId, {
       msg_type: "poll",
       content: question,
       poll_data: pollData,
@@ -2034,8 +2036,8 @@ export default function ChatPage({
       scheduleScrollToBottomAfterSend();
       onMessageSent?.(chatId, formatMessagePreview(res.data, lang), res.data.created_at);
       if (!sendWithoutSoundRef.current) playSound("send");
+      setReplyToMessage(null);
     });
-    setReplyToMessage(null);
   }, [chatId, channelId, scheduleScrollToBottomAfterSend, onMessageSent, storeUpsertMessage]);
 
   const [editablePlainCursor, setEditablePlainCursor] = useState({ plain: "", cursor: 0 });
@@ -5914,11 +5916,7 @@ export default function ChatPage({
                             type="button"
                             onClick={() => {
                               setShowInfoMenu(false);
-                              if (canPostToChannel) {
-                                setShowImportTelegramModal(true);
-                                return;
-                              }
-                              openPremiumModal();
+                              setShowImportTelegramModal(true);
                             }}
                             className={btnCls}
                           >

@@ -45,13 +45,13 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: false,
       showAvatar: false,
-      rowGapPx: 12,
+      rowGapPx: 3,
       sentinelHeight: 0,
     });
     expect(getChatMessageLayoutMeta(messages, 2)).toMatchObject({
       isFirstInGroup: false,
       showAvatar: true,
-      rowGapPx: 12,
+      rowGapPx: 3,
       sentinelHeight: 4,
     });
   });
@@ -65,11 +65,11 @@ describe("chat layout grouping", () => {
 
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
-      rowGapPx: 16,
+      rowGapPx: 5,
     });
     expect(getChatMessageLayoutMeta(messages, 2)).toMatchObject({
       isFirstInGroup: false,
-      rowGapPx: 12,
+      rowGapPx: 3,
     });
   });
 
@@ -82,7 +82,7 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
       showDateDivider: true,
-      rowGapPx: 6,
+      rowGapPx: 2,
     });
   });
 
@@ -95,7 +95,7 @@ describe("chat layout grouping", () => {
     expect(getChatMessageLayoutMeta(messages, 1)).toMatchObject({
       isFirstInGroup: true,
       showAvatar: true,
-      rowGapPx: 16,
+      rowGapPx: 5,
     });
   });
 });

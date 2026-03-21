@@ -14,6 +14,7 @@ const BENEFIT_KEYS: TranslationKey[] = [
   "premiumModal.benefitReactions",
   "premiumModal.benefitScheduled",
   "premiumModal.benefitChannels",
+  "premiumModal.benefitTelegramImport",
   "premiumModal.benefitAvatars",
   "premiumModal.benefitPolls",
   "premiumModal.benefitStickers",

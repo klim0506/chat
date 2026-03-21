@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pingy" />
     <meta name="theme-color" content="#0b1220" />
+    <meta name="format-detection" content="telephone=no" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; img-src 'self' data: blob: http: https:; media-src 'self' blob: http: https:; connect-src 'self' ws: wss: http: https:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://www.gstatic.com; font-src 'self' https://fonts.gstatic.com data:;"
@@ -31,16 +34,22 @@
       content="Pingy — мессенджер в России без VPN. Альтернатива Telegram и Max. Регистрация по SMS, шифрование, файлы до 4 ГБ."
     />
     <meta property="og:image" content="%VITE_APP_URL%/icons/icon-512x512.png" />
+    <meta property="og:image:secure_url" content="%VITE_APP_URL%/icons/icon-512x512.png" />
     <meta property="og:image:width" content="512" />
     <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="Pingy — мессенджер без VPN и блокировок в России" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:locale" content="ru_RU" />
     <meta property="og:site_name" content="Pingy" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:determiner" content="auto" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Pingy — мессенджер в России без VPN, альтернатива Telegram и Max" />
     <meta
       name="twitter:description"
-      content="Pingy — мессенджер в России без VPN. Альтернатива Telegram и Max. Регистрация по SMS, шифрование."
+      content="Pingy — мессенджер в России без VPN. Альтернатива Telegram и Max. Регистрация по SMS, шифрование, файлы до 4 ГБ."
     />
+    <meta name="twitter:image" content="%VITE_APP_URL%/icons/icon-512x512.png" />
+    <meta name="twitter:image:alt" content="Pingy — мессенджер без VPN и блокировок в России" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -49,26 +58,54 @@
       rel="stylesheet"
     />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96x96.png" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "Pingy",
-      "applicationCategory": "CommunicationApplication",
-      "operatingSystem": "Web, Windows, Android",
-      "description": "Мессенджер в России без VPN и блокировок. Альтернатива Telegram и Max. Регистрация по SMS, шифрование сообщений, файлы до 4 ГБ. Работает без VPN в РФ.",
-      "url": "%VITE_APP_URL%/",
-      "screenshot": "%VITE_APP_URL%/icons/icon-512x512.png",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" },
-      "inLanguage": "ru"
-    }
+    [
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Pingy",
+        "alternateName": "PingyChat",
+        "url": "%VITE_APP_URL%/",
+        "description": "Мессенджер в России без VPN и блокировок. Альтернатива Telegram и Max. Регистрация по SMS, шифрование, файлы до 4 ГБ.",
+        "inLanguage": "ru",
+        "potentialAction": {
+          "@type": "ViewAction",
+          "target": "%VITE_APP_URL%/auth",
+          "name": "Войти в Pingy"
+        }
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Pingy",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "Web, Windows, Android",
+        "description": "Мессенджер в России без VPN и блокировок. Альтернатива Telegram и Max. Регистрация по SMS, шифрование сообщений, файлы до 4 ГБ. Работает без VPN в РФ.",
+        "url": "%VITE_APP_URL%/",
+        "screenshot": "%VITE_APP_URL%/icons/icon-512x512.png",
+        "image": "%VITE_APP_URL%/icons/icon-512x512.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB", "availability": "https://schema.org/InStock" },
+        "inLanguage": "ru",
+        "featureList": "Регистрация по SMS, шифрование E2EE, файлы до 4 ГБ, работа без VPN в России"
+      }
+    ]
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <noscript>
+        <main style="font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 1rem; color: #e2e8f0;">
+          <h1>Pingy — мессенджер в России без VPN</h1>
+          <p>Альтернатива Telegram и Max. Регистрация по SMS, шифрование, файлы до 4 ГБ. Работает без VPN и блокировок в РФ.</p>
+          <p><a href="%VITE_APP_URL%/auth" style="color: #38bdf8;">Войти в Pingy</a> · <a href="%VITE_APP_URL%/downloads/desktop" style="color: #38bdf8;">Скачать для Windows</a> · <a href="%VITE_APP_URL%/downloads/android" style="color: #38bdf8;">Скачать для Android</a></p>
+          <p><small>Для работы приложения включите JavaScript.</small></p>
+        </main>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -7,10 +7,10 @@ Wants=redis-server.service
 Type=simple
 User=pingychat
 Group=pingychat
-WorkingDirectory=/root/chat/chat-dev/backend
-EnvironmentFile=/root/chat/chat-dev/backend/.env
+WorkingDirectory=/root/chat/backend
+EnvironmentFile=/root/chat/backend/.env
 Environment=DJANGO_SETTINGS_MODULE=config.settings.prod
-ExecStart=/root/chat/chat-dev/backend/.venv/bin/celery -A config worker -l INFO -c 4
+ExecStart=/root/chat/backend/.venv/bin/celery -A config worker -l INFO -c 4
 Restart=always
 RestartSec=3
 

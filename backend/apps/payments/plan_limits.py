@@ -40,7 +40,7 @@ PREMIUM_REACTIONS_PER_MESSAGE = 3
 FREE_DAILY_FILE_UPLOADS = 20
 # Premium: без лимита (возвращаем None в get_max_daily_file_uploads)
 
-# Poll: Free — только anonymous; Premium — public, quiz, multiple
+# Poll: Free — нет; Premium — любые опросы и викторины
 # Video circles: Free — 3 в день; Premium — без лимита
 FREE_DAILY_VIDEO_CIRCLES = 3
 # Scheduled messages: Free — нет; Premium — да
@@ -141,8 +141,8 @@ def can_use_privacy_settings(user) -> bool:
     return _user_has_subscription(user)
 
 
-def can_create_non_anonymous_poll(user) -> bool:
-    """Free — только анонимные опросы; Premium — любые (public, quiz, multiple)."""
+def can_create_poll(user) -> bool:
+    """Free — опросы и викторины недоступны; Premium — любые опросы и викторины."""
     return _user_has_subscription(user)
 
 
@@ -153,3 +153,10 @@ def can_use_extended_reactions(user) -> bool:
 
 # Код ошибки для фронтенда (в detail или code)
 RESTRICTION_CODE = "plan_restriction"
+
+
+class PlanRestrictionError(Exception):
+    """Исключение для ограничений по тарифу — возвращает 403 с code=plan_restriction."""
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(detail)

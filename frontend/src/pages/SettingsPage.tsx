@@ -282,13 +282,6 @@ function ReferralProgressCard({
               )}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onCopy}
-            className={`ui-accent-strong inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors shrink-0 ${shake ? "animate-username-shake" : ""}`}
-          >
-            {copied ? t("common.copied") : t("settings.referralCopyCta")}
-          </button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -328,6 +321,14 @@ function ReferralProgressCard({
             </p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onCopy}
+          className={`ui-accent-strong w-full inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors ${shake ? "animate-username-shake" : ""}`}
+        >
+          {copied ? t("common.copied") : t("settings.referralCopyCta")}
+        </button>
       </div>
 
       {showLevelsModal && (

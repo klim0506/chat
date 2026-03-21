@@ -61,7 +61,7 @@ function formatUnread(count: number): string {
 export default function DashboardPage() {
   const { t, lang } = useTranslation();
   const [chats, setChats] = useState<Chat[]>([]);
-  const [sub, setSub] = useState<SubscriptionStatus | null>(null);
+  const [_sub, setSub] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [needsSub, _setNeedsSub] = useState(false);

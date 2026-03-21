@@ -1,10 +1,10 @@
 import type { Message, User } from "../api/client";
 
 export const CHAT_GROUP_TIME_MS = 5 * 60 * 1000;
-export const CHAT_MESSAGE_ITEM_GAP_PX = 12;
-export const CHAT_MESSAGE_GROUP_GAP_PX = 16;
+export const CHAT_MESSAGE_ITEM_GAP_PX = 3;
+export const CHAT_MESSAGE_GROUP_GAP_PX = 5;  // was 16, reduced 3×
 export const CHAT_MESSAGE_FIRST_ITEM_GAP_PX = 0;
-export const CHAT_MESSAGE_AFTER_DATE_GAP_PX = 6;
+export const CHAT_MESSAGE_AFTER_DATE_GAP_PX = 2;  // was 6, reduced 3×
 export const CHAT_GROUP_SENTINEL_HEIGHT = 4;
 
 function getSenderId(msg: Message): string {

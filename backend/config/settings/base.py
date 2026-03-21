@@ -129,8 +129,11 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Media (uploads, avatars, etc.). By default in project dir; in prod set to external path.
+# For remote storage: mount NFS/SMB at MEDIA_ROOT, or use S3 via django-storages (future).
+MEDIA_URL = env("MEDIA_URL", default="/media/")
+_media_root = env("MEDIA_ROOT", default="")
+MEDIA_ROOT = Path(_media_root) if _media_root else BASE_DIR / "media"
 
 TEMPLATES = [
     {

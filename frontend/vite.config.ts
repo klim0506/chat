@@ -55,7 +55,7 @@ export default defineConfig(({ mode }) => {
     port: 5173,
     strictPort: isTauri,
     host: process.env.TAURI_DEV_HOST || true,
-    allowedHosts: ["localhost", "127.0.0.1", "host.docker.internal", ".local", "web.pingychat.com"],
+    allowedHosts: ["localhost", "127.0.0.1", "host.docker.internal", ".local", "web.pingychat.com", "pingychat.com", "www.pingychat.com"],
     fs: {
       strict: false,
       allow: [path.resolve(__dirname, "..")],

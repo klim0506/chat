@@ -314,14 +314,15 @@ class ChannelCommentsTest(TestCase):
         self.free_sub_client = auth_client(self.free_sub)
         self.premium_sub_client = auth_client(self.premium_sub)
 
-    def test_free_subscriber_cannot_comment(self):
+    def test_free_subscriber_can_comment(self):
         res = self.free_sub_client.post(
             f"/api/channels/{self.channel.id}/posts/{self.post.id}/comments/",
             {"msg_type": "text", "content": "Мой комментарий"},
             format="json",
         )
-        self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.data["code"], "plan_restriction")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["content"], "Мой комментарий")
+        self.assertEqual(self.post.comments.filter(is_deleted=False).count(), 1)
 
     def test_premium_subscriber_can_comment(self):
         res = self.premium_sub_client.post(

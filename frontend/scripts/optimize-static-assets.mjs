@@ -95,7 +95,13 @@ async function main() {
     if (cache[rel] === prevFingerprint) continue;
 
     checked += 1;
-    const result = await optimizeFile(filePath);
+    let result;
+    try {
+      result = await optimizeFile(filePath);
+    } catch (err) {
+      console.warn(`skipping ${rel}: ${err.message}`);
+      result = { changed: false, from: prevStats.size, to: prevStats.size };
+    }
     beforeBytes += result.from;
     afterBytes += result.changed ? result.to : result.from;
     if (result.changed) {

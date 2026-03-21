@@ -202,14 +202,13 @@ export default function AuthPage() {
     }
   };
 
-  const onRequestAlternateCode = async () => {
+  const onRequestCodeVia = async (method: "telegram" | "sms" | "pingy") => {
     if (!phone) return;
     setError("");
     setDeliveryInfo("");
     setTelegramRequesting(true);
-    const nextMethod = codeMethod === "telegram" ? "sms" : "telegram";
     try {
-      const res = await authApi.sendCode(phone, nextMethod, true);
+      const res = await authApi.sendCode(phone, method, true);
       const resData = res.data as { detail?: string; method?: string };
       setCodeMethod(resData.method === "sms" ? "sms" : resData.method === "pingy" ? "pingy" : "telegram");
       setDeliveryInfo(resData.detail || "");
@@ -519,8 +518,8 @@ export default function AuthPage() {
                     <div className="flex min-w-0 items-baseline gap-2 pt-2 text-sm leading-6 text-slate-600 whitespace-nowrap">
                       <span>
                         {language === "ru"
-                          ? `Отправили сообщение в ${codeMethod === "telegram" ? "Telegram" : codeMethod === "sms" ? "SMS" : "Pingy"} на номер`
-                          : `Sent a message to ${codeMethod === "telegram" ? "Telegram" : codeMethod === "sms" ? "SMS" : "Pingy"} for number`}
+                          ? `Отправили сообщение в ${codeMethod === "telegram" ? "Telegram" : codeMethod === "pingy" ? "Pingy" : "SMS"} на номер`
+                          : `Sent a message to ${codeMethod === "telegram" ? "Telegram" : codeMethod === "pingy" ? "Pingy" : "SMS"} for number`}
                       </span>
                       <span className="font-medium text-slate-900">{phone}</span>
                       <button
@@ -719,7 +718,7 @@ export default function AuthPage() {
                       </div>
                       <input
                         ref={(node) => {
-                          codeInputRef.current = node;
+                          (codeInputRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
                           codeRegisterRef(node);
                         }}
                         type="text"
@@ -745,18 +744,40 @@ export default function AuthPage() {
                   >
                     {loading ? t("auth.checking") : t("auth.loginBtn")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={onRequestAlternateCode}
-                    disabled={telegramRequesting || loading}
-                    className="mx-auto block text-sm font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline"
-                  >
-                    {telegramRequesting
-                      ? t("auth.sending")
-                      : codeMethod === "telegram"
-                        ? (language === "ru" ? "Отправить SMS" : "Send SMS")
-                        : (language === "ru" ? "Отправить в телеграмм" : "Send to Telegram")}
-                  </button>
+                  <p className="text-center text-sm text-slate-500">
+                    {telegramRequesting ? (
+                      t("auth.sending")
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onRequestCodeVia("pingy")}
+                          disabled={loading}
+                          className="font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline"
+                        >
+                          {language === "ru" ? "Отправить в Pingy" : "Send to Pingy"}
+                        </button>
+                        {" · "}
+                        <button
+                          type="button"
+                          onClick={() => onRequestCodeVia("telegram")}
+                          disabled={loading}
+                          className="font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline"
+                        >
+                          {language === "ru" ? "Отправить в Telegram" : "Send to Telegram"}
+                        </button>
+                        {" · "}
+                        <button
+                          type="button"
+                          onClick={() => onRequestCodeVia("sms")}
+                          disabled={loading}
+                          className="font-medium text-sky-700 underline-offset-4 transition-colors hover:text-sky-800 hover:underline"
+                        >
+                          {language === "ru" ? "Отправить по SMS" : "Send via SMS"}
+                        </button>
+                      </>
+                    )}
+                  </p>
                 </div>
               </form>
             )}

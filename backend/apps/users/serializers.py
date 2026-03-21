@@ -23,7 +23,10 @@ def validate_username_format(value: str) -> str:
 
 class SendCodeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
-    method = serializers.ChoiceField(choices=["sms", "telegram"], required=False)  # "sms" — SMS only, otherwise try Telegram first
+    method = serializers.ChoiceField(
+        choices=["sms", "telegram", "pingy"],
+        required=False,
+    )  # "sms" — SMS only; "telegram" — Telegram only; "pingy" — Pingy app only; default: Pingy → Telegram → SMS
     reuse_existing = serializers.BooleanField(required=False, default=False)
 
 
@@ -219,7 +222,9 @@ class UserSerializer(serializers.ModelSerializer):
             try:
                 if a.image:
                     from apps.files.access_handles import make_user_gallery_avatar_handle
-
+                    from apps.files.protected_media import _protected_media_file_exists
+                    if not _protected_media_file_exists(a.image.name):
+                        continue
                     access_handle = make_user_gallery_avatar_handle(a.id)
                     access_handle_small = make_user_gallery_avatar_handle(a.id, size="small")
                     access_handle_medium = make_user_gallery_avatar_handle(a.id, size="medium")

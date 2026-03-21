@@ -14,7 +14,7 @@ from apps.files.access_handles import (
     make_chat_background_handle,
 )
 from apps.users.serializers import UserSerializer
-from apps.payments.plan_limits import can_send_video_circle_today, can_create_non_anonymous_poll, RESTRICTION_CODE
+from apps.payments.plan_limits import can_send_video_circle_today, can_create_poll, PlanRestrictionError
 from .utils import generate_slug, make_verification_code
 
 
@@ -184,15 +184,24 @@ class ChatSerializer(serializers.ModelSerializer):
     def get_avatar_handle(self, obj):
         if not obj.avatar:
             return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
+            return None
         return make_chat_avatar_handle(obj.id)
 
     def get_avatar_handle_small(self, obj):
         if not obj.avatar:
             return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
+            return None
         return make_chat_avatar_handle(obj.id, size="small")
 
     def get_avatar_handle_medium(self, obj):
         if not obj.avatar:
+            return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
             return None
         return make_chat_avatar_handle(obj.id, size="medium")
 
@@ -582,11 +591,8 @@ class MessageSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"msg_type": "Опросы можно создавать только в группах и каналах."}
                     )
-                poll_data = attrs.get("poll_data") or {}
-                if not poll_data.get("anonymous") and not can_create_non_anonymous_poll(request.user):
-                    raise PermissionDenied(
-                        detail="Публичные и quiz-опросы доступны по подписке. Используйте анонимный опрос или оформите подписку.",
-                    )
+                if not can_create_poll(request.user):
+                    raise PlanRestrictionError("Опросы и викторины доступны по подписке. Оформите подписку в настройках.")
         return attrs
 
     def create(self, validated_data):
@@ -760,15 +766,24 @@ class ChannelSerializer(serializers.ModelSerializer):
     def get_avatar_handle(self, obj):
         if not obj.avatar:
             return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
+            return None
         return make_channel_avatar_handle(obj.id)
 
     def get_avatar_handle_small(self, obj):
         if not obj.avatar:
             return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
+            return None
         return make_channel_avatar_handle(obj.id, size="small")
 
     def get_avatar_handle_medium(self, obj):
         if not obj.avatar:
+            return None
+        from apps.files.protected_media import _protected_media_file_exists
+        if not _protected_media_file_exists(obj.avatar.name):
             return None
         return make_channel_avatar_handle(obj.id, size="medium")
 

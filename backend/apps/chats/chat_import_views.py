@@ -56,11 +56,7 @@ class ChatImportTelegramPreviewView(APIView):
         chat = get_object_or_404(Chat, id=chat_id, is_active=True)
         if not _can_manage_import(chat, request.user):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
-        if not can_import_telegram(request.user):
-            return Response(
-                {"detail": "Импорт из Telegram доступен по подписке.", "code": RESTRICTION_CODE},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Premium check only on Import, not on Preview — let user upload and parse first
 
         file_obj = request.FILES.get("file")
         if not file_obj:

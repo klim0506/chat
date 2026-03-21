@@ -80,8 +80,6 @@ def _ensure_channel_commenting_allowed(request, channel):
         return Response({"detail": "Нет доступа к каналу."}, status=status.HTTP_403_FORBIDDEN)
     if not channel.comments_enabled:
         return Response({"detail": "Комментарии отключены."}, status=status.HTTP_403_FORBIDDEN)
-    if not can_create_channels(request.user):
-        return _premium_restriction_response("Комментарии в каналах доступны только с Premium.")
     return None
 
 

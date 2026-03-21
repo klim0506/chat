@@ -204,10 +204,12 @@ function App() {
     }
     setRestoringSession(true);
     api
-      .post<{ access: string; refresh?: string; user?: User }>("/auth/refresh/")
-      .then(({ data }) => {
-        if (data.access && data.user) {
-          setTokens(data.access, data.refresh ?? "", data.user);
+      .post<{ access: string; refresh?: string; user?: User }>("/auth/refresh/", undefined, {
+        validateStatus: (s) => s === 200 || s === 401,
+      })
+      .then((res) => {
+        if (res.status === 200 && res.data.access && res.data.user) {
+          setTokens(res.data.access, res.data.refresh ?? "", res.data.user);
         }
       })
       .catch(() => {})

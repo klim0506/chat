@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { authApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
+import { TOP_LAYER_Z_INDEX } from "./TopLayerPortal";
 
 const MAX_IMAGES = 5;
 
@@ -95,8 +97,8 @@ export default function SupportModal({ isOpen, onClose, initialTopic }: SupportM
   const placeholder = isFeedback ? t("feedback.placeholder") : t("support.placeholder");
   const attachLabel = isFeedback ? t("feedback.attachPhotos") : t("support.attachPhotos");
 
-  return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+  const modalContent = (
+    <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/50" style={{ zIndex: TOP_LAYER_Z_INDEX }} onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-slate-800 mb-1">{modalTitle}</h2>
         <p className="text-sm text-slate-500 mb-4">{desc}</p>
@@ -183,4 +185,6 @@ export default function SupportModal({ isOpen, onClose, initialTopic }: SupportM
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }

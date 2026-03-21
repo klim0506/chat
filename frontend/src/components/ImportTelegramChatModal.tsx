@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { chatsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import { userDisplayName } from "../api/client";
+import { usePremiumModalStore } from "../store/premiumModal";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -103,7 +104,14 @@ export default function ImportTelegramChatModal({
       setStep("done");
       onSuccess?.();
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string | string[] }; status?: number } };
+      const err = e as { response?: { data?: { detail?: string | string[]; code?: string }; status?: number } };
+      const status = err.response?.status;
+      const code = err.response?.data?.code;
+      if (status === 403 && code === "plan_restriction") {
+        onClose();
+        usePremiumModalStore.getState().openModal();
+        return;
+      }
       const detail = err.response?.data?.detail;
       const msg = Array.isArray(detail) ? detail[0] : (detail as string) || t("channelImport.error");
       setError(msg);

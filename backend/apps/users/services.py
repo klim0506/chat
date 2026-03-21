@@ -190,7 +190,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
                     "Accept": "application/json",
                 },
                 json=payload,
-                timeout=(3.05, 12),
+                timeout=(10, 15),
             )
             try:
                 data = resp.json()

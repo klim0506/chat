@@ -41,6 +41,9 @@ from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
+# 1x1 transparent GIF — returned when file/avatar is missing on disk (avoids 404 and broken <img>)
+_PLACEHOLDER_GIF = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+
 DEFAULT_MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB fallback
 FILE_TOKEN_TTL_SECONDS = 24 * 60 * 60  # 24h — reduce 403 for cached/long-open tabs
 # Chunked upload: 128 KB per part — server only holds one part in memory
@@ -281,9 +284,7 @@ class MediaAccessView(APIView):
             except User.DoesNotExist:
                 raise Http404
             path = user._get_avatar_path()
-            if not path:
-                raise Http404
-            url = make_protected_media_url(path, request, size=variant, expires_at=expires_at)
+            url = make_protected_media_url(path or "", request, size=variant, expires_at=expires_at) if path else None
             target_id = str(user.id)
         elif kind == KIND_USER_GALLERY_AVATAR:
             from apps.users.models import UserAvatar
@@ -330,8 +331,9 @@ class MediaAccessView(APIView):
         else:
             return Response({"detail": "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ."}, status=status.HTTP_403_FORBIDDEN)
 
+        # File missing on disk (e.g. after migration) — return data URL to avoid 404 and broken <img>
         if not url:
-            raise Http404
+            url = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
         expires_at_iso = timezone.datetime.fromtimestamp(expires_at, tz=dt_timezone.utc).isoformat()
         logger.info(
@@ -782,7 +784,7 @@ class SecureFileServeView(APIView):
         try:
             att = FileAttachment.objects.get(pk=file_id)
         except FileAttachment.DoesNotExist:
-            raise Http404
+            return HttpResponse(_PLACEHOLDER_GIF, content_type="image/gif")
         if att.scan_status == FileAttachment.ScanStatus.PENDING:
             return Response({"detail": "Файл ещё не готов."}, status=status.HTTP_423_LOCKED)
         if att.scan_status in {FileAttachment.ScanStatus.INFECTED, FileAttachment.ScanStatus.ERROR}:
@@ -791,11 +793,14 @@ class SecureFileServeView(APIView):
         is_encrypted = getattr(att, "is_encrypted", False) or att.scan_status == FileAttachment.ScanStatus.ENCRYPTED
         media_root = Path(settings.MEDIA_ROOT).resolve()
         full_path = (media_root / att.file_path).resolve()
-        if media_root not in full_path.parents and full_path != media_root:
-            raise Http404
-        if not full_path.is_file():
-            raise Http404
         content_type = "application/octet-stream" if is_encrypted else (att.mime_type or mimetypes.guess_type(att.original_name)[0] or "application/octet-stream")
+        file_missing = (
+            media_root not in full_path.parents
+            and full_path != media_root
+            or not full_path.is_file()
+        )
+        if file_missing:
+            return HttpResponse(_PLACEHOLDER_GIF, content_type="image/gif")
 
         # Optional lightweight preview for images
         try:
@@ -881,7 +886,7 @@ class ProtectedMediaServeView(APIView):
         if media_root not in full_path.parents and full_path != media_root:
             return Response({"detail": "Доступ запрещён."}, status=status.HTTP_403_FORBIDDEN)
         if not full_path.is_file():
-            raise Http404
+            return HttpResponse(_PLACEHOLDER_GIF, content_type="image/gif")
 
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         response = FileResponse(open(full_path, "rb"), content_type=content_type)
