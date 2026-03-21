@@ -7,7 +7,7 @@ import { usePreferencesStore } from "./store/preferences";
 import type { AppTheme } from "./store/preferences";
 import { DEFAULT_MESSAGE_TEXT_SCALE, normalizeMessageTextScale } from "./store/preferences";
 
-const faviconUrl = "/favicon.ico";
+const faviconUrl = "/ico_png_ai_16x16.ico";
 const themeColorByTheme: Record<AppTheme, string> = {
   light: "#f4f7fb",
   dark: "#08111d",

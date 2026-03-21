@@ -2870,8 +2870,10 @@ export default function ChatPage({
       const d = data as { message?: Record<string, unknown> };
       if (!d.message) return;
       let raw = normalizeMediaPayload(d.message);
+      const mid = raw.id != null ? String(raw.id) : "";
+      if (!mid) return;
       if (raw.is_deleted) {
-        storeUpdateMessageRef.current(chatId, raw.id as string, { is_deleted: true });
+        storeUpdateMessageRef.current(chatId, mid, { is_deleted: true });
       } else {
         // Build a proper sender object from flat WS fields
         if (!raw.sender && raw.sender_id) {
@@ -4301,7 +4303,7 @@ export default function ChatPage({
       )}
       <div
         ref={chatAreaRef}
-        className="flex flex-col flex-1 min-w-0 min-h-0 relative overflow-hidden"
+        className="flex flex-col flex-1 min-w-0 min-h-0 relative overflow-hidden pb-[calc(env(safe-area-inset-bottom)+var(--keyboard-bottom-inset,0px))]"
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -4350,7 +4352,7 @@ export default function ChatPage({
       <header
         className="chat-topbar-surface sticky z-30 shrink-0 border-b backdrop-blur px-4 h-16 flex items-center gap-3"
         style={{
-          top: "env(safe-area-inset-top)",
+          top: "calc(env(safe-area-inset-top) + var(--visual-viewport-offset-top, 0px))",
         }}
       >
           {selectionMode ? (
@@ -4832,7 +4834,7 @@ export default function ChatPage({
                     const i = start + offset;
                     const isMine = channelId
                       ? ((msg as Message & { authorId?: string }).authorId === myUserId)
-                      : (msg.id.startsWith("upload-") || ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId));
+                      : (msg.id?.startsWith("upload-") || ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId));
                     const layout = getChatMessageLayoutMeta(messages, i);
                     const msgTime = msg.created_at ? new Date(msg.created_at).getTime() : 0;
                     const isNewMessage = msgTime > 0 && Date.now() - msgTime < 2800;
@@ -4872,7 +4874,7 @@ export default function ChatPage({
                           message={msg}
                           isMine={isMine}
                           uploadProgress={(() => { const u = activeUploads.find((x) => x.tempId === msg.id); return u ? { loaded: u.loaded, total: u.total } : undefined; })()}
-                          onCancelUpload={msg.id.startsWith("upload-") ? cancelUpload : undefined}
+                          onCancelUpload={msg.id?.startsWith("upload-") ? cancelUpload : undefined}
                           downloadProgress={downloadProgressByMessageId[msg.id]}
                           onDownloadWithProgress={channelId ? undefined : (messageId, url, filename) => {
                             const fullUrl = toSameOriginMediaUrl(url);

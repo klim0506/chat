@@ -454,6 +454,14 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             "is_mention": event.get("is_mention", False),
         }))
 
+    async def notify_message_updated(self, event):
+        """Message edited or soft-deleted — sync list + other devices when chat WS is closed."""
+        await self.send(text_data=json.dumps({
+            "type": "message_updated",
+            "chat_id": event["chat_id"],
+            "message": event["message"],
+        }))
+
     async def notify_reaction_on_message(self, event):
         """Forward reaction notification: '{{name}} отреагировал \"{{emoji}}\" на {{message}}'."""
         await self.send(text_data=json.dumps({

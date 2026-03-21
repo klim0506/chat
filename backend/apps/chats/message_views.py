@@ -63,15 +63,40 @@ def _notify_reaction_to_author(chat, msg, reactor, emoji):
         pass
 
 
-def _broadcast_message_updated(chat_id, message_data):
-    """Notify chat members about a message update (edit or reaction)."""
+def _notify_members_message_deleted(chat_id, message_payload):
+    """Push delete to each member's /ws/notifications/ (all tabs/devices), not only chat room WS."""
     try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        member_ids = ChatMember.objects.filter(
+            chat_id=chat_id, status=ChatMember.Status.ACTIVE
+        ).values_list("user_id", flat=True)
+        for uid in member_ids:
+            async_to_sync(channel_layer.group_send)(
+                f"user_{uid}",
+                {
+                    "type": "notify.message_updated",
+                    "chat_id": str(chat_id),
+                    "message": message_payload,
+                },
+            )
+    except Exception:
+        pass
+
+
+def _broadcast_message_updated(chat_id, message_data):
+    """Notify chat members about a message update (edit, reaction, or soft-delete)."""
+    try:
+        payload = _message_data_serializable(message_data)
         channel_layer = get_channel_layer()
         if channel_layer:
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_id}",
-                {"type": "chat.message.updated", "message": message_data},
+                {"type": "chat.message.updated", "message": payload},
             )
+        if payload.get("is_deleted"):
+            _notify_members_message_deleted(str(chat_id), payload)
     except Exception:
         pass
 

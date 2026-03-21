@@ -73,7 +73,12 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (r) => {
-    r.data = normalizeMediaPayload(r.data);
+    // 204/205: no body — avoid passing empty string through media normalization (edge cases in callers).
+    if (r.status === 204 || r.status === 205) {
+      r.data = undefined as typeof r.data;
+    } else {
+      r.data = normalizeMediaPayload(r.data);
+    }
     return r;
   },
   async (error) => {

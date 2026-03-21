@@ -1,0 +1,91 @@
+# Узел приложения (ВМ 1): API, Celery, Tor для Telegram Gateway.
+# Подстановка DATA_NODE_HOST и POSTGRES_PASSWORD — только через --env-file (файл может не совпадать с env внутри контейнера).
+#   cp deploy.stage2.env.example app-node.docker.env
+# Запуск (файл обязателен для подстановки в DATABASE_URL / REDIS_URL):
+#   docker compose -f docker-compose.app-node.yml --env-file app-node.docker.env up -d
+
+name: pingychat-app
+
+services:
+  telegram-tor:
+    build:
+      context: ./docker/tor
+      dockerfile: Dockerfile
+    container_name: pingychat-telegram-tor
+    restart: unless-stopped
+    volumes:
+      - pingychat_tordata:/var/lib/tor
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@${DATA_NODE_HOST}:5432/pingychat_db
+      REDIS_URL: redis://${DATA_NODE_HOST}:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      TELEGRAM_GATEWAY_HTTPS_PROXY: socks5h://telegram-tor:9050
+    depends_on:
+      telegram-tor:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -o /dev/null http://127.0.0.1:8000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    volumes:
+      # Файлы пользователей (MEDIA_ROOT по умолчанию /app/media). Замените на bind-mount хоста при необходимости.
+      - pingychat_media:/app/media
+    networks: [internal]
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@${DATA_NODE_HOST}:5432/pingychat_db
+      REDIS_URL: redis://${DATA_NODE_HOST}:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config", "worker", "-l", "INFO"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - pingychat_media:/app/media
+    networks: [internal]
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@${DATA_NODE_HOST}:5432/pingychat_db
+      REDIS_URL: redis://${DATA_NODE_HOST}:6379/0
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config", "beat", "-l", "INFO"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pingychat_tordata:
+  pingychat_media:
+    name: pingychat_media

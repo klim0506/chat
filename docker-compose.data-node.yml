@@ -1,0 +1,43 @@
+# Узел данных (ВМ 2): только PostgreSQL и Redis.
+# Не публикуйте эти порты в интернет — только приватная сеть + firewall (см. docs/deploy-stage2-two-vm.md).
+# Запуск на ВМ с приватным IP, доступным с ВМ приложения:
+#   docker compose -f docker-compose.data-node.yml up -d
+
+name: pingychat-data
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - postgres.docker.env
+    environment:
+      POSTGRES_USER: pingychat
+      POSTGRES_DB: pingychat_db
+    volumes:
+      - pingychat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pingychat -d pingychat_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "5432:5432"
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pingychat_pgdata:
+    name: pingychat_pgdata
+    external: true

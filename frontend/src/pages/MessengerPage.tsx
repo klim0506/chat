@@ -137,7 +137,7 @@ function WelcomeAnimationButton() {
     <button
       type="button"
       onClick={replay}
-      className="mx-auto mb-6 inline-flex min-h-[10.08rem] min-w-[10.08rem] items-center justify-center transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 sm:min-h-[11.52rem] sm:min-w-[11.52rem]"
+      className="messenger-welcome-animation-btn mx-auto mb-6 inline-flex min-h-[10.08rem] min-w-[10.08rem] items-center justify-center transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 sm:min-h-[11.52rem] sm:min-w-[11.52rem]"
       aria-label="Replay welcome animation"
     >
       <video
@@ -148,7 +148,7 @@ function WelcomeAnimationButton() {
         playsInline
         preload="auto"
         onEnded={handleEnded}
-        className="block max-h-[10.08rem] w-auto max-w-[10.08rem] object-contain sm:max-h-[11.52rem] sm:max-w-[11.52rem]"
+        className="messenger-welcome-animation-video block max-h-[10.08rem] w-auto max-w-[10.08rem] object-contain sm:max-h-[11.52rem] sm:max-w-[11.52rem]"
       />
     </button>
   );
@@ -400,7 +400,7 @@ export default function MessengerPage() {
         const chat = dmRes.data;
         storeUpsertChat(chat);
         navigate(`/chat/${chat.id}`, {
-          replace: true,
+          replace: typeof window !== "undefined" && window.location.pathname.startsWith("/chat/"),
           state: shouldOpenProfile ? { openInfoUserId: userId } : undefined,
         });
       });
@@ -604,6 +604,19 @@ export default function MessengerPage() {
       return;
     }
 
+    if (data.type === "message_updated" && data.chat_id) {
+      const chatId = data.chat_id;
+      const raw = data.message as Record<string, unknown> | undefined;
+      const msgId = raw && raw.id != null ? String(raw.id) : "";
+      if (msgId && raw?.is_deleted) {
+        useMessagesStore.getState().updateMessage(chatId, msgId, { is_deleted: true });
+      }
+      chatsApi.get(chatId).then((res) => {
+        useChatListStore.getState().upsertChat(res.data);
+      }).catch(() => {});
+      return;
+    }
+
     if (data.type === "new_message" && data.chat_id) {
       const chatId = data.chat_id;
       const raw = data.message as Record<string, unknown> | undefined;
@@ -791,7 +804,9 @@ export default function MessengerPage() {
     setActiveChatId(chatId);
     setActiveChannelId(null);
     storeSetUnread(chatId, 0);
-    navigate(`/chat/${chatId}`, { replace: true, state });
+    // Push when opening from /chats (or channel/settings) so the browser/system Back returns to the list, not the previous site (e.g. landing). Replace only when switching between chats.
+    const replace = pathname.startsWith("/chat/");
+    navigate(`/chat/${chatId}`, { replace, state });
   };
 
   const closeChat = () => {
@@ -802,7 +817,8 @@ export default function MessengerPage() {
   const openChannel = (channelId: string) => {
     setActiveChannelId(channelId);
     setActiveChatId(null);
-    navigate(`/channel/${channelId}`, { replace: true });
+    const replace = pathname.startsWith("/channel/");
+    navigate(`/channel/${channelId}`, { replace });
   };
 
   const closeChannel = () => {
@@ -1248,8 +1264,10 @@ export default function MessengerPage() {
     }
   }, [location.search, location.pathname, navigate]);
 
+  const showMainTopSafeInset = !renderChatId && !renderChannelId;
+
   return (
-    <div className="messenger-app-bg flex h-screen flex-col overflow-hidden relative">
+    <div className="messenger-app-bg flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden relative">
       <OfflineBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
       {/* Toast: invite link copied */}
@@ -1464,7 +1482,7 @@ export default function MessengerPage() {
 
       {/* ═══════ Left sidebar — column-left (Telegram: chatlist-container + folders) ═══════ */}
       <aside
-        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} messenger-sidebar-surface messenger-divider-vertical flex-row border-r shrink-0 relative overflow-hidden`}
+        className={`column-left chatlist-container ${rightPanelOpen ? "hidden md:flex" : "flex max-md:!w-full"} messenger-sidebar-surface messenger-divider-vertical flex-row border-r shrink-0 relative overflow-hidden pt-[calc(env(safe-area-inset-top)+var(--visual-viewport-offset-top,0px))]`}
         style={{ width: sidebarWidth, minWidth: 280 }}
         id="column-left"
       >
@@ -2364,7 +2382,12 @@ export default function MessengerPage() {
       />
 
       {/* ═══════ Right panel — column-center (Telegram: main-column / chat area) ═══════ */}
-      <main id="column-center" className={`column-center main-column ${showRightPanel ? "flex" : "hidden md:flex"} messenger-main-backdrop flex-col flex-1 min-w-0 min-h-0 overflow-hidden`}>
+      <main
+        id="column-center"
+        className={`column-center main-column ${showRightPanel ? "flex" : "hidden md:flex"} messenger-main-backdrop flex-col flex-1 min-w-0 min-h-0 overflow-hidden ${
+          showMainTopSafeInset ? "pt-[calc(env(safe-area-inset-top)+var(--visual-viewport-offset-top,0px))]" : ""
+        }`}
+      >
         {showSettings ? (
           <div key="settings" className="flex flex-col flex-1 min-h-0 overflow-hidden messenger-panel-fade-in">
             {!(isMobile && settingsMobileInSubSection) && (
@@ -2469,7 +2492,10 @@ export default function MessengerPage() {
             />
           </div>
         ) : (
-          <div key="welcome" className="messenger-main-backdrop flex-1 min-h-0 flex items-center justify-center p-6 messenger-panel-fade-in">
+          <div
+            key="welcome"
+            className="messenger-main-backdrop messenger-panel-fade-in flex min-h-0 flex-1 flex-col items-center justify-end overflow-y-auto p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:flex-row md:items-center md:justify-center md:overflow-visible md:pb-6"
+          >
           {(() => {
             const welcomeCopy = lang === "ru"
               ? {

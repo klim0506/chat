@@ -3,6 +3,8 @@
  * URLs are driven by env so deployment works on any domain.
  */
 
+import packageJson from "../../package.json";
+
 const envAppUrl = import.meta.env.VITE_APP_URL || "";
 const envWebAppUrl = import.meta.env.VITE_WEB_APP_URL || "";
 
@@ -20,6 +22,10 @@ export function isMarketingSite(): boolean {
   return (MARKETING_HOSTS as string[]).includes(window.location.hostname);
 }
 
+/** Filename on the site: Pingy_1_3_17.apk (dots in package.json version → underscores). */
+export const ANDROID_APK_FILENAME = `Pingy_${packageJson.version.replace(/\./g, "_")}.apk`;
+
 /** Direct link to Android APK (optional VITE_ANDROID_APK_URL, else APP_BASE_URL + path). */
 export const ANDROID_APK_URL =
-  import.meta.env.VITE_ANDROID_APK_URL || `${APP_BASE_URL}/downloads/android/Pingy.apk`;
+  import.meta.env.VITE_ANDROID_APK_URL ||
+  `${APP_BASE_URL}/downloads/android/${ANDROID_APK_FILENAME}`;

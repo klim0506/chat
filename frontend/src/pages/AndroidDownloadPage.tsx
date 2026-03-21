@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useDocumentHead } from "../hooks/useDocumentHead";
 import { useTranslation } from "../lib/i18n";
-import { ANDROID_APK_URL } from "../lib/host";
+import { ANDROID_APK_FILENAME, ANDROID_APK_URL } from "../lib/host";
 
 export default function AndroidDownloadPage() {
   const { t } = useTranslation();
@@ -41,7 +41,7 @@ export default function AndroidDownloadPage() {
           <div className="space-y-4 mb-10">
             <a
               href={ANDROID_APK_URL}
-              download="Pingy.apk"
+              download={ANDROID_APK_FILENAME}
               className="inline-flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

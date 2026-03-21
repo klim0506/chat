@@ -1,0 +1,8 @@
+# Скопируйте в local.properties и укажите путь к Android SDK.
+# Файл local.properties не коммитится (см. .gitignore).
+#
+# Windows (пример):
+# sdk.dir=C\:\\Users\\You\\AppData\\Local\\Android\\Sdk
+#
+# macOS / Linux (пример):
+sdk.dir=/path/to/Android/Sdk

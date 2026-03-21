@@ -43,6 +43,16 @@ export type ChatMessageLayoutMeta = {
 
 export function getChatMessageLayoutMeta(messages: Message[], index: number): ChatMessageLayoutMeta {
   const message = messages[index];
+  if (!message) {
+    return {
+      isFirstInGroup: true,
+      isLastInGroup: false,
+      showAvatar: true,
+      showDateDivider: false,
+      rowGapPx: CHAT_MESSAGE_ITEM_GAP_PX,
+      sentinelHeight: CHAT_GROUP_SENTINEL_HEIGHT,
+    };
+  }
   const prevMsg = index > 0 ? messages[index - 1] : undefined;
   const nextMsg = index < messages.length - 1 ? messages[index + 1] : undefined;
 

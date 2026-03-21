@@ -7,9 +7,11 @@ import { useTranslation, type TranslationKey } from "../lib/i18n";
 import { EmojiPickerPopover } from "./EmojiPickerPopover";
 import ImportTelegramModal from "./ImportTelegramModal";
 import { ModalViewportLayer } from "./TopLayerPortal";
+import { ClosedTypeSwitchRow } from "./ClosedTypeSwitchRow";
 
 const TITLE_MAX = 50;
 const DESCRIPTION_MAX = 300;
+const DESCRIPTION_COUNTER_NEAR = 50;
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,30}$/;
 
@@ -56,10 +58,12 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
   const apiErrorRef = useRef<HTMLParagraphElement | null>(null);
   const { register, handleSubmit, watch, reset, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { title: "", title_icon: "", description: "", is_public: "true" as unknown as boolean, username: "" },
+    defaultValues: { title: "", title_icon: "", description: "", is_public: true, username: "" },
   });
   const titleValue = watch("title") ?? "";
   const descriptionValue = watch("description") ?? "";
+  const isPublicRaw = watch("is_public");
+  const channelClosed = isPublicRaw === false;
 
   const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,7 +84,7 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
 
   useEffect(() => {
     if (isOpen) {
-      reset({ title: "", title_icon: "", description: "", is_public: "true" as unknown as boolean, username: "" });
+      reset({ title: "", title_icon: "", description: "", is_public: true, username: "" });
       setError("");
       setAvatarFile(null);
       setCreatedChannel(null);
@@ -164,11 +168,11 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
       <>
         <ModalViewportLayer onBackdropClick={() => onClose()}>
           <div
-            className="ui-modal-surface max-w-md w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150"
+            className="ui-modal-surface ui-create-modal max-w-md w-full my-auto rounded-xl animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-6 pt-5 pb-2">
-              <h2 className="text-lg font-semibold text-slate-800">{t("createChannel.done")}</h2>
+            <div className="flex items-center justify-between px-5 pt-3 pb-2 ui-create-modal-divider border-b">
+              <h2 className="text-base font-semibold ui-create-modal-title">{t("createChannel.done")}</h2>
               <button
                 type="button"
                 onClick={() => { onCreated(createdChannel.id, createdChannel.inviteLink); onClose(); }}
@@ -178,20 +182,20 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>
-            <div className="px-6 pb-5 pt-3 space-y-4">
-              <p className="text-sm text-slate-600">{t("createChannel.doneHint").replace("%s", createdChannel.title)}</p>
-              <div className="flex gap-2">
+            <div className="px-5 pb-4 pt-2 space-y-3">
+              <p className="text-sm ui-create-modal-hint leading-snug">{t("createChannel.doneHint").replace("%s", createdChannel.title)}</p>
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => setShowImportModal(true)}
-                  className="ui-picker-tile rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors"
+                  className="ui-accent-soft border rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
                 >
                   {t("channelImport.title")}
                 </button>
                 <button
                   type="button"
                   onClick={() => { onCreated(createdChannel.id, createdChannel.inviteLink); onClose(); }}
-                  className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  className="ui-accent-strong rounded-lg px-4 py-1.5 text-sm font-medium transition-colors"
                 >
                   {t("createChannel.later")}
                 </button>
@@ -214,13 +218,13 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
       <div
         role="dialog"
         aria-modal="true"
-        className="ui-modal-surface max-h-[85vh] max-w-lg w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
+        className="ui-modal-surface ui-create-modal max-h-[85vh] max-w-lg w-full my-auto rounded-xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-slate-200">
+        <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b ui-create-modal-divider">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">{t("createChannel.title")}</h2>
-            <p className="text-slate-500 text-sm mt-1">{t("createChannel.afterCreateHint")}</p>
+            <h2 className="text-base font-semibold ui-create-modal-title">{t("createChannel.title")}</h2>
+            <p className="ui-create-modal-subtitle text-xs mt-0.5 leading-snug">{t("createChannel.afterCreateHint")}</p>
           </div>
           <button type="button" onClick={onClose} disabled={loading} className="ui-icon-button rounded-lg p-1.5 transition-colors disabled:opacity-50" aria-label={t("common.close")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -238,13 +242,13 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
           )}
           className="flex max-h-[85vh] flex-col"
         >
-          <div className="space-y-4 overflow-y-auto px-6 py-4">
-            <div className="flex gap-4 items-start">
+          <div className="space-y-3 overflow-y-auto px-5 py-3">
+            <div className="flex gap-3 items-start">
               <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarChange} />
               <button
                 type="button"
                 onClick={() => avatarInputRef.current?.click()}
-                className="ui-avatar-slot w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0 border-2 border-dashed hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                className="ui-avatar-slot ui-create-avatar-btn w-12 h-12 rounded-full flex items-center justify-center overflow-hidden shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:rgba(33,55,84,0.28)]"
                 title={t("createChat.addPhoto")}
               >
                 {avatarPreview ? (
@@ -256,11 +260,11 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
                 )}
               </button>
               <div className="flex-1 min-w-0">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChannel.channelName")}</label>
-                <div className="flex">
+                <label className="block ui-create-modal-label mb-1">{t("createChannel.channelName")}</label>
+                <div className={`ui-create-field-row ${errors.title ? "ui-create-field-row--error" : ""}`}>
                   <input
                     type="text"
-                    className={`flex-1 border rounded-l-lg rounded-r-none px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-inset ${errors.title ? "border-red-500 focus:ring-red-500" : "border-slate-300 focus:ring-blue-400"}`}
+                    className="ui-create-input"
                     maxLength={TITLE_MAX}
                     placeholder={t("createChat.namePlaceholder")}
                     autoFocus
@@ -273,76 +277,74 @@ export default function CreateChannelModal({ isOpen, onClose, onCreated }: Creat
                   >
                     <button
                       type="button"
-                      className={`ui-picker-tile shrink-0 h-10 w-10 rounded-r-lg rounded-l-none border border-l-0 ${
-                        watch("title_icon") ? "ui-picker-tile-active" : ""
-                      } ${errors.title ? "border-red-500" : "border-slate-300"}`}
+                      className={`ui-create-attach-btn h-9 w-9 min-h-[2.25rem] p-0 text-base leading-none ${watch("title_icon") ? "ui-create-attach-btn--active" : ""}`}
                       title={t("createChat.titleIcon")}
                     >
                       {watch("title_icon") || "−"}
                     </button>
                   </EmojiPickerPopover>
                 </div>
-                {titleValue.length >= 30 && <p className={`text-xs mt-0.5 ${titleValue.length >= TITLE_MAX ? "text-red-500 font-medium" : "text-slate-500"}`}>{titleValue.length}/{TITLE_MAX}</p>}
+                {titleValue.length >= 30 && <p className={`text-xs mt-0.5 ${titleValue.length >= TITLE_MAX ? "text-red-500 font-medium" : "ui-create-modal-hint"}`}>{titleValue.length}/{TITLE_MAX}</p>}
                 {errors.title && <p className="text-red-500 text-xs mt-1">{errors.title.message}</p>}
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.description")}</label>
+              <label className="block ui-create-modal-label mb-1">{t("createChat.description")}</label>
               <textarea
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 resize-none text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-                rows={3}
+                className={`ui-create-input ${errors.description ? "ui-create-input--error" : ""}`}
+                rows={2}
                 maxLength={DESCRIPTION_MAX}
                 placeholder={t("createChat.descPlaceholder")}
                 {...register("description")}
               />
-              <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionValue.length}/{DESCRIPTION_MAX}</p>
+              {descriptionValue.length >= DESCRIPTION_MAX - DESCRIPTION_COUNTER_NEAR && (
+                <p
+                  className={`text-xs text-right mt-0.5 ${
+                    descriptionValue.length >= DESCRIPTION_MAX ? "text-red-500 font-medium" : "ui-create-modal-hint"
+                  }`}
+                >
+                  {descriptionValue.length}/{DESCRIPTION_MAX}
+                </p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChannel.username")}</label>
-              <div
-                className={`flex items-center border rounded-lg overflow-hidden focus-within:ring-2 ${errors.username ? "border-red-500 focus-within:ring-red-500 focus-within:border-red-500" : "border-slate-300 focus-within:ring-blue-400 focus-within:border-blue-400"}`}
-              >
-                <span className="px-3 py-2 text-slate-500 bg-slate-50 border-r border-slate-200 text-lg font-medium select-none">@</span>
+              <label className="block ui-create-modal-label mb-1">{t("createChannel.username")}</label>
+              <div className={`ui-create-field-row items-center ${errors.username ? "ui-create-field-row--error" : ""}`}>
+                <span className="ui-create-prefix">@</span>
                 <input
                   type="text"
                   maxLength={31}
                   placeholder="channelname"
-                  className="flex-1 min-w-0 border-0 rounded-none px-3 py-2 text-sm focus:outline-none focus:ring-0 lowercase bg-transparent placeholder:text-slate-400"
+                  className="ui-create-input lowercase"
                   {...register("username")}
                 />
               </div>
-              <p className="text-xs text-slate-500 mt-1">{t("createChannel.usernameHint")}</p>
+              <p className="text-xs ui-create-modal-hint mt-1">{t("createChannel.usernameHint")}</p>
               {errors.username && <p className="text-red-500 text-xs mt-1">{errors.username.message}</p>}
             </div>
 
-            {validationFocused && (errors.title || errors.username || errors.is_public) && (
+            {validationFocused && (errors.title || errors.username) && (
               <p ref={firstErrorRef} className="text-red-600 text-sm font-medium" role="alert">
                 {t("createChat.fixErrors")}
               </p>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">{t("createChat.chatType")}</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" value="true" className="accent-blue-600" {...register("is_public", { setValueAs: (v) => v === "true" })} /> {t("createChat.open")}
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" value="false" className="accent-blue-600" {...register("is_public", { setValueAs: (v) => v === "true" })} /> {t("createChat.closed")}
-                </label>
-              </div>
-              {errors.is_public && <p className="text-red-500 text-xs mt-1">{errors.is_public.message}</p>}
-              <p className="text-xs text-slate-400 mt-1">{t("createChannel.typeHint")}</p>
-            </div>
+            <ClosedTypeSwitchRow
+              closed={channelClosed}
+              onClosedChange={(closed) => setValue("is_public", !closed, { shouldValidate: true })}
+              tooltip={t("createChannel.typeHint")}
+              disabled={loading}
+            />
+            {errors.is_public && <p className="text-red-500 text-xs mt-0.5">{errors.is_public.message}</p>}
 
             {error && <p ref={apiErrorRef} className="text-red-500 text-sm" role="alert">{error}</p>}
           </div>
 
-          <div className="flex gap-2 justify-end border-t border-slate-200 px-6 py-4">
-            <button type="button" onClick={onClose} disabled={loading} className="ui-picker-tile rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
-            <button type="submit" disabled={loading} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors">
+          <div className="flex gap-2 justify-end border-t ui-create-modal-divider px-5 py-2.5">
+            <button type="button" onClick={onClose} disabled={loading} className="ui-accent-soft border rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50">{t("common.cancel")}</button>
+            <button type="submit" disabled={loading} className="ui-accent-strong rounded-lg px-4 py-1.5 disabled:opacity-50 text-sm font-medium transition-colors">
               {loading ? t("createChannel.creating") : t("createChannel.create")}
             </button>
           </div>

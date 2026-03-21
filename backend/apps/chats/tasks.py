@@ -5,6 +5,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from .models import ChatMember, Message, ScheduledMessage
+from apps.chats.message_views import _broadcast_message_updated
 
 
 def _build_message_payload(msg):
@@ -30,19 +31,6 @@ def _broadcast_new_message(chat_id, message_payload):
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_id}",
                 {"type": "chat.message.broadcast", "message": message_payload},
-            )
-    except Exception:
-        pass
-
-
-def _broadcast_message_updated(chat_id, message_payload):
-    """Notify chat members about a message update (e.g. TTL expired -> is_deleted)."""
-    try:
-        channel_layer = get_channel_layer()
-        if channel_layer:
-            async_to_sync(channel_layer.group_send)(
-                f"chat_{chat_id}",
-                {"type": "chat.message.updated", "message": message_payload},
             )
     except Exception:
         pass

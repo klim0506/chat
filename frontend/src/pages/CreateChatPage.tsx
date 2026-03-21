@@ -7,9 +7,12 @@ import { chatsApi } from "../api/client";
 import { useTranslation, type TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
 import { compressAvatar } from "../lib/compress-avatar";
+import { ClosedTypeSwitchRow } from "../components/ClosedTypeSwitchRow";
 
 const TITLE_MAX = 50;
 const DESCRIPTION_MAX = 300;
+/** Show description length only when this many characters from the limit (same idea as title counter). */
+const DESCRIPTION_COUNTER_NEAR = 50;
 
 function getSchema(t: (key: TranslationKey) => string) {
   return z.object({
@@ -29,12 +32,13 @@ export default function CreateChatPage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: { title: "", description: "", chat_type: "open" },
   });
   const titleValue = watch("title") ?? "";
   const descriptionValue = watch("description") ?? "";
+  const chatType = watch("chat_type");
 
   const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,7 +150,7 @@ export default function CreateChatPage() {
               )}
             </button>
             <div className="flex-1 min-w-0">
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.chatName")}</label>
+              <label className="block text-base font-semibold text-slate-800 mb-1.5">{t("createChat.chatName")}</label>
               <input
                 type="text"
                 className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${errors.title ? "border-red-500 focus:ring-red-500 focus:border-red-500" : "border-slate-300 focus:ring-blue-400 focus:border-blue-400"}`}
@@ -162,30 +166,30 @@ export default function CreateChatPage() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.description")}</label>
+            <label className="block text-base font-semibold text-slate-800 mb-1.5">{t("createChat.description")}</label>
             <textarea
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 resize-none"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 resize-none text-base leading-relaxed placeholder:text-slate-400"
               rows={3}
               maxLength={DESCRIPTION_MAX}
               placeholder={t("createChat.descPlaceholder")}
               {...register("description")}
             />
-            <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionValue.length}/{DESCRIPTION_MAX}</p>
+            {descriptionValue.length >= DESCRIPTION_MAX - DESCRIPTION_COUNTER_NEAR && (
+              <p
+                className={`text-xs text-right mt-0.5 ${
+                  descriptionValue.length >= DESCRIPTION_MAX ? "text-red-500 font-medium" : "text-slate-500"
+                }`}
+              >
+                {descriptionValue.length}/{DESCRIPTION_MAX}
+              </p>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">{t("createChat.chatType")}</label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2">
-                <input type="radio" value="open" {...register("chat_type")} /> {t("createChat.open")}
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" value="closed" {...register("chat_type")} /> {t("createChat.closed")}
-              </label>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">
-              {t("createChat.typeHint")}
-            </p>
-          </div>
+          <ClosedTypeSwitchRow
+            closed={chatType === "closed"}
+            onClosedChange={(closed) => setValue("chat_type", closed ? "closed" : "open", { shouldValidate: true })}
+            tooltip={t("createChat.typeHint")}
+            disabled={loading}
+          />
           {error && <p className="text-red-500 text-sm">{error}</p>}
           <button
             type="submit"

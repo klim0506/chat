@@ -105,6 +105,8 @@ systemctl status pingychat-backend pingychat-celery
 
 Бэкенд слушает `127.0.0.1:8000`. Доступ снаружи — через Nginx (прокси на 8000) и раздачу статики фронта из `/var/www/pingychat.com/frontend` (или аналог).
 
+**Две ВМ (приложение и БД раздельно, Docker):** пошаговая схема и команды — [docs/deploy-stage2-two-vm.md](docs/deploy-stage2-two-vm.md) (`docker-compose.data-node.yml`, `docker-compose.app-node.yml`).
+
 ### 5. Деплой новой сборки фронта и перезапуск backend
 
 Из корня репозитория:
@@ -128,6 +130,8 @@ systemctl status pingychat-backend pingychat-celery
 
 | Раздел | Файл |
 |--------|------|
+| Сборка **Windows** (десктоп) и **Android** (команды, CI, артефакты) | [docs/build-windows-and-android.md](docs/build-windows-and-android.md) |
+| Этап 2: две ВМ (Docker, приватная сеть) | [docs/deploy-stage2-two-vm.md](docs/deploy-stage2-two-vm.md) |
 | Настройка сайта (pingychat.com, web.pingychat.com, Nginx, SSL) | [docs/web.pingychat.com-setup.md](docs/web.pingychat.com-setup.md) |
 | Ошибки 502 и WebSocket на продакшене | [docs/troubleshooting-502-websocket.md](docs/troubleshooting-502-websocket.md) |
 | Релиз на прод (чеклист, CI, подпись) | [docs/production-release-guide.md](docs/production-release-guide.md) |

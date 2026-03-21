@@ -14,7 +14,9 @@ npm run desktop:build
 
 Скопировать в этот каталог вручную или скриптом.
 
-**Windows (для сайта):** ссылка ведёт на `Pingy-setup.exe`. Положите сюда установщик из сборки (из `bundle/nsis/`, переименуйте в `Pingy-setup.exe`). Как собрать самому: [build-windows-exe.md](../../../docs/build-windows-exe.md). После загрузки файла пересоберите фронт и задеплойте.
+**Windows (для сайта):** ссылка ведёт на `Pingy-setup.exe`. Из корня репозитория на Windows: `npm run build:windows-desktop` (или [build-windows-exe.md](../../../docs/build-windows-exe.md)). После копирования установщика сюда — `cd frontend && npm run build` и деплой.
+
+Сводка с Android: [build-windows-and-android.md](../../../docs/build-windows-and-android.md).
 
 **Windows и macOS (сборка):** только на соответствующей ОС или в CI. Подробно: [desktop-build-mac-windows.md](../../../docs/desktop-build-mac-windows.md).  
 **Все платформы:** [installers-all-platforms.md](../../../docs/installers-all-platforms.md).

@@ -485,6 +485,9 @@ const translations = {
   "createChat.description": { en: "Description", ru: "Описание" },
   "createChat.descPlaceholder": { en: "What's this chat about?", ru: "О чём этот чат?" },
   "createChat.chatType": { en: "Chat type", ru: "Тип чата" },
+  /** Short labels on the open/closed segment control (sentence case). */
+  "createChat.segmentOpen": { en: "open", ru: "открытый" },
+  "createChat.segmentClosed": { en: "closed", ru: "закрытый" },
   "createChat.open": { en: "Open", ru: "Открытый" },
   "createChat.closed": { en: "Closed", ru: "Закрытый" },
   "createChat.typeHint": { en: "Anyone can join an open chat by link. Closed chats require approval.", ru: "В открытый чат может войти любой по ссылке. В закрытый — только после одобрения." },

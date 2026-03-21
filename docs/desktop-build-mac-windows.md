@@ -2,6 +2,8 @@
 
 Tauri собирает нативный бинарник только на той ОС, для которой собираешь: под **Windows** — на Windows, под **macOS** — на Mac. На Linux получаются только Linux-артефакты.
 
+**Windows: один скрипт из корня репо** — `npm run build:windows-desktop` (см. [build-windows-and-android.md](build-windows-and-android.md)).
+
 ---
 
 ## Вариант 1: GitHub Actions (рекомендуется)

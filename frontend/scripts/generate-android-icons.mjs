@@ -1,17 +1,51 @@
 /**
- * Generates Android launcher icons from the Pingy logo.
+ * Generates Android launcher icons from favicon.ico (same as web app icon).
  * Creates mipmap resources for adaptive icon (API 26+) and legacy icons.
  *
- * Usage: node scripts/generate-android-icons.mjs
+ * Usage: npm run android:icons  (from frontend/)
  */
 import sharp from "sharp";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { execFileSync } from "node:child_process";
+import os from "node:os";
+
+/**
+ * Sharp не читает некоторые .ico — извлекаем крупнейший кадр через ImageMagick.
+ */
+function rasterPathForSharp(sourcePath) {
+  if (!sourcePath.toLowerCase().endsWith(".ico")) {
+    return { path: sourcePath, cleanup: () => {} };
+  }
+  const tmp = path.join(os.tmpdir(), `android-launcher-ico-${process.pid}.png`);
+  try {
+    execFileSync("convert", [`${sourcePath}[0]`, tmp], { stdio: "inherit" });
+  } catch {
+    try {
+      execFileSync("magick", [`${sourcePath}[0]`, tmp], { stdio: "inherit" });
+    } catch (e2) {
+      console.error(
+        "Для favicon.ico нужен ImageMagick в PATH (команды convert или magick)."
+      );
+      throw e2;
+    }
+  }
+  return {
+    path: tmp,
+    cleanup: () => {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const SOURCE = path.resolve(__dirname, "../public/assets/logo.png");
+const SOURCE = path.resolve(__dirname, "../public/favicon.ico");
 const OUT_BASE = path.resolve(__dirname, "../../android/app/src/main/res");
 
 // Pingy theme color (from manifest.json)
@@ -41,9 +75,8 @@ async function generate() {
     process.exit(1);
   }
 
-  const meta = await sharp(SOURCE).metadata();
-  const size = Math.min(meta.width || 512, meta.height || 512);
-
+  const { path: raster, cleanup } = rasterPathForSharp(SOURCE);
+  try {
   for (const [folder, px] of FOREGROUND_SIZES) {
     const dir = path.join(OUT_BASE, folder);
     mkdirSync(dir, { recursive: true });
@@ -52,7 +85,7 @@ async function generate() {
     const logoSize = Math.round(px * 0.72);
     const padding = Math.round((px - logoSize) / 2);
 
-    await sharp(SOURCE)
+    await sharp(raster)
       .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .extend({
         top: padding,
@@ -74,7 +107,7 @@ async function generate() {
     const logoSize = Math.round(px * 0.72);
     const padding = Math.round((px - logoSize) / 2);
 
-    const logoBuf = await sharp(SOURCE)
+    const logoBuf = await sharp(raster)
       .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png()
       .toBuffer();
@@ -105,6 +138,9 @@ async function generate() {
   }
 
   console.log("Done! Android icons generated.");
+  } finally {
+    cleanup();
+  }
 }
 
 generate().catch((err) => {

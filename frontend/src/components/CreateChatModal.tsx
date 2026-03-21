@@ -7,9 +7,11 @@ import { useTranslation, type TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
 import { StickerGifPanel } from "./StickerGifPanel";
 import { ModalViewportLayer } from "./TopLayerPortal";
+import { ClosedTypeSwitchRow } from "./ClosedTypeSwitchRow";
 
 const TITLE_MAX = 50;
 const DESCRIPTION_MAX = 300;
+const DESCRIPTION_COUNTER_NEAR = 50;
 
 function getSchema(t: (key: TranslationKey) => string) {
   return z.object({
@@ -43,6 +45,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
   const emojiPanelRef = useRef<HTMLDivElement>(null);
   const titleValue = watch("title") ?? "";
   const descriptionValue = watch("description") ?? "";
+  const chatType = watch("chat_type");
 
   const onAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -143,14 +146,14 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
   return (
     <ModalViewportLayer onBackdropClick={loading ? undefined : onClose}>
       <div
-        className="ui-modal-surface max-h-[85vh] max-w-lg w-full my-auto rounded-2xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
+        className="ui-modal-surface ui-create-modal max-h-[85vh] max-w-lg w-full my-auto rounded-xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 pt-5 pb-3">
+        <div className="flex items-center justify-between border-b ui-create-modal-divider px-5 pt-3 pb-2">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">{t("createChat.title")}</h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <h2 className="text-base font-semibold ui-create-modal-title">{t("createChat.title")}</h2>
+            <p className="mt-0.5 text-xs ui-create-modal-subtitle leading-snug">
               {t("createChat.afterCreateHint")}
             </p>
           </div>
@@ -169,8 +172,8 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
 
         {/* Form */}
         <form onSubmit={handleSubmit(onSubmit)} className="flex max-h-[85vh] flex-col">
-          <div className="space-y-4 overflow-y-auto px-6 py-4">
-          <div className="flex gap-4 items-start">
+          <div className="space-y-3 overflow-y-auto px-5 py-3">
+          <div className="flex gap-3 items-start">
             <input
               ref={avatarInputRef}
               type="file"
@@ -181,7 +184,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
             <button
               type="button"
               onClick={() => avatarInputRef.current?.click()}
-              className="ui-avatar-slot w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0 border-2 border-dashed hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+              className="ui-avatar-slot ui-create-avatar-btn w-12 h-12 rounded-full flex items-center justify-center overflow-hidden shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:rgba(33,55,84,0.28)]"
               title={t("createChat.addPhoto")}
             >
               {avatarPreview ? (
@@ -194,11 +197,12 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
             </button>
             <div className="flex-1 min-w-0">
               <div className="flex-1 min-w-0">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.chatName")}</label>
-                <div ref={emojiPanelRef} className="relative flex">
+                <label className="block ui-create-modal-label mb-1">{t("createChat.chatName")}</label>
+                <div ref={emojiPanelRef} className="relative">
+                  <div className={`ui-create-field-row ${errors.title ? "ui-create-field-row--error" : ""}`}>
                   <input
                     type="text"
-                    className={`flex-1 border rounded-l-lg rounded-r-none px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-inset ${errors.title ? "border-red-500 focus:ring-red-500" : "border-slate-300 focus:ring-blue-400"}`}
+                    className="ui-create-input"
                     maxLength={TITLE_MAX}
                     placeholder={t("createChat.namePlaceholder")}
                     autoFocus
@@ -207,11 +211,12 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
                   <button
                     type="button"
                     onClick={() => setShowEmojiPanel((v) => !v)}
-                    className={`ui-picker-tile shrink-0 rounded-r-lg border border-l-0 px-2.5 transition-colors ${showEmojiPanel ? "ui-picker-tile-active" : ""} ${errors.title ? "border-red-500" : "border-slate-300"}`}
+                    className={`ui-create-attach-btn min-h-[2.25rem] px-2.5 ${showEmojiPanel ? "ui-create-attach-btn--active" : ""}`}
                     title={t("chat.emoji")}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
                   </button>
+                  </div>
                   {showEmojiPanel && (
                     <div className="absolute right-0 bottom-full mb-1 z-50">
                       <StickerGifPanel
@@ -227,7 +232,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
                   )}
                 </div>
                 {titleValue.length >= 30 && (
-                  <p className={`text-xs mt-0.5 ${titleValue.length >= TITLE_MAX ? "text-red-500 font-medium" : "text-slate-500"}`}>
+                  <p className={`text-xs mt-0.5 ${titleValue.length >= TITLE_MAX ? "text-red-500 font-medium" : "ui-create-modal-hint"}`}>
                     {titleValue.length}/{TITLE_MAX}
                   </p>
                 )}
@@ -237,48 +242,48 @@ export default function CreateChatModal({ isOpen, onClose, onCreated }: CreateCh
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">{t("createChat.description")}</label>
+            <label className="block ui-create-modal-label mb-1">{t("createChat.description")}</label>
             <textarea
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 resize-none text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-              rows={3}
+              className={`ui-create-input ${errors.description ? "ui-create-input--error" : ""}`}
+              rows={2}
               maxLength={DESCRIPTION_MAX}
               placeholder={t("createChat.descPlaceholder")}
               {...register("description")}
             />
-            <p className="text-xs text-slate-500 text-right mt-0.5">{descriptionValue.length}/{DESCRIPTION_MAX}</p>
+            {descriptionValue.length >= DESCRIPTION_MAX - DESCRIPTION_COUNTER_NEAR && (
+              <p
+                className={`text-xs text-right mt-0.5 ${
+                  descriptionValue.length >= DESCRIPTION_MAX ? "text-red-500 font-medium" : "ui-create-modal-hint"
+                }`}
+              >
+                {descriptionValue.length}/{DESCRIPTION_MAX}
+              </p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">{t("createChat.chatType")}</label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="radio" value="open" className="accent-blue-600" {...register("chat_type")} /> {t("createChat.open")}
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="radio" value="closed" className="accent-blue-600" {...register("chat_type")} /> {t("createChat.closed")}
-              </label>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">
-              {t("createChat.typeHint")}
-            </p>
-          </div>
+          <ClosedTypeSwitchRow
+            closed={chatType === "closed"}
+            onClosedChange={(closed) => setValue("chat_type", closed ? "closed" : "open", { shouldValidate: true })}
+            tooltip={t("createChat.typeHint")}
+            disabled={loading}
+          />
 
           {error && <p className="text-red-500 text-sm">{error}</p>}
           </div>
 
-          <div className="flex gap-2 justify-end border-t border-slate-200 px-6 py-4">
+          <div className="flex gap-2 justify-end border-t ui-create-modal-divider px-5 py-2.5">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="ui-picker-tile rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition-colors disabled:opacity-50"
+              className="ui-accent-soft border rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
             >
               {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
+              className="ui-accent-strong rounded-lg px-4 py-1.5 disabled:opacity-50 text-sm font-medium transition-colors"
             >
               {loading ? t("createChat.creating") : t("createChat.create")}
             </button>

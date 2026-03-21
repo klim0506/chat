@@ -523,14 +523,14 @@ export default function AuthPage() {
       ? ""
       : authUxCopy.descriptions[flowStage];
   return (
-    <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
+    <div className="auth-shell relative min-h-screen w-full max-w-[100vw] overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-[-8%] top-[-6%] h-64 w-64 rounded-full bg-sky-200/40 blur-3xl" />
         <div className="absolute bottom-[-8%] right-[-4%] h-72 w-72 rounded-full bg-blue-200/40 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-3xl items-center justify-center">
-        <div className="grid w-full items-stretch gap-5">
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] w-full min-w-0 max-w-3xl items-center justify-center">
+        <div className="grid w-full min-w-0 max-w-full items-stretch gap-5">
           <section className="hidden">
             <div className="space-y-8">
               <Link
@@ -589,10 +589,10 @@ export default function AuthPage() {
             </div>
           </section>
 
-          <section className={`auth-glass-card relative mx-auto flex w-full max-w-[34rem] flex-col justify-center rounded-[28px] p-5 sm:p-7 lg:rounded-[32px] lg:p-8 ${
+          <section className={`auth-glass-card relative mx-auto flex w-full min-w-0 max-w-[min(34rem,100%)] flex-col justify-center rounded-[28px] p-4 sm:p-7 lg:rounded-[32px] lg:p-8 ${
             step === "phone" || step === "code" ? "min-h-[24rem]" : ""
           }`}>
-            <div className="mb-6 flex items-start justify-between gap-4">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <div className="min-w-0 flex-1 space-y-3">
                 <Link
                   to="/"
@@ -601,8 +601,8 @@ export default function AuthPage() {
                 >
                   <img src={LOGO_URL} alt={t("auth.logo")} className="h-12 w-auto object-contain opacity-95" />
                 </Link>
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+                <div className="min-w-0 space-y-2">
+                  <h2 className="break-words text-2xl font-semibold tracking-[-0.03em] text-slate-950">
                     {stageTitle}
                   </h2>
                   {stageDescription && (
@@ -616,13 +616,13 @@ export default function AuthPage() {
                     </p>
                   )}
                   {step === "code" && (
-                    <div className="flex min-w-0 items-baseline gap-2 pt-2 text-sm leading-6 text-slate-600 whitespace-nowrap">
-                      <span>
+                    <div className="flex min-w-0 flex-col gap-2 pt-2 text-sm leading-6 text-slate-600 sm:flex-row sm:flex-wrap sm:items-baseline">
+                      <span className="min-w-0 break-words">
                         {language === "ru"
                           ? "Отправили сообщение в Telegram на номер"
-                          : "Sent a message to Telegram for number"}
+                          : "Sent a message to Telegram for number"}{" "}
+                        <span className="font-medium text-slate-900 break-all">{phone}</span>
                       </span>
-                      <span className="font-medium text-slate-900">{phone}</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -634,7 +634,7 @@ export default function AuthPage() {
                           setResendCooldownSec(0);
                           codeForm.reset({ code: "" });
                         }}
-                        className="font-medium text-sky-700 transition-colors hover:text-sky-800"
+                        className="shrink-0 self-start font-medium text-sky-700 transition-colors hover:text-sky-800 sm:self-auto"
                       >
                         {t("auth.changeNumber")}
                       </button>
@@ -642,7 +642,7 @@ export default function AuthPage() {
                   )}
                 </div>
               </div>
-              <div className="soft-chip inline-flex shrink-0 rounded-full p-1 self-start">
+              <div className="soft-chip inline-flex w-fit shrink-0 self-end rounded-full p-1 sm:self-start">
                 <button
                   type="button"
                   onClick={() => setLanguage("ru")}
@@ -715,9 +715,9 @@ export default function AuthPage() {
                 </div>
               </form>
             ) : step === "phone" ? (
-              <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="space-y-6">
-                <div className="space-y-2">
-                  <div className="rounded-[22px] bg-white/40 p-1.5">
+              <form onSubmit={phoneForm.handleSubmit(onSendCode)} className="min-w-0 space-y-6">
+                <div className="min-w-0 space-y-2">
+                  <div className="min-w-0 rounded-[22px] bg-white/40 p-1.5">
                     <Controller
                       name="phone"
                       control={phoneForm.control}
@@ -759,7 +759,7 @@ export default function AuthPage() {
                 </div>
               </form>
             ) : step === "username" ? (
-              <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="space-y-4">
+              <form onSubmit={usernameForm.handleSubmit(onSetUsername)} className="min-w-0 space-y-4">
                 <div className="space-y-1">
                   <label className="mb-1 block text-sm font-medium text-slate-700">{t("auth.nameLabel")}</label>
                     <input
@@ -816,11 +816,11 @@ export default function AuthPage() {
                 </div>
               </form>
             ) : (
-              <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="space-y-6">
-                <div className="space-y-2">
-                  <div className="rounded-[22px] bg-white/40 p-1.5">
-                    <div className={`ui-field-shell flex overflow-hidden rounded-[18px] border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${codeForm.formState.errors.code || error ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
-                      <div className="ui-picker-tile flex min-w-0 items-center gap-2 rounded-none border-r border-slate-200 px-5 py-3 text-left">
+              <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="min-w-0 space-y-6">
+                <div className="min-w-0 space-y-2">
+                  <div className="min-w-0 rounded-[22px] bg-white/40 p-1.5">
+                    <div className={`ui-field-shell flex min-w-0 overflow-hidden rounded-[18px] border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${codeForm.formState.errors.code || error ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
+                      <div className="ui-picker-tile flex min-w-0 shrink-0 items-center gap-2 rounded-none border-r border-slate-200 px-3 py-3 text-left sm:px-5">
                         <span className="text-base font-medium text-slate-700 sm:text-lg">
                           {language === "ru" ? "Код" : "Code"}
                         </span>

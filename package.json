@@ -2,6 +2,11 @@
   "name": "pingychat-dev",
   "private": true,
   "scripts": {
+    "build:android": "bash ./scripts/build-android.sh",
+    "build:android:win": "powershell -ExecutionPolicy Bypass -File ./scripts/build-android.ps1",
+    "build:windows-desktop": "powershell -ExecutionPolicy Bypass -File ./scripts/build-desktop-windows.ps1",
+    "downloads:copy:android": "bash ./scripts/copy-android-apk-to-public.sh",
+    "downloads:copy:android:win": "powershell -ExecutionPolicy Bypass -File ./scripts/copy-android-apk-to-public.ps1",
     "deploy": "bash ./scripts/build-restart-deploy.sh",
     "dev": "powershell -ExecutionPolicy Bypass -File ./scripts/dev.ps1",
     "dev:frontend": "cd frontend && npm run dev",

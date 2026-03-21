@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useVisualViewportCssVars } from "./hooks/useVisualViewportCssVars";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuthStore } from "./store/auth";
 import { api, authApi, chatsApi, type User } from "./api/client";
@@ -182,6 +183,7 @@ function useAuthRehydrated() {
 }
 
 function App() {
+  useVisualViewportCssVars();
   const authRehydrated = useAuthRehydrated();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setTokens = useAuthStore((s) => s.setTokens);

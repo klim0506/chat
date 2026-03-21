@@ -2,6 +2,8 @@
 
 Краткая инструкция: собрать на своей Windows-машине и загрузить на сайт самому.
 
+Объединённый чеклист (Android + Windows + CI): [build-windows-and-android.md](build-windows-and-android.md). Автоматизация из корня репо: `npm run build:windows-desktop` (скрипт `scripts/build-desktop-windows.ps1`).
+
 ## Что нужно
 
 - **Node.js** (LTS, например 20)
@@ -21,7 +23,7 @@
    ```
 
 3. Дождаться окончания сборки. Результат:
-   - **Установщик .exe:** `frontend\src-tauri\target\release\bundle\nsis\Pingy_1.0.3_x64-setup.exe` (или похожее имя)
+   - **Установщик .exe:** `frontend\src-tauri\target\release\bundle\nsis\Pingy_*_x64-setup.exe` (имя содержит версию из `tauri.conf.json`)
    - **Папка без установки (portable):** `frontend\src-tauri\target\release\bundle\win-unpacked\` — там лежит `Pingy.exe`
 
 ## Что загрузить на сайт

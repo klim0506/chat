@@ -64,8 +64,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      # На windows-latest шелл по умолчанию — PowerShell; здесь нужен bash (есть в Git for Windows).
       - name: Build Tauri
         working-directory: frontend
+        shell: bash
         run: |
           if [ -n "${{ matrix.target }}" ]; then
             npx tauri build --target ${{ matrix.target }}

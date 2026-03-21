@@ -4,7 +4,7 @@ import { t } from "../lib/i18n";
 import type { AppLanguage } from "../store/preferences";
 import { useAuthStore } from "../store/auth";
 import { api } from "../api/client";
-import { APP_BASE_URL, ANDROID_APK_URL } from "../lib/host";
+import { APP_BASE_URL, ANDROID_APK_FILENAME, ANDROID_APK_URL } from "../lib/host";
 
 const GEO_TIMEOUT_MS = 3500;
 
@@ -196,7 +196,7 @@ export default function LandingPage() {
             <p className="text-sm text-slate-500">
               <a href={`${APP_BASE_URL}/downloads/desktop/Pingy-setup.exe`} download className="text-slate-600 hover:underline">Windows</a>
               {", "}
-              <a href={ANDROID_APK_URL} download="Pingy.apk" className="text-slate-600 hover:underline">Android</a>
+              <a href={ANDROID_APK_URL} download={ANDROID_APK_FILENAME} className="text-slate-600 hover:underline">Android</a>
               {", "}
               <a href={`${APP_BASE_URL}/auth`} className="text-slate-600 hover:underline">Web</a>
             </p>
@@ -317,7 +317,7 @@ export default function LandingPage() {
                 <div className="space-y-2">
                   <a
                     href={ANDROID_APK_URL}
-                    download="Pingy.apk"
+                    download={ANDROID_APK_FILENAME}
                     className="flex items-center gap-3 p-3 rounded-lg border-2 border-green-200 bg-green-50 hover:border-green-400 hover:bg-green-100/50 transition-all group"
                   >
                     <div className="w-10 h-10 rounded-lg bg-green-100 text-green-600 flex items-center justify-center">

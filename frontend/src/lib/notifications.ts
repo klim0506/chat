@@ -41,7 +41,7 @@ export function getNotificationBody(message: {
 }
 
 /** Сухой формат пушей: только favicon, отправитель, текст, время. */
-const NOTIFICATION_ICON = "/favicon.ico";
+const NOTIFICATION_ICON = "/ico_png_ai_16x16.ico";
 
 function formatNotificationTime(createdAt?: string): string {
   if (!createdAt) return "";

@@ -1,10 +1,12 @@
 {
+  "id": "/",
   "name": "Pingy",
   "short_name": "Pingy",
   "description": "Pingy — мессенджер без VPN и блокировок. Регистрация по SMS, файлы до 0,5 ГБ, до 300 участников.",
   "start_url": "/chats",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "orientation": "any",
   "theme_color": "#0b1220",
   "background_color": "#0b1220",

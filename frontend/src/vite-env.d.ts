@@ -13,7 +13,7 @@ interface ImportMetaEnv {
   readonly VITE_LANDING_AT_ROOT: string;
   /** Comma-separated hostnames that show landing+wiki (default: pingychat.com,www.pingychat.com). */
   readonly VITE_MARKETING_HOSTS: string;
-  /** Direct URL to Android APK; if not set, APP_BASE_URL/downloads/android/Pingy.apk is used. */
+  /** Direct URL to Android APK; if not set, APP_BASE_URL/downloads/android/Pingy_{version}.apk is used. */
   readonly VITE_ANDROID_APK_URL: string;
 }
 interface ImportMeta { readonly env: ImportMetaEnv; }

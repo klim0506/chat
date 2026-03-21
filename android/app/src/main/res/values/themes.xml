@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.App.Light" parent="android:Theme.Material.Light.NoActionBar">
+    <!-- AppCompatActivity требует тему AppCompat; Theme.Material с ним даёт краши на части устройств (Xiaomi и др.). -->
+    <style name="Theme.App.Light" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@android:color/white</item>
-        <item name="android:colorPrimary">#2563EB</item>
+        <item name="colorPrimary">#2563EB</item>
     </style>
 </resources>
