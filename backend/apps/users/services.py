@@ -206,6 +206,9 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
 
     last_error: str | None = None
     api_error_code: str | None = None  # error code from data["error"] for 503
+    proxy_url = (getattr(settings, "TELEGRAM_GATEWAY_HTTPS_PROXY", None) or "").strip()
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
     for attempt in range(1, 4):
         try:
             resp = requests.post(
@@ -216,6 +219,7 @@ def send_telegram_verification(phone: str, code: str) -> tuple[dict | None, str 
                     "Accept": "application/json",
                 },
                 json=payload,
+                proxies=proxies,
                 # Keep total worst-case under frontend send-code timeout (connect + read per attempt).
                 timeout=(8, 15),
             )

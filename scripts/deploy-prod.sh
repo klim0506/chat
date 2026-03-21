@@ -17,10 +17,10 @@ if [ -f "$REPO_ROOT/docker-compose.yml" ] && [ -f "$REPO_ROOT/postgres.docker.en
 fi
 
 if [ "$USE_DOCKER_STACK" = "1" ]; then
-  echo "--- Docker stack: rebuild backend/celery, миграции в entrypoint при старте backend ---"
+  echo "--- Docker stack: rebuild telegram-tor + backend/celery, миграции в entrypoint при старте backend ---"
   ln -sf postgres.docker.env .env
-  docker compose build backend celery celery-beat
-  docker compose up -d db redis backend celery celery-beat
+  docker compose build telegram-tor backend celery celery-beat
+  docker compose up -d db redis telegram-tor backend celery celery-beat
   echo "--- Frontend (Docker build → $FRONTEND_DEST) ---"
   # Важно: всегда пересобирать образ фронта — иначе run использует старый dist из кэша Docker
   docker compose --profile frontend build frontend-build

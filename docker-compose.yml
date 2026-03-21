@@ -1,4 +1,6 @@
-# Полный стек PingyChat: Postgres, Redis, Daphne, Celery, Celery Beat.
+# Полный стек PingyChat: Postgres, Redis, Tor (SOCKS5), Daphne, Celery, Celery Beat.
+# Telegram Gateway (коды входа) идёт через Tor: backend → socks5h://telegram-tor:9050 (см. TELEGRAM_GATEWAY_HTTPS_PROXY).
+# Альтернатива — свой VPN: docker-compose.telegram-gluetun.yml (предварительно отключите telegram-tor в этом файле).
 # Переменные: export $(grep -v '^#' postgres.docker.env | xargs) перед docker compose up
 # Фронт в /var/www: docker compose run --rm frontend-build
 name: pingychat
@@ -30,6 +32,16 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     networks: [internal]
 
+  telegram-tor:
+    build:
+      context: ./docker/tor
+      dockerfile: Dockerfile
+    container_name: pingychat-telegram-tor
+    restart: unless-stopped
+    volumes:
+      - pingychat_tordata:/var/lib/tor
+    networks: [internal]
+
   backend:
     build:
       context: ./backend
@@ -41,11 +53,14 @@ services:
       DATABASE_URL: postgres://pingychat:${POSTGRES_PASSWORD}@db:5432/pingychat_db
       REDIS_URL: redis://redis:6379/0
       DJANGO_SETTINGS_MODULE: config.settings.prod
+      TELEGRAM_GATEWAY_HTTPS_PROXY: socks5h://telegram-tor:9050
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
+      telegram-tor:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -116,3 +131,4 @@ volumes:
   pingychat_pgdata:
     name: pingychat_pgdata
     external: true
+  pingychat_tordata:

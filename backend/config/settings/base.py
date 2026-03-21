@@ -282,6 +282,8 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 # Telegram Gateway API (verification codes via @VerificationCodes)
 # https://gateway.telegram.org/ → Account → API → Copy Token
 TELEGRAM_GATEWAY_TOKEN = env("TELEGRAM_GATEWAY_TOKEN", default="")
+# Outbound proxy only for gatewayapi.telegram.org: http(s)://, socks5h:// (Docker: TELEGRAM_GATEWAY_HTTPS_PROXY в docker-compose.yml)
+TELEGRAM_GATEWAY_HTTPS_PROXY = env("TELEGRAM_GATEWAY_HTTPS_PROXY", default="")
 
 # YooKassa webhook: allow only requests from these IPs/CIDRs (see yookassa.ru/developers/using-api/webhooks).
 # Empty list = no IP filter (not recommended for production).

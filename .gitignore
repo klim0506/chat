@@ -13,6 +13,7 @@ __pycache__/
 backend/.env
 backend/env
 postgres.docker.env
+telegram-gluetun.env
 /.env
 frontend/.env.local
 frontend/.env.production

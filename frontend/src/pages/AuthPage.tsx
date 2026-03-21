@@ -141,7 +141,7 @@ export default function AuthPage() {
   const [usernameDetail, setUsernameDetail] = useState("");
   const checkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCheckedRef = useRef("");
-  const protectedUsernames = new Set(["pingy", "support", "admin", "security", "news", "help"]);
+  const protectedUsernames = new Set(["support", "admin", "security", "news", "help"]);
 
   const checkUsernameAvailability = useCallback((value: string) => {
     if (checkTimerRef.current) clearTimeout(checkTimerRef.current);

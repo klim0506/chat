@@ -1,0 +1,31 @@
+# Опционально: свой VPN через Gluetun (HTTP-прокси :8888) вместо встроенного Tor.
+# https://github.com/qdm12/gluetun-wiki
+#
+# Перед запуском в основном docker-compose.yml закомментируйте или удалите:
+#   - сервис telegram-tor и том pingychat_tordata;
+#   - у backend: depends_on.telegram-tor и TELEGRAM_GATEWAY_HTTPS_PROXY (их задаёт этот файл).
+#
+#   cp telegram-gluetun.env.example telegram-gluetun.env
+#   docker compose -f docker-compose.yml -f docker-compose.telegram-gluetun.yml up -d
+
+services:
+  telegram-vpn:
+    image: qmcgaw/gluetun:latest
+    container_name: pingychat-telegram-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - telegram-gluetun.env
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    networks: [internal]
+
+  backend:
+    environment:
+      TELEGRAM_GATEWAY_HTTPS_PROXY: http://telegram-vpn:8888
+    depends_on:
+      telegram-vpn:
+        condition: service_healthy

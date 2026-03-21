@@ -1,5 +1,5 @@
 #!/bin/bash
-# Поднять весь стек в Docker (Postgres, Redis, backend, celery, beat) и собрать фронт в /var/www.
+# Поднять весь стек в Docker (Postgres, Redis, Tor, backend, celery, beat) и собрать фронт в /var/www.
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -12,7 +12,7 @@ fi
 ln -sf postgres.docker.env .env
 
 docker compose build --parallel
-docker compose up -d db redis backend celery celery-beat
+docker compose up -d db redis telegram-tor backend celery celery-beat
 
 echo "--- Сборка и копирование фронтенда в /var/www/pingychat.com/frontend ---"
 docker compose --profile frontend run --rm frontend-build

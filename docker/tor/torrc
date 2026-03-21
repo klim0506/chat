@@ -1,0 +1,5 @@
+# Минимальный Tor для SOCKS5 (исходный код: https://gitlab.torproject.org/tpo/core/tor)
+Log notice stdout
+SocksPort 0.0.0.0:9050
+DataDirectory /var/lib/tor
+ControlPort 0
