@@ -7789,6 +7789,24 @@ const MessageBubble = memo(function MessageBubble({
   const rowJustify = alignRight ? "justify-end" : "justify-start";
   const contentOrderReverse = alignRight;
 
+  const isFile =
+    message.msg_type !== "text" &&
+    message.msg_type !== "emoji" &&
+    message.msg_type !== "gif" &&
+    message.msg_type !== "sticker" &&
+    message.msg_type !== "poll";
+
+  const runCopyAction = useCallback((forWord: boolean) => {
+    const raw = isFile ? t("common.fileMsg") : (message.content || "");
+    const text = forWord && !isFile ? stripMarkdown(raw) : raw;
+    copyToClipboard(text).then(() => {
+      setContextMenuCopyShake(true);
+      setTimeout(() => setContextMenuCopyShake(false), 400);
+      setContextMenuCopied(true);
+      setTimeout(() => setContextMenuCopied(false), 2000);
+    });
+  }, [isFile, message.content, t]);
+
   // Deleted message placeholder
   if (message.is_deleted) {
     return (
@@ -7797,8 +7815,6 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     );
   }
-
-  const isFile = message.msg_type !== "text" && message.msg_type !== "emoji" && message.msg_type !== "gif" && message.msg_type !== "sticker" && message.msg_type !== "poll";
   const isGif = message.msg_type === "gif" && message.content;
   const isSticker = message.msg_type === "sticker" && (message.content || message.file);
   const isPoll = message.msg_type === "poll" && message.poll_data;
@@ -7915,17 +7931,6 @@ const MessageBubble = memo(function MessageBubble({
   const supportsHoverSubmenu =
     typeof window !== "undefined" &&
     window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-
-  const runCopyAction = useCallback((forWord: boolean) => {
-    const raw = isFile ? t("common.fileMsg") : (message.content || "");
-    const text = forWord && !isFile ? stripMarkdown(raw) : raw;
-    copyToClipboard(text).then(() => {
-      setContextMenuCopyShake(true);
-      setTimeout(() => setContextMenuCopyShake(false), 400);
-      setContextMenuCopied(true);
-      setTimeout(() => setContextMenuCopied(false), 2000);
-    });
-  }, [isFile, message.content, t]);
 
   const handleDelete = () => {
     closeContextMenu();
