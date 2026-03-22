@@ -3066,15 +3066,47 @@ export default function ChatPage({
           durationSeconds = await new Promise<number>((resolve) => {
             const video = document.createElement("video");
             video.preload = "metadata";
-            video.onloadedmetadata = () => {
-              URL.revokeObjectURL(url);
-              resolve(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0);
+            let settled = false;
+            let probeTimeout = 0;
+            const finish = (v: number) => {
+              if (settled) return;
+              settled = true;
+              if (probeTimeout) window.clearTimeout(probeTimeout);
+              try {
+                URL.revokeObjectURL(url);
+              } catch {
+                /* ignore */
+              }
+              resolve(v);
             };
-            video.onerror = () => {
-              URL.revokeObjectURL(url);
-              resolve(0);
+            const tryRead = (): number | null => {
+              let d = video.duration;
+              if (!Number.isFinite(d) || d <= 0 || d === Infinity) {
+                try {
+                  if (video.seekable && video.seekable.length > 0) {
+                    const end = video.seekable.end(video.seekable.length - 1);
+                    if (Number.isFinite(end) && end > 0) d = end;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+              if (Number.isFinite(d) && d > 0 && d !== Infinity) return d;
+              return null;
             };
+            const onMaybeReady = () => {
+              const d = tryRead();
+              if (d != null) finish(d);
+            };
+            video.onloadedmetadata = onMaybeReady;
+            video.ondurationchange = onMaybeReady;
+            video.onprogress = onMaybeReady;
+            video.onerror = () => finish(0);
             video.src = url;
+            probeTimeout = window.setTimeout(() => {
+              const d = tryRead();
+              finish(d ?? 0);
+            }, 3000);
           });
           if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) durationSeconds = undefined;
         } catch {
@@ -9650,6 +9682,8 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
   const wasDragRef = useRef(false);
   const isSeekingRef = useRef(false);
   const pendingSeekTimeRef = useRef<number | null>(null);
+  const durationSecondsRef = useRef(durationSeconds);
+  durationSecondsRef.current = durationSeconds;
 
   useEffect(() => {
     const el = videoRef.current;
@@ -9667,8 +9701,18 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
   }, [ownerId]);
 
   const syncDuration = useCallback((el: HTMLVideoElement) => {
-    const d = el.duration;
-    if (Number.isFinite(d) && d > 0) setDuration(d);
+    let d = el.duration;
+    if (!Number.isFinite(d) || d <= 0 || d === Infinity) {
+      try {
+        if (el.seekable && el.seekable.length > 0) {
+          const end = el.seekable.end(el.seekable.length - 1);
+          if (Number.isFinite(end) && end > 0) d = end;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (Number.isFinite(d) && d > 0 && d !== Infinity) setDuration(d);
   }, []);
 
   /** Подтягиваем длительность с сервера без el.load() — иначе при обновлении сообщения перемотка сбрасывается в 0. */
@@ -9679,12 +9723,13 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
   }, [durationSeconds]);
 
   useEffect(() => {
+    if (!videoUrl) return;
     const el = videoRef.current;
     if (!el) return;
     setPlaying(false);
     setMuted(true);
     setCurrentTime(0);
-    setDuration(durationSeconds ?? 0);
+    setDuration(durationSecondsRef.current ?? 0);
     pendingSeekTimeRef.current = null;
     const onTimeUpdate = () => {
       if (isSeekingRef.current) return;
@@ -9714,6 +9759,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     const onLoadedData = () => applyPendingSeek();
     const onCanPlay = () => applyPendingSeek();
     const onDurationChange = () => syncDuration(el);
+    const onProgress = () => syncDuration(el);
     const onEnded = () => {
       setPlaying(false);
       setCurrentTime(0);
@@ -9727,6 +9773,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     el.addEventListener("loadeddata", onLoadedData);
     el.addEventListener("canplay", onCanPlay);
     el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("progress", onProgress);
     el.addEventListener("ended", onEnded);
     try { el.load(); } catch {}
     syncDuration(el);
@@ -9738,9 +9785,10 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
       el.removeEventListener("loadeddata", onLoadedData);
       el.removeEventListener("canplay", onCanPlay);
       el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
-  }, [src, syncDuration, ownerId]);
+  }, [src, videoUrl, syncDuration, ownerId]);
 
   /* When leaving the visible area — pause and reset audio */
   useEffect(() => {
