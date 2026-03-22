@@ -63,6 +63,9 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # Локальная разработка / тест: файлы вложений и backfill duration (ffprobe) видят один каталог
+      - ./backend/media:/app/media
     healthcheck:
       test: ["CMD-SHELL", "curl -sf -o /dev/null http://127.0.0.1:8000/ || exit 1"]
       interval: 15s
@@ -90,6 +93,8 @@ services:
         condition: service_started
       backend:
         condition: service_healthy
+    volumes:
+      - ./backend/media:/app/media
     networks: [internal]
 
   celery-beat:
@@ -111,6 +116,8 @@ services:
         condition: service_started
       backend:
         condition: service_healthy
+    volumes:
+      - ./backend/media:/app/media
     networks: [internal]
 
   frontend-build:
