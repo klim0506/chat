@@ -7783,7 +7783,7 @@ const MessageBubble = memo(function MessageBubble({
     if (reactionPickerOpen) onCloseReactionPicker?.();
   }, [reactionPickerOpen, onCloseReactionPicker]);
 
-  /** Must run before is_deleted early return — same hooks every render (React #300). */
+  /** Must run before is_deleted early return — same hooks every render (React #300). Includes isFile + runCopyAction. */
   const messageAlignment = usePreferencesStore((s) => s.messageAlignment);
   const alignRight = isMine && messageAlignment === "right";
   const rowJustify = alignRight ? "justify-end" : "justify-start";
@@ -7806,6 +7806,70 @@ const MessageBubble = memo(function MessageBubble({
       setTimeout(() => setContextMenuCopied(false), 2000);
     });
   }, [isFile, message.content, t]);
+
+  const supportsHoverSubmenu =
+    typeof window !== "undefined" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  const contextSubmenuCopyTriggerRef = useRef<HTMLDivElement>(null);
+  const contextSubmenuPinTriggerRef = useRef<HTMLDivElement>(null);
+  const [contextSubmenuFlyoutPos, setContextSubmenuFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const submenuHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSubmenuHoverCloseTimer = useCallback(() => {
+    if (submenuHoverCloseTimerRef.current) {
+      clearTimeout(submenuHoverCloseTimerRef.current);
+      submenuHoverCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSubmenuHoverClose = useCallback(() => {
+    clearSubmenuHoverCloseTimer();
+    submenuHoverCloseTimerRef.current = setTimeout(() => {
+      setContextSubmenu(null);
+      setContextSubmenuFlyoutPos(null);
+    }, 120);
+  }, [clearSubmenuHoverCloseTimer]);
+
+  const updateContextSubmenuFlyoutPosition = useCallback(() => {
+    if (!contextSubmenu) {
+      setContextSubmenuFlyoutPos(null);
+      return;
+    }
+    const el = contextSubmenu === "copy" ? contextSubmenuCopyTriggerRef.current : contextSubmenuPinTriggerRef.current;
+    if (!el) {
+      setContextSubmenuFlyoutPos(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const gap = 4;
+    const flyoutWidth = 260;
+    let left = r.right + gap;
+    if (left + flyoutWidth > window.innerWidth - 8) {
+      left = Math.max(8, r.left - gap - flyoutWidth);
+    }
+    setContextSubmenuFlyoutPos({ top: r.top, left });
+  }, [contextSubmenu]);
+
+  useLayoutEffect(() => {
+    updateContextSubmenuFlyoutPosition();
+  }, [updateContextSubmenuFlyoutPosition, contextMenu, contextSubmenu]);
+
+  useEffect(() => {
+    const onViewportChange = () => updateContextSubmenuFlyoutPosition();
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [updateContextSubmenuFlyoutPosition]);
+
+  useEffect(() => {
+    if (!contextMenu) setContextSubmenuFlyoutPos(null);
+  }, [contextMenu]);
+
+  useEffect(() => () => clearSubmenuHoverCloseTimer(), [clearSubmenuHoverCloseTimer]);
 
   // Deleted message placeholder
   if (message.is_deleted) {
@@ -7926,11 +7990,8 @@ const MessageBubble = memo(function MessageBubble({
   const closeContextMenu = () => {
     setContextMenu(null);
     setContextSubmenu(null);
+    setContextSubmenuFlyoutPos(null);
   };
-
-  const supportsHoverSubmenu =
-    typeof window !== "undefined" &&
-    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
   const handleDelete = () => {
     closeContextMenu();
@@ -8777,39 +8838,27 @@ const MessageBubble = memo(function MessageBubble({
           )}
           {/* 3. Copy submenu */}
           <div
-            className={`${contextMenuCopyShake ? "animate-username-shake" : ""}`}
-            onMouseEnter={() => { if (supportsHoverSubmenu) setContextSubmenu("copy"); }}
-            onMouseLeave={() => { if (supportsHoverSubmenu) setContextSubmenu((prev) => (prev === "copy" ? null : prev)); }}
+            ref={contextSubmenuCopyTriggerRef}
+            className={`relative ${contextMenuCopyShake ? "animate-username-shake" : ""}`}
+            onMouseEnter={() => {
+              clearSubmenuHoverCloseTimer();
+              if (supportsHoverSubmenu) setContextSubmenu("copy");
+            }}
+            onMouseLeave={() => {
+              if (supportsHoverSubmenu) scheduleSubmenuHoverClose();
+            }}
           >
             <button
               type="button"
-              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 justify-between"
+              className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 justify-between ${contextSubmenu === "copy" ? "bg-slate-100" : "text-slate-700 hover:bg-slate-100"}`}
               onClick={() => setContextSubmenu((prev) => (prev === "copy" ? null : "copy"))}
             >
               <span className="inline-flex items-center gap-2 min-w-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
                 <span className="truncate">{contextMenuCopied ? t("common.copied") : t("common.copy")}</span>
               </span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-slate-400 transition-transform ${contextSubmenu === "copy" ? "rotate-90" : ""}`}><polyline points="9 18 15 12 9 6"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
-            {contextSubmenu === "copy" && (
-              <div className="mx-2 mb-1 rounded-md border border-slate-200 bg-slate-50 py-1">
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                  onClick={() => { runCopyAction(false); closeContextMenu(); }}
-                >
-                  <span className="truncate">{t("common.copy")}</span>
-                </button>
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                  onClick={() => { runCopyAction(true); closeContextMenu(); }}
-                >
-                  <span className="truncate">{t("chat.copyForWord")}</span>
-                </button>
-              </div>
-            )}
           </div>
           {/* 5. Edit */}
           {canEdit && (
@@ -8842,72 +8891,27 @@ const MessageBubble = memo(function MessageBubble({
           )}
           {/* 7. Pin submenu */}
           <div
-            onMouseEnter={() => { if (supportsHoverSubmenu) setContextSubmenu("pin"); }}
-            onMouseLeave={() => { if (supportsHoverSubmenu) setContextSubmenu((prev) => (prev === "pin" ? null : prev)); }}
+            ref={contextSubmenuPinTriggerRef}
+            className="relative"
+            onMouseEnter={() => {
+              clearSubmenuHoverCloseTimer();
+              if (supportsHoverSubmenu) setContextSubmenu("pin");
+            }}
+            onMouseLeave={() => {
+              if (supportsHoverSubmenu) scheduleSubmenuHoverClose();
+            }}
           >
             <button
               type="button"
-              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 justify-between"
+              className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 justify-between ${contextSubmenu === "pin" ? "bg-slate-100" : "text-slate-700 hover:bg-slate-100"}`}
               onClick={() => setContextSubmenu((prev) => (prev === "pin" ? null : "pin"))}
             >
               <span className="inline-flex items-center gap-2 min-w-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
                 <span className="truncate">Закрепить</span>
               </span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-slate-400 transition-transform ${contextSubmenu === "pin" ? "rotate-90" : ""}`}><polyline points="9 18 15 12 9 6"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-400"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
-            {contextSubmenu === "pin" && (
-              <div className="mx-2 mb-1 rounded-md border border-slate-200 bg-slate-50 py-1">
-                {!isPinnedByMe && (
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                    onClick={() => {
-                      closeContextMenu();
-                      messagesApi.pin(chatId, message.id, "me").then(() => onPinChange?.());
-                    }}
-                  >
-                    Закрепить для себя
-                  </button>
-                )}
-                {isPinnedByMe && (
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                    onClick={() => {
-                      closeContextMenu();
-                      messagesApi.unpin(chatId, message.id, "me").then(() => onPinChange?.());
-                    }}
-                  >
-                    Открепить для себя
-                  </button>
-                )}
-                {canPinForAll && !isPinnedForAll && canPinMore && (
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                    onClick={() => {
-                      closeContextMenu();
-                      messagesApi.pin(chatId, message.id, "all").then(() => onPinChange?.());
-                    }}
-                  >
-                    Закрепить для всех
-                  </button>
-                )}
-                {canPinForAll && isPinnedForAll && (
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
-                    onClick={() => {
-                      closeContextMenu();
-                      messagesApi.unpin(chatId, message.id, "all").then(() => onPinChange?.());
-                    }}
-                  >
-                    Открепить для всех
-                  </button>
-                )}
-              </div>
-            )}
           </div>
           {isMine && (message.read_by?.length ?? 0) > 0 && (
             <>
@@ -8937,6 +8941,95 @@ const MessageBubble = memo(function MessageBubble({
             </>
           )}
         </div>
+        {contextSubmenuFlyoutPos &&
+          contextSubmenu &&
+          (contextSubmenu === "copy" || contextSubmenu === "pin") &&
+          createPortal(
+            <div
+              className="fixed z-[102] min-w-[200px] max-w-[260px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col"
+              style={{ top: contextSubmenuFlyoutPos.top, left: contextSubmenuFlyoutPos.left }}
+              onMouseEnter={clearSubmenuHoverCloseTimer}
+              onMouseLeave={supportsHoverSubmenu ? scheduleSubmenuHoverClose : undefined}
+            >
+              {contextSubmenu === "copy" && (
+                <>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                    onClick={() => {
+                      runCopyAction(false);
+                      closeContextMenu();
+                    }}
+                  >
+                    <span className="truncate">{t("common.copy")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                    onClick={() => {
+                      runCopyAction(true);
+                      closeContextMenu();
+                    }}
+                  >
+                    <span className="truncate">{t("chat.copyForWord")}</span>
+                  </button>
+                </>
+              )}
+              {contextSubmenu === "pin" && (
+                <>
+                  {!isPinnedByMe && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                      onClick={() => {
+                        closeContextMenu();
+                        messagesApi.pin(chatId, message.id, "me").then(() => onPinChange?.());
+                      }}
+                    >
+                      Закрепить для себя
+                    </button>
+                  )}
+                  {isPinnedByMe && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                      onClick={() => {
+                        closeContextMenu();
+                        messagesApi.unpin(chatId, message.id, "me").then(() => onPinChange?.());
+                      }}
+                    >
+                      Открепить для себя
+                    </button>
+                  )}
+                  {canPinForAll && !isPinnedForAll && canPinMore && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                      onClick={() => {
+                        closeContextMenu();
+                        messagesApi.pin(chatId, message.id, "all").then(() => onPinChange?.());
+                      }}
+                    >
+                      Закрепить для всех
+                    </button>
+                  )}
+                  {canPinForAll && isPinnedForAll && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                      onClick={() => {
+                        closeContextMenu();
+                        messagesApi.unpin(chatId, message.id, "all").then(() => onPinChange?.());
+                      }}
+                    >
+                      Открепить для всех
+                    </button>
+                  )}
+                </>
+              )}
+            </div>,
+            document.body
+          )}
         </>
       )}
       {reactionLimitToast && createPortal(
