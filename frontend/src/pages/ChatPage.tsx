@@ -7687,6 +7687,12 @@ const MessageBubble = memo(function MessageBubble({
     if (reactionPickerOpen) onCloseReactionPicker?.();
   }, [reactionPickerOpen, onCloseReactionPicker]);
 
+  /** Must run before is_deleted early return — same hooks every render (React #300). */
+  const messageAlignment = usePreferencesStore((s) => s.messageAlignment);
+  const alignRight = isMine && messageAlignment === "right";
+  const rowJustify = alignRight ? "justify-end" : "justify-start";
+  const contentOrderReverse = alignRight;
+
   // Deleted message placeholder
   if (message.is_deleted) {
     return (
@@ -7893,11 +7899,6 @@ const MessageBubble = memo(function MessageBubble({
     }
     schedulePickerHide();
   };
-
-  const messageAlignment = usePreferencesStore((s) => s.messageAlignment);
-  const alignRight = isMine && messageAlignment === "right";
-  const rowJustify = alignRight ? "justify-end" : "justify-start";
-  const contentOrderReverse = alignRight;
 
   return (
     <div
@@ -8869,6 +8870,11 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
   const [duration, setDuration] = useState(durationSeconds ?? 0);
   const effectiveDuration = duration > 0 ? duration : (durationSeconds ?? 0);
   const progress = effectiveDuration > 0 ? currentTime / effectiveDuration : 0;
+  useEffect(() => {
+    if (durationSeconds != null && Number.isFinite(durationSeconds) && durationSeconds > 0) {
+      setDuration((prev) => (prev > 0 ? prev : durationSeconds));
+    }
+  }, [durationSeconds]);
   const waveform = useMemo(() => {
     const count = 48;
     let seed = 0;
@@ -8921,7 +8927,7 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [fileUrl, durationSeconds, syncDuration, ownerId]);
+  }, [fileUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -9064,6 +9070,11 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
   const [duration, setDuration] = useState(durationSeconds ?? 0);
   const effectiveDuration = duration > 0 ? duration : (durationSeconds ?? 0);
   const progress = effectiveDuration > 0 ? currentTime / effectiveDuration : 0;
+  useEffect(() => {
+    if (durationSeconds != null && Number.isFinite(durationSeconds) && durationSeconds > 0) {
+      setDuration((prev) => (prev > 0 ? prev : durationSeconds));
+    }
+  }, [durationSeconds]);
 
   const syncDuration = useCallback((el: HTMLAudioElement) => {
     const d = el.duration;
@@ -9104,7 +9115,7 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [fileUrl, durationSeconds, syncDuration, ownerId]);
+  }, [fileUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -9536,16 +9547,24 @@ function VideoLightbox({
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  const videoReady = Boolean(url && url !== "#");
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center" onClick={onClose}>
       <div className="relative w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-        <video
-          src={url}
-          className="max-w-full max-h-full object-contain rounded-lg"
-          controls
-          playsInline
-          autoPlay
-        />
+        {videoReady ? (
+          <video
+            key={url}
+            src={url}
+            className="max-w-full max-h-full object-contain rounded-lg"
+            controls
+            playsInline
+            preload="auto"
+            autoPlay
+          />
+        ) : (
+          <div className="text-white/80 text-sm">{t("common.loading")}</div>
+        )}
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
@@ -9619,6 +9638,13 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     if (Number.isFinite(d) && d > 0) setDuration(d);
   }, []);
 
+  /** Подтягиваем длительность с сервера без el.load() — иначе при обновлении сообщения перемотка сбрасывается в 0. */
+  useEffect(() => {
+    if (durationSeconds != null && Number.isFinite(durationSeconds) && durationSeconds > 0) {
+      setDuration((prev) => (prev > 0 ? prev : durationSeconds));
+    }
+  }, [durationSeconds]);
+
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -9634,9 +9660,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     const onSeeking = () => { isSeekingRef.current = true; };
     const onSeeked = () => {
       isSeekingRef.current = false;
-      if (pendingSeekTimeRef.current != null && Math.abs(el.currentTime - pendingSeekTimeRef.current) <= 0.25) {
-        pendingSeekTimeRef.current = null;
-      }
+      pendingSeekTimeRef.current = null;
       setCurrentTime(el.currentTime);
     };
     const applyPendingSeek = () => {
@@ -9683,7 +9707,7 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
       el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("ended", onEnded);
     };
-  }, [src, durationSeconds, syncDuration, ownerId]);
+  }, [src, syncDuration, ownerId]);
 
   /* When leaving the visible area — pause and reset audio */
   useEffect(() => {
