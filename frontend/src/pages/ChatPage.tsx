@@ -7554,6 +7554,7 @@ const MessageBubble = memo(function MessageBubble({
   const [reactionLimitToast, setReactionLimitToast] = useState(false);
   const reactionLimitToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextSubmenu, setContextSubmenu] = useState<"copy" | "pin" | null>(null);
   const [contextMenuCopied, setContextMenuCopied] = useState(false);
   const [contextMenuCopyShake, setContextMenuCopyShake] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -7627,6 +7628,7 @@ const MessageBubble = memo(function MessageBubble({
   const handleLongPress = () => {
     longPressTimerRef.current = null;
     if (!longPressStartRef.current) return;
+    setContextSubmenu(null);
     setContextMenu({ x: longPressStartRef.current.x, y: longPressStartRef.current.y });
     longPressStartRef.current = null;
     if (navigator.vibrate) navigator.vibrate(15);
@@ -7650,6 +7652,7 @@ const MessageBubble = memo(function MessageBubble({
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
       setContextMenu(null);
+      setContextSubmenu(null);
     };
     window.addEventListener("mousedown", handleClick);
     return () => window.removeEventListener("mousedown", handleClick);
@@ -7811,7 +7814,25 @@ const MessageBubble = memo(function MessageBubble({
     setEditing(false);
   };
 
-  const closeContextMenu = () => setContextMenu(null);
+  const closeContextMenu = () => {
+    setContextMenu(null);
+    setContextSubmenu(null);
+  };
+
+  const supportsHoverSubmenu =
+    typeof window !== "undefined" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  const runCopyAction = useCallback((forWord: boolean) => {
+    const raw = isFile ? t("common.fileMsg") : (message.content || "");
+    const text = forWord && !isFile ? stripMarkdown(raw) : raw;
+    copyToClipboard(text).then(() => {
+      setContextMenuCopyShake(true);
+      setTimeout(() => setContextMenuCopyShake(false), 400);
+      setContextMenuCopied(true);
+      setTimeout(() => setContextMenuCopied(false), 2000);
+    });
+  }, [isFile, message.content, t]);
 
   const handleDelete = () => {
     closeContextMenu();
@@ -7825,6 +7846,9 @@ const MessageBubble = memo(function MessageBubble({
 
   const hasReactions = Object.keys(reactions).length > 0;
   const reactionEntries = Object.entries(reactions).filter(([, c]) => c > 0);
+  const isPinnedByMe = (myPinnedIds ?? []).includes(message.id);
+  const isPinnedForAll = (pinnedForAllIds ?? []).includes(message.id);
+  const canPinMore = (pinnedForAllIds ?? []).length < (maxPins ?? 1);
   const hasCommentsFooter = typeof commentsCount === "number" && commentsCount >= 0 && !!onOpenComments;
   const fileCardSubtitle = uploadProgress || downloadProgress
     ? `${(uploadProgress ? (uploadProgress.loaded / 1024 / 1024).toFixed(1) : (downloadProgress!.loaded / 1024 / 1024).toFixed(1))} / ${(uploadProgress ? (uploadProgress.total / 1024 / 1024).toFixed(1) : (downloadProgress!.total / 1024 / 1024).toFixed(1))} ${t("chat.progressMB")}`
@@ -7917,6 +7941,7 @@ const MessageBubble = memo(function MessageBubble({
         const pad = 8;
         const x = Math.max(pad, Math.min(e.clientX, window.innerWidth - menuWidth - pad));
         const y = Math.max(pad, Math.min(e.clientY, window.innerHeight - menuHeight - pad));
+        setContextSubmenu(null);
         setContextMenu({ x, y });
       }}
       onTouchStart={(e) => {
@@ -8652,41 +8677,42 @@ const MessageBubble = memo(function MessageBubble({
               {t("chat.forward")}
             </button>
           )}
-          {/* 3. Copy */}
-          <button
-            type="button"
-            className={`w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 ${contextMenuCopyShake ? "animate-username-shake" : ""}`}
-            onClick={() => {
-              const text = isFile ? t("common.fileMsg") : (message.content || "");
-              copyToClipboard(text).then(() => {
-                setContextMenuCopyShake(true);
-                setTimeout(() => setContextMenuCopyShake(false), 400);
-                setContextMenuCopied(true);
-                setTimeout(() => setContextMenuCopied(false), 2000);
-              });
-            }}
+          {/* 3. Copy submenu */}
+          <div
+            className={`${contextMenuCopyShake ? "animate-username-shake" : ""}`}
+            onMouseEnter={() => { if (supportsHoverSubmenu) setContextSubmenu("copy"); }}
+            onMouseLeave={() => { if (supportsHoverSubmenu) setContextSubmenu((prev) => (prev === "copy" ? null : prev)); }}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            {contextMenuCopied ? t("common.copied") : t("common.copy")}
-          </button>
-          {/* 4. Copy for Word */}
-          <button
-            type="button"
-            className={`w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 ${contextMenuCopyShake ? "animate-username-shake" : ""}`}
-            onClick={() => {
-              const raw = isFile ? t("common.fileMsg") : (message.content || "");
-              const text = isFile ? raw : stripMarkdown(raw);
-              copyToClipboard(text).then(() => {
-                setContextMenuCopyShake(true);
-                setTimeout(() => setContextMenuCopyShake(false), 400);
-                setContextMenuCopied(true);
-                setTimeout(() => setContextMenuCopied(false), 2000);
-              });
-            }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            {t("chat.copyForWord")}
-          </button>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 justify-between"
+              onClick={() => setContextSubmenu((prev) => (prev === "copy" ? null : "copy"))}
+            >
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                <span className="truncate">{contextMenuCopied ? t("common.copied") : t("common.copy")}</span>
+              </span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-slate-400 transition-transform ${contextSubmenu === "copy" ? "rotate-90" : ""}`}><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            {contextSubmenu === "copy" && (
+              <div className="mx-2 mb-1 rounded-md border border-slate-200 bg-slate-50 py-1">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                  onClick={() => { runCopyAction(false); closeContextMenu(); }}
+                >
+                  <span className="truncate">{t("common.copy")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
+                  onClick={() => { runCopyAction(true); closeContextMenu(); }}
+                >
+                  <span className="truncate">{t("chat.copyForWord")}</span>
+                </button>
+              </div>
+            )}
+          </div>
           {/* 5. Edit */}
           {canEdit && (
             <button
@@ -8716,13 +8742,24 @@ const MessageBubble = memo(function MessageBubble({
               Удалить сообщение
             </button>
           )}
-          {/* 7. Pin actions */}
-          {(() => {
-            const isPinnedByMe = (myPinnedIds ?? []).includes(message.id);
-            const isPinnedForAll = (pinnedForAllIds ?? []).includes(message.id);
-            const canPinMore = (pinnedForAllIds ?? []).length < (maxPins ?? 1);
-            return (
-              <>
+          {/* 7. Pin submenu */}
+          <div
+            onMouseEnter={() => { if (supportsHoverSubmenu) setContextSubmenu("pin"); }}
+            onMouseLeave={() => { if (supportsHoverSubmenu) setContextSubmenu((prev) => (prev === "pin" ? null : prev)); }}
+          >
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2 justify-between"
+              onClick={() => setContextSubmenu((prev) => (prev === "pin" ? null : "pin"))}
+            >
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
+                <span className="truncate">Закрепить</span>
+              </span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-slate-400 transition-transform ${contextSubmenu === "pin" ? "rotate-90" : ""}`}><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            {contextSubmenu === "pin" && (
+              <div className="mx-2 mb-1 rounded-md border border-slate-200 bg-slate-50 py-1">
                 {!isPinnedByMe && (
                   <button
                     type="button"
@@ -8732,7 +8769,6 @@ const MessageBubble = memo(function MessageBubble({
                       messagesApi.pin(chatId, message.id, "me").then(() => onPinChange?.());
                     }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
                     Закрепить для себя
                   </button>
                 )}
@@ -8745,7 +8781,6 @@ const MessageBubble = memo(function MessageBubble({
                       messagesApi.unpin(chatId, message.id, "me").then(() => onPinChange?.());
                     }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
                     Открепить для себя
                   </button>
                 )}
@@ -8758,7 +8793,6 @@ const MessageBubble = memo(function MessageBubble({
                       messagesApi.pin(chatId, message.id, "all").then(() => onPinChange?.());
                     }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
                     Закрепить для всех
                   </button>
                 )}
@@ -8771,13 +8805,12 @@ const MessageBubble = memo(function MessageBubble({
                       messagesApi.unpin(chatId, message.id, "all").then(() => onPinChange?.());
                     }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V17"/><path d="M12 2v5"/></svg>
                     Открепить для всех
                   </button>
                 )}
-              </>
-            );
-          })()}
+              </div>
+            )}
+          </div>
           {isMine && (message.read_by?.length ?? 0) > 0 && (
             <>
               <div className="border-t border-slate-100 mt-0.5" />
