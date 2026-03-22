@@ -1,3 +1,7 @@
+/**
+ * Allowed chat/channel reaction emojis — must match backend `REACTION_EMOJIS`
+ * (`apps/chats/models.py`). Otherwise POST …/reactions/ returns 400.
+ */
 export interface ReactionDef {
   emoji: string;
   label: string;
@@ -6,20 +10,20 @@ export interface ReactionDef {
 
 export const REACTIONS: ReactionDef[] = [
   { emoji: "\u{1F525}", label: "Огонёк", animationUrl: "/animations/reactions/fire.json" },
-  { emoji: "\u{1F44D}", label: "Нравится" },
-  { emoji: "\u{2764}\u{FE0F}", label: "Сердце" },
-  { emoji: "\u{1F602}", label: "Смех" },
+  { emoji: "\u{1F4AB}", label: "Звёзды" },
+  { emoji: "\u2728", label: "Блеск" },
+  { emoji: "\u2764\uFE0F", label: "Сердце" },
   { emoji: "\u{1F970}", label: "Нежность" },
-  { emoji: "\u{1F44F}", label: "Аплодисменты" },
-  { emoji: "\u{1F601}", label: "Улыбка" },
-  { emoji: "\u{1F914}", label: "Задумался" },
-  { emoji: "\u{1F62D}", label: "Слёзы" },
-  { emoji: "\u{1F64F}", label: "Спасибо" },
-  { emoji: "\u{1F618}", label: "Поцелуй" },
-  { emoji: "\u{1F44C}", label: "Отлично" },
-  { emoji: "\u{1F60D}", label: "Восхищение" },
+  { emoji: "\u{1F602}", label: "Смех" },
+  { emoji: "\u{1F60E}", label: "Круто" },
   { emoji: "\u{1F389}", label: "Праздник" },
-  { emoji: "\u{1F92F}", label: "Шок" },
+  { emoji: "\u{1F64C}", label: "Ура" },
+  { emoji: "\u{1F44F}", label: "Аплодисменты" },
+  { emoji: "\u{1F4AA}", label: "Сила" },
+  { emoji: "\u{1F929}", label: "Восторг" },
+  { emoji: "\u{1F31F}", label: "Звезда" },
+  { emoji: "\u{1F62E}", label: "Удивление" },
+  { emoji: "\u{1F622}", label: "Грусть" },
 ];
 
 export const REACTION_BY_EMOJI = new Map(REACTIONS.map((r) => [r.emoji, r]));

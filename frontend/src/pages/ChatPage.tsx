@@ -4787,6 +4787,9 @@ export default function ChatPage({
               ) : (
                 <div className="flex flex-col pb-2">
                   {postComments.map((msg, index) => {
+                    if (msg.is_deleted) {
+                      return <div key={msg.id} className="hidden" aria-hidden />;
+                    }
                     const layout = getChatMessageLayoutMeta(postComments, index);
                     const isMine = (msg as Message & { authorId?: string }).authorId === myUserId;
                     return (
@@ -4925,6 +4928,24 @@ export default function ChatPage({
                   {virtualState.enabled && <div style={{ height: virtualState.topPadding }} aria-hidden />}
                   {visibleMessages.map((msg, offset) => {
                     const i = start + offset;
+                    if (msg.is_deleted) {
+                      return (
+                        <div
+                          key={msg.id}
+                          data-msg-wrapper={msg.id}
+                          ref={(el) => {
+                            if (!el) return;
+                            const prevHeight = rowHeightsRef.current.get(msg.id);
+                            if (prevHeight == null || prevHeight !== 0) {
+                              rowHeightsRef.current.set(msg.id, 0);
+                              setVirtualMeasureTick((v) => v + 1);
+                            }
+                          }}
+                          style={{ height: 0, margin: 0, padding: 0, overflow: "hidden" }}
+                          aria-hidden
+                        />
+                      );
+                    }
                     const isMine = channelId
                       ? ((msg as Message & { authorId?: string }).authorId === myUserId)
                       : (msg.id?.startsWith("upload-") || ((msg as Message & { sender_display_name?: string }).sender_display_name ? false : getSenderId(msg) === myUserId));
@@ -7871,13 +7892,9 @@ const MessageBubble = memo(function MessageBubble({
 
   useEffect(() => () => clearSubmenuHoverCloseTimer(), [clearSubmenuHoverCloseTimer]);
 
-  // Deleted message placeholder
+  // Deleted messages: do not render a row (no "message deleted" placeholder)
   if (message.is_deleted) {
-    return (
-      <div className="flex justify-center py-1">
-        <span className="text-xs text-slate-400 italic">{t("chat.messageDeleted")}</span>
-      </div>
-    );
+    return null;
   }
   const isGif = message.msg_type === "gif" && message.content;
   const isSticker = message.msg_type === "sticker" && (message.content || message.file);
@@ -8340,13 +8357,6 @@ const MessageBubble = memo(function MessageBubble({
               </button>
             </div>
           )}
-          {message.reply_to && message.reply_to.is_deleted && (
-            <div className="mb-0.5 -mt-0.5 max-w-full min-w-0">
-              <div className="w-full max-w-full min-w-0 rounded-lg border-l-[3px] border-slate-300 bg-slate-50/50 px-2 py-0.5 text-left">
-                <div className="block max-w-full min-w-0 truncate text-xs italic text-slate-400">{t("chat.messageDeleted")}</div>
-              </div>
-            </div>
-          )}
           {editing ? (
             <div className="min-w-[240px] max-w-full">
               <textarea
@@ -8423,7 +8433,12 @@ const MessageBubble = memo(function MessageBubble({
                 {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
               </div>
               {videoLightboxOpen && createPortal(
-                <VideoLightbox src={fileUrl} originalName={fileName || "video"} onClose={() => setVideoLightboxOpen(false)} />,
+                <VideoLightbox
+                  src={fileUrl}
+                  originalName={fileName || "video"}
+                  instanceKey={message.id}
+                  onClose={() => setVideoLightboxOpen(false)}
+                />,
                 document.body,
               )}
             </div>
@@ -9788,10 +9803,13 @@ function VideoLightbox({
   src,
   originalName,
   onClose,
+  /** Unique per message so a new <video> mounts for each open (fixes broken seek on 2nd+ opens when URLs match). */
+  instanceKey = "",
 }: {
   src: string;
   originalName: string;
   onClose: () => void;
+  instanceKey?: string;
 }) {
   const { t } = useTranslation();
   const resolvedUrl = useMediaAccess(src || null, { enabled: !!src });
@@ -9814,7 +9832,7 @@ function VideoLightbox({
       <div className="relative w-full h-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
         {videoReady ? (
           <video
-            key={url}
+            key={`${instanceKey}-${url}`}
             src={url}
             className="max-w-full max-h-full object-contain rounded-lg"
             controls
@@ -10072,15 +10090,30 @@ function VideoCirclePlayer({ src, ownerId, durationSeconds }: { src: string; own
     return distance >= minDistance && distance <= maxDistance;
   }, [R, strokeWidth]);
 
-  const seekToPercent = useCallback((percent: number) => {
-    const v = videoRef.current;
-    if (!v || !Number.isFinite(effectiveDuration) || effectiveDuration <= 0) return;
-    const time = Math.max(0, Math.min(effectiveDuration, percent * effectiveDuration));
-    isSeekingRef.current = true;
-    pendingSeekTimeRef.current = time;
-    v.currentTime = time;
-    setCurrentTime(time);
-  }, [effectiveDuration]);
+  const seekToPercent = useCallback(
+    (percent: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      let dur = effectiveDuration;
+      if (!(Number.isFinite(dur) && dur > 0)) {
+        const vd = v.duration;
+        if (Number.isFinite(vd) && vd > 0 && vd !== Infinity) {
+          dur = vd;
+          syncDuration(v);
+        } else {
+          const ds = durationSecondsRef.current;
+          if (ds != null && Number.isFinite(ds) && ds > 0) dur = ds;
+        }
+      }
+      if (!(Number.isFinite(dur) && dur > 0)) return;
+      const time = Math.max(0, Math.min(dur, percent * dur));
+      isSeekingRef.current = true;
+      pendingSeekTimeRef.current = time;
+      v.currentTime = time;
+      setCurrentTime(time);
+    },
+    [effectiveDuration, syncDuration],
+  );
 
   const clearDragState = useCallback(() => {
     const el = containerRef.current;
