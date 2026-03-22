@@ -85,6 +85,8 @@ function VoiceInfoList({
   onJump: (messageId: string) => void;
 }) {
   const [durations, setDurations] = useState<Record<string, number>>({});
+  const durationsRef = useRef(durations);
+  durationsRef.current = durations;
 
   const resolveUrl = useCallback(async (msg: Message) => {
     const raw =
@@ -99,9 +101,30 @@ function VoiceInfoList({
     let cancelled = false;
     const pending: HTMLMediaElement[] = [];
 
+    const readMediaDuration = (el: HTMLMediaElement): number | null => {
+      let d = el.duration;
+      if (!Number.isFinite(d) || d <= 0 || d === Infinity) {
+        try {
+          if (el.seekable && el.seekable.length > 0) {
+            const end = el.seekable.end(el.seekable.length - 1);
+            if (Number.isFinite(end) && end > 0) d = end;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (Number.isFinite(d) && d > 0 && d !== Infinity) return d;
+      return null;
+    };
+
     items.forEach(({ kind, msg }) => {
       if (!msg?.id) return;
-      if (durations[msg.id] != null) return;
+      const serverDur = (msg as { duration_seconds?: number | null }).duration_seconds;
+      if (serverDur != null && Number.isFinite(serverDur) && serverDur > 0) {
+        setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: serverDur }));
+        return;
+      }
+      if (durationsRef.current[msg.id] != null) return;
       resolveUrl(msg)
         .then((url) => {
           if (cancelled || !url) return;
@@ -110,21 +133,27 @@ function VoiceInfoList({
           el.src = url;
           pending.push(el);
 
-          const onLoaded = () => {
+          const applyDuration = () => {
             if (cancelled) return;
-            const d = Number(el.duration);
-            setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: Number.isFinite(d) && d > 0 ? d : 0 }));
+            const d = readMediaDuration(el);
+            if (d != null) {
+              setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: d }));
+            }
           };
           const onError = () => {
             if (cancelled) return;
             setDurations((prev) => (prev[msg.id] != null ? prev : { ...prev, [msg.id]: 0 }));
           };
 
-          el.addEventListener("loadedmetadata", onLoaded);
+          el.addEventListener("loadedmetadata", applyDuration);
+          el.addEventListener("durationchange", applyDuration);
+          el.addEventListener("progress", applyDuration);
           el.addEventListener("error", onError);
 
           (el as unknown as { __voiceCleanup?: () => void }).__voiceCleanup = () => {
-            el.removeEventListener("loadedmetadata", onLoaded);
+            el.removeEventListener("loadedmetadata", applyDuration);
+            el.removeEventListener("durationchange", applyDuration);
+            el.removeEventListener("progress", applyDuration);
             el.removeEventListener("error", onError);
             try { el.src = ""; el.load(); } catch { /* ignore */ }
           };
@@ -141,7 +170,7 @@ function VoiceInfoList({
         cleanup?.();
       });
     };
-  }, [items, durations, resolveUrl]);
+  }, [items, resolveUrl]);
 
   return (
     <ul className="space-y-1">
@@ -8929,10 +8958,14 @@ const WAVEFORM_SEEK_STEPS = 1000;
 
 function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { fileUrl: string; durationSeconds?: number; isMine: boolean; ownerId: string }) {
   const { t } = useTranslation();
+  const resolvedUrl = useMediaAccess(fileUrl && fileUrl !== "#" ? fileUrl : null, { enabled: !!fileUrl && fileUrl !== "#" });
+  const audioUrl = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "";
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(durationSeconds ?? 0);
+  const durationSecondsRef = useRef(durationSeconds);
+  durationSecondsRef.current = durationSeconds;
   const effectiveDuration = duration > 0 ? duration : (durationSeconds ?? 0);
   const progress = effectiveDuration > 0 ? currentTime / effectiveDuration : 0;
   useEffect(() => {
@@ -8954,11 +8987,22 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
   }, [fileUrl]);
 
   const syncDuration = useCallback((el: HTMLAudioElement) => {
-    const d = el.duration;
-    if (Number.isFinite(d) && d > 0) setDuration(d);
+    let d = el.duration;
+    if (!Number.isFinite(d) || d <= 0 || d === Infinity) {
+      try {
+        if (el.seekable && el.seekable.length > 0) {
+          const end = el.seekable.end(el.seekable.length - 1);
+          if (Number.isFinite(end) && end > 0) d = end;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (Number.isFinite(d) && d > 0 && d !== Infinity) setDuration(d);
   }, []);
 
   useEffect(() => {
+    if (!audioUrl) return;
     const el = audioRef.current;
     if (!el) return;
     const unregister = exclusiveSound.register(ownerId, () => {
@@ -8966,18 +9010,20 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
     });
     setIsPlaying(false);
     setCurrentTime(0);
-    setDuration(durationSeconds ?? 0);
+    setDuration(durationSecondsRef.current ?? 0);
     const onTimeUpdate = () => {
       setCurrentTime(el.currentTime);
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
+    const onProgress = () => syncDuration(el);
     const onEnded = () => { setIsPlaying(false); setCurrentTime(0); exclusiveSound.release(ownerId); };
     const onPlay = () => { exclusiveSound.request(ownerId); setIsPlaying(true); };
     const onPause = () => { setIsPlaying(false); exclusiveSound.release(ownerId); };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("progress", onProgress);
     el.addEventListener("ended", onEnded);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
@@ -8988,11 +9034,12 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [fileUrl, syncDuration, ownerId]);
+  }, [audioUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -9014,7 +9061,7 @@ function SimpleAudioPlayer({ fileUrl, durationSeconds, isMine, ownerId }: { file
 
   return (
     <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
-      <audio ref={audioRef} src={fileUrl} preload="metadata" crossOrigin="anonymous" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
+      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" crossOrigin="anonymous" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
       <button
         type="button"
         onClick={togglePlay}
@@ -9129,10 +9176,14 @@ function AudioWaveform({
 
 function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerId }: { fileUrl: string; waveform: number[]; durationSeconds?: number; isMine: boolean; ownerId: string }) {
   const { t } = useTranslation();
+  const resolvedUrl = useMediaAccess(fileUrl && fileUrl !== "#" ? fileUrl : null, { enabled: !!fileUrl && fileUrl !== "#" });
+  const audioUrl = resolvedUrl ? (toSameOriginMediaUrl(resolvedUrl) || resolvedUrl) : "";
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(durationSeconds ?? 0);
+  const durationSecondsRef = useRef(durationSeconds);
+  durationSecondsRef.current = durationSeconds;
   const effectiveDuration = duration > 0 ? duration : (durationSeconds ?? 0);
   const progress = effectiveDuration > 0 ? currentTime / effectiveDuration : 0;
   useEffect(() => {
@@ -9142,11 +9193,22 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
   }, [durationSeconds]);
 
   const syncDuration = useCallback((el: HTMLAudioElement) => {
-    const d = el.duration;
-    if (Number.isFinite(d) && d > 0) setDuration(d);
+    let d = el.duration;
+    if (!Number.isFinite(d) || d <= 0 || d === Infinity) {
+      try {
+        if (el.seekable && el.seekable.length > 0) {
+          const end = el.seekable.end(el.seekable.length - 1);
+          if (Number.isFinite(end) && end > 0) d = end;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (Number.isFinite(d) && d > 0 && d !== Infinity) setDuration(d);
   }, []);
 
   useEffect(() => {
+    if (!audioUrl) return;
     const el = audioRef.current;
     if (!el) return;
     const unregister = exclusiveSound.register(ownerId, () => {
@@ -9154,18 +9216,20 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
     });
     setIsPlaying(false);
     setCurrentTime(0);
-    setDuration(durationSeconds ?? 0);
+    setDuration(durationSecondsRef.current ?? 0);
     const onTimeUpdate = () => {
       setCurrentTime(el.currentTime);
     };
     const onLoadedMetadata = () => syncDuration(el);
     const onDurationChange = () => syncDuration(el);
+    const onProgress = () => syncDuration(el);
     const onEnded = () => { setIsPlaying(false); setCurrentTime(0); exclusiveSound.release(ownerId); };
     const onPlay = () => { exclusiveSound.request(ownerId); setIsPlaying(true); };
     const onPause = () => { setIsPlaying(false); exclusiveSound.release(ownerId); };
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("progress", onProgress);
     el.addEventListener("ended", onEnded);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
@@ -9176,11 +9240,12 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [fileUrl, syncDuration, ownerId]);
+  }, [audioUrl, syncDuration, ownerId]);
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -9202,7 +9267,7 @@ function AudioMessagePlayer({ fileUrl, waveform, durationSeconds, isMine, ownerI
 
   return (
     <div className="flex items-center gap-2.5 my-0.5 min-w-[180px] max-w-[260px]">
-      <audio ref={audioRef} src={fileUrl} preload="metadata" crossOrigin="anonymous" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
+      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" crossOrigin="anonymous" className="absolute w-0 h-0 opacity-0 pointer-events-none" />
       <button
         type="button"
         onClick={togglePlay}
