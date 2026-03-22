@@ -1734,6 +1734,8 @@ export default function ChatPage({
   const videoChunksRef = useRef<Blob[]>([]);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Wall-clock start of MediaRecorder (onstop reads Date.now() — state videoRecordingTime resets before onstop). */
+  const videoRecordingStartedAtRef = useRef<number>(0);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(null);
 
@@ -3032,7 +3034,12 @@ export default function ChatPage({
   }, []);
 
   /** Send a single file (audio, video, etc.). Optimistic block with upload progress "X/Y Мб", then message for all. */
-  const sendFileMessage = async (file: File, msgTypeOverride?: string, caption?: string) => {
+  const sendFileMessage = async (
+    file: File,
+    msgTypeOverride?: string,
+    caption?: string,
+    meta?: { duration_seconds?: number }
+  ) => {
     if (!conversationId) return;
     if (file.size > MAX_FILE_SIZE_BYTES) {
       showFileTooBig(file.name);
@@ -3046,6 +3053,12 @@ export default function ChatPage({
     );
     const contentToShow = (caption != null && caption.trim() !== "" ? caption.trim() : file.name.trim());
     const tempId = `upload-${crypto.randomUUID()}`;
+    const optimisticDuration =
+      meta?.duration_seconds != null &&
+      Number.isFinite(meta.duration_seconds) &&
+      meta.duration_seconds > 0
+        ? meta.duration_seconds
+        : undefined;
     const optimisticMsg: Message = {
       id: tempId,
       chat: conversationId,
@@ -3066,6 +3079,7 @@ export default function ChatPage({
       reactions: {},
       my_reactions: [],
       read_status: undefined,
+      ...(optimisticDuration != null ? { duration_seconds: optimisticDuration } : {}),
     };
     storeUpsertMessage(conversationId, optimisticMsg);
     setUploadError("");
@@ -3088,8 +3102,13 @@ export default function ChatPage({
       });
       const fileId = uploadRes.data.id;
       const contentToSend = (caption != null && caption.trim() !== "" ? caption.trim() : file.name.trim());
-      let durationSeconds: number | undefined;
-      if (msgType === "video" || msgType === "video_circle") {
+      let durationSeconds: number | undefined =
+        meta?.duration_seconds != null &&
+        Number.isFinite(meta.duration_seconds) &&
+        meta.duration_seconds > 0
+          ? Math.min(86400, Math.max(0.05, meta.duration_seconds))
+          : undefined;
+      if (durationSeconds == null && (msgType === "video" || msgType === "video_circle")) {
         try {
           const url = URL.createObjectURL(file);
           durationSeconds = await new Promise<number>((resolve) => {
@@ -4118,6 +4137,7 @@ export default function ChatPage({
       videoStreamRef.current = stream;
       setVideoRecording(true);
       setVideoRecordingTime(0);
+      videoRecordingStartedAtRef.current = 0;
 
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus"
@@ -4137,9 +4157,21 @@ export default function ChatPage({
         const blob = new Blob(videoChunksRef.current, { type: mimeType });
         const ext = mimeType.includes("webm") ? "webm" : "mp4";
         const prefix = mode === "video_circle" ? "circle" : "video";
-        sendFileMessage(new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: mimeType }), mode);
+        const startedAt = videoRecordingStartedAtRef.current;
+        videoRecordingStartedAtRef.current = 0;
+        const wallSec =
+          startedAt > 0
+            ? Math.min(MAX_VIDEO_DURATION, Math.max(0.05, (Date.now() - startedAt) / 1000))
+            : undefined;
+        sendFileMessage(
+          new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: mimeType }),
+          mode,
+          undefined,
+          wallSec != null ? { duration_seconds: wallSec } : undefined
+        );
       };
       rec.start(250);
+      videoRecordingStartedAtRef.current = Date.now();
       videoRecorderRef.current = rec;
       videoTimerRef.current = setInterval(() => setVideoRecordingTime((t) => t + 1), 1000);
     } catch {
