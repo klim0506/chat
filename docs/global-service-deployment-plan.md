@@ -205,3 +205,49 @@ Off-provider Backup Storage (резервный провайдер)
 - [ ] Мониторинг и критичные алерты включены.
 - [ ] Off-provider backup и DR-процедуры подтверждены тестами.
 - [ ] Runbook инцидентов и ответственные назначены.
+
+---
+
+## 14. Боевой минимум для текущего self-managed набора VM
+
+Этот раздел фиксирует рабочий стартовый вариант, если managed LB/DB недоступны как отдельные сервисы.
+
+### Роли ресурсов (минимум для production старта)
+- `LB VM`: `1-2 vCPU / 1-2 GB RAM / 20-40 GB SSD`, только `Nginx/HAProxy + TLS`.
+- `App VM x2`: `4 vCPU / 8 GB RAM / 80 GB SSD` (backend/ws/celery, одинаковая конфигурация).
+- `PostgreSQL VM`: `4 vCPU / 8-16 GB RAM / 120+ GB SSD`, без публичного доступа.
+- `Redis`: managed сервис (если доступен) или отдельная private VM.
+- `Object Storage`: хранение медиа и бэкапов артефактов.
+
+### Порты и доступы (security baseline)
+- Интернет -> `LB VM`: только `80/443`.
+- Admin IP/VPN -> `LB VM`: `22` (SSH по ключам).
+- `LB VM` -> `App VM`: `8000` (API), `8001/WS` (если выделен), либо единый upstream-порт.
+- Admin IP/VPN -> `App VM`: `22` (SSH по ключам).
+- `App VM` -> `PostgreSQL VM`: `5432`.
+- `App VM` -> `Redis`: `6379`.
+- `PostgreSQL VM` и `Redis`: без публичного IP, только private subnet/SG.
+
+### 10 обязательных алертов "первого дня"
+1. API `p95 > 600ms` (warning, 5-10 мин).
+2. API `p95 > 1200ms` (critical, 3-5 мин).
+3. `5xx > 1%` (warning, 5 мин).
+4. `5xx > 2%` (critical, 3 мин).
+5. `LB healthcheck` unhealthy backend > 0 (critical, сразу).
+6. CPU на любой `App VM > 85%` (warning, 10 мин).
+7. RAM на любой `App VM > 90%` (warning, 10 мин).
+8. Postgres connections > 70% (warning), > 85% (critical).
+9. Postgres disk usage > 80% (warning), > 90% (critical).
+10. Redis memory > 75% (warning) и `evictions > 0` (critical).
+
+### Быстрая оптимизация затрат (без потери надежности)
+- Оставить `2 x App VM` (не снижать ниже 2 нод в production).
+- Уменьшать сначала `S3`/retention/lifecycle, а не compute.
+- `LB VM` держать маленькой, пока нет постоянной высокой TLS/RPS нагрузки.
+- Для Postgres оптимизировать retention/backup-политику по фактическому росту данных.
+- Ежемесячно пересматривать размеры по метрикам `CPU/RAM/latency/disk growth`.
+
+### Риски, которые остаются в этом варианте
+- Один `LB VM` = single point of failure (временный компромисс по бюджету).
+- Один `PostgreSQL VM` без реплики = риск downtime при аварии узла.
+- В roadmap заложить: `2 x LB` c failover и `PostgreSQL replica + регулярные restore tests`.

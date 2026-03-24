@@ -21,6 +21,7 @@ frontend/.env.production
 # Build and cache
 frontend/dist/
 release-*/
+frontend/public/downloads/desktop/Pingy-setup.exe
 android/app/build/
 android/build/
 android/.gradle/
