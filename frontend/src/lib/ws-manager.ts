@@ -1,4 +1,5 @@
 import { useNetworkStore } from "../store/network";
+import { resolveWsHttpBase } from "./api-origin";
 
 /* ------------------------------------------------------------------ */
 /*  WsManager — WebSocket wrapper with auto-reconnect                  */
@@ -194,13 +195,10 @@ export class WsManager {
 /*  Helper: build WS URL from env                                      */
 /* ------------------------------------------------------------------ */
 
-const WS_BASE = typeof import.meta !== "undefined"
-  ? (import.meta.env?.VITE_WS_URL || "")
-  : "";
-
 export function buildWsUrl(path: string): string {
-  const base = WS_BASE
-    ? WS_BASE.replace(/^http/, "ws")
+  const httpBase = resolveWsHttpBase();
+  const base = httpBase
+    ? httpBase.replace(/^http/, "ws")
     : (typeof window !== "undefined" ? window.location.origin.replace(/^http/, "ws") : "");
   return `${base}${path}`;
 }

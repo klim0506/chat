@@ -19,7 +19,11 @@ from .serializers import ChatSerializer, ChatCreateSerializer, ChatMemberSeriali
 from .services import create_favorites_chat
 from .utils import verify_invite_code, generate_slug, make_verification_code
 from rest_framework.permissions import IsAuthenticated
-from apps.payments.plan_limits import get_max_pinned_chats, RESTRICTION_CODE
+from apps.payments.plan_limits import (
+    get_max_pinned_chats,
+    can_archive_chats,
+    RESTRICTION_CODE,
+)
 from apps.users.models import User
 from apps.common.image_utils import compress_uploaded_image, create_avatar_thumbnails, delete_avatar_thumbnails, AVATAR_MAX_DIM, BACKGROUND_MAX_DIM
 
@@ -229,6 +233,14 @@ class ChatViewSet(viewsets.ModelViewSet):
         ).first()
         if not membership:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        if not can_archive_chats(request.user):
+            return Response(
+                {
+                    "detail": "Архивация чатов доступна только с Premium. Оформите пробный период, чтобы включить архив.",
+                    "code": RESTRICTION_CODE,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         membership.is_archived = not membership.is_archived
         membership.save(update_fields=["is_archived"])
         return Response({"is_archived": membership.is_archived})

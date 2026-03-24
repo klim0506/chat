@@ -1,15 +1,41 @@
+function getAndroidNotificationsBridge(): AndroidNotificationsBridge | null {
+  if (typeof window === "undefined") return null;
+  return window.PingyAndroid ?? null;
+}
+
 /** Поддержка браузерных уведомлений */
 export const NOTIFICATIONS_SUPPORTED =
-  typeof window !== "undefined" && "Notification" in window;
+  typeof window !== "undefined" && ("Notification" in window || !!getAndroidNotificationsBridge());
 
 export type NotificationPermission = "granted" | "denied" | "default";
 
 export function getPermission(): NotificationPermission {
+  const androidBridge = getAndroidNotificationsBridge();
+  if (androidBridge) {
+    return androidBridge.getNotificationPermission();
+  }
   if (!NOTIFICATIONS_SUPPORTED) return "denied";
   return Notification.permission as NotificationPermission;
 }
 
 export function requestPermission(): Promise<NotificationPermission> {
+  const androidBridge = getAndroidNotificationsBridge();
+  if (androidBridge) {
+    androidBridge.requestNotificationPermission();
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const tick = () => {
+        const permission = androidBridge.getNotificationPermission();
+        if (permission === "granted" || permission === "denied" || attempts >= 20) {
+          resolve(permission);
+          return;
+        }
+        attempts += 1;
+        window.setTimeout(tick, 250);
+      };
+      tick();
+    });
+  }
   if (!NOTIFICATIONS_SUPPORTED) return Promise.resolve("denied");
   return Notification.requestPermission();
 }
@@ -63,9 +89,23 @@ export function showMessageNotification(
   message: { msg_type?: string; content?: string; sender_display_name?: string; created_at?: string },
   options?: { icon?: string; chatId?: string }
 ): void {
-  if (!NOTIFICATIONS_SUPPORTED || Notification.permission !== "granted") return;
   const sender = message.sender_display_name?.trim() || chatTitle || "Новое сообщение";
   const textPart = getNotificationBody(message);
+  const androidBridge = getAndroidNotificationsBridge();
+  const permission = getPermission();
+  if (!NOTIFICATIONS_SUPPORTED || permission !== "granted") return;
+
+  if (androidBridge) {
+    androidBridge.showMessageNotification(
+      chatTitle,
+      sender,
+      textPart,
+      options?.chatId ?? "",
+      String(message.created_at ? new Date(message.created_at).getTime() : Date.now()),
+    );
+    return;
+  }
+
   const timeStr = formatNotificationTime(message.created_at);
   const body = timeStr ? `${textPart} · ${timeStr}` : textPart;
   const icon = options?.icon ?? NOTIFICATION_ICON;

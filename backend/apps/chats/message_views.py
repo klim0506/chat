@@ -9,7 +9,20 @@ from django.shortcuts import get_object_or_404
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from .models import Chat, ChatMember, Message, MessageReaction, UserPinnedMessage, ChatPinnedMessage, PollVote, REACTION_EMOJIS, MAX_REACTIONS_PER_USER
+from .models import (
+    Chat,
+    ChatMember,
+    Message,
+    MessageReaction,
+    UserPinnedMessage,
+    ChatPinnedMessage,
+    PollVote,
+    ChannelMember,
+    ChannelPost,
+    ChannelPostComment,
+    REACTION_EMOJIS,
+    MAX_REACTIONS_PER_USER,
+)
 from apps.payments.plan_limits import get_max_reactions_per_message, RESTRICTION_CODE
 from .serializers import MessageSerializer, MESSAGE_CONTENT_MAX_LENGTH
 from apps.users.serializers import UserSerializer
@@ -569,55 +582,114 @@ class GlobalMessageSearchView(APIView):
             limit = min(int(request.query_params.get("limit", 30)), 50)
         except (TypeError, ValueError):
             limit = 30
+
         my_chat_ids = list(
             ChatMember.objects.filter(
-                user=request.user, status=ChatMember.Status.ACTIVE,
+                user=request.user, status=ChatMember.Status.ACTIVE
             ).values_list("chat_id", flat=True)
         )
-        if not my_chat_ids:
+        my_channel_ids = list(
+            ChannelMember.objects.filter(
+                user=request.user, status=ChannelMember.Status.ACTIVE
+            ).values_list("channel_id", flat=True)
+        )
+        if not my_chat_ids and not my_channel_ids:
             return Response({"results": []})
-        # Use PostgreSQL full-text search when available; fallback to icontains for SQLite
-        if connection.vendor == "postgresql":
-            from django.contrib.postgres.search import SearchQuery, SearchVector
-            search_query = SearchQuery(q, config="simple", search_type="plain")
-            qs = (
-                Message.objects.filter(
-                    chat_id__in=my_chat_ids,
-                    is_deleted=False,
-                    is_encrypted=False,
-                )
-                .annotate(search=SearchVector("content", config="simple"))
-                .filter(search=search_query)
-                .exclude(chat__is_secret=True)
-                .select_related("sender", "chat", "file", "sender_device")
-                .order_by("-created_at")[:limit]
+
+        # Search in user's chats.
+        chat_messages = (
+            Message.objects.filter(
+                chat_id__in=my_chat_ids,
+                is_deleted=False,
+                is_encrypted=False,
+                content__icontains=q,
             )
-        else:
-            qs = (
-                Message.objects.filter(
-                    chat_id__in=my_chat_ids,
-                    is_deleted=False,
-                    is_encrypted=False,
-                    content__icontains=q,
-                )
-                .exclude(chat__is_secret=True)
-                .select_related("sender", "chat", "file", "sender_device")
-                .order_by("-created_at")[:limit]
+            .exclude(chat__is_secret=True)
+            .select_related("sender", "chat")
+            .order_by("-created_at")[:limit]
+            if my_chat_ids
+            else []
+        )
+
+        # Search in user's channel posts.
+        channel_posts = (
+            ChannelPost.objects.filter(
+                channel_id__in=my_channel_ids,
+                is_deleted=False,
+                is_encrypted=False,
+                content__icontains=q,
             )
-        results = []
-        for msg in qs:
-            results.append({
-                "id": str(msg.id),
-                "chat_id": str(msg.chat_id),
-                "chat_title": msg.chat.title,
-                "chat_is_personal": msg.chat.is_personal,
-                "sender_id": str(msg.sender_id),
-                "sender_name": msg.sender.display_name or msg.sender.phone,
-                "content": msg.content[:200],
-                "msg_type": msg.msg_type,
-                "created_at": msg.created_at.isoformat(),
-            })
-        return Response({"results": results})
+            .select_related("author", "channel")
+            .order_by("-created_at")[:limit]
+            if my_channel_ids
+            else []
+        )
+
+        # Search in user's channel comments.
+        channel_comments = (
+            ChannelPostComment.objects.filter(
+                post__channel_id__in=my_channel_ids,
+                is_deleted=False,
+                content__icontains=q,
+            )
+            .select_related("author", "post__channel")
+            .order_by("-created_at")[:limit]
+            if my_channel_ids
+            else []
+        )
+
+        combined = []
+        for msg in chat_messages:
+            combined.append(
+                {
+                    "id": str(msg.id),
+                    "target_type": "chat_message",
+                    "chat_id": str(msg.chat_id),
+                    "channel_id": None,
+                    "chat_title": msg.chat.title,
+                    "chat_is_personal": msg.chat.is_personal,
+                    "sender_id": str(msg.sender_id),
+                    "sender_name": msg.sender.display_name or msg.sender.phone,
+                    "content": (msg.content or "")[:200],
+                    "msg_type": msg.msg_type,
+                    "created_at": msg.created_at.isoformat(),
+                }
+            )
+        for post in channel_posts:
+            combined.append(
+                {
+                    "id": str(post.id),
+                    "target_type": "channel_post",
+                    "chat_id": None,
+                    "channel_id": str(post.channel_id),
+                    "chat_title": post.channel.title,
+                    "chat_is_personal": False,
+                    "sender_id": str(post.author_id),
+                    "sender_name": post.author.display_name or post.author.phone,
+                    "content": (post.content or "")[:200],
+                    "msg_type": post.msg_type,
+                    "created_at": post.created_at.isoformat(),
+                }
+            )
+        for comment in channel_comments:
+            combined.append(
+                {
+                    "id": str(comment.id),
+                    "target_type": "channel_comment",
+                    "chat_id": None,
+                    "channel_id": str(comment.post.channel_id),
+                    "chat_title": comment.post.channel.title,
+                    "chat_is_personal": False,
+                    "sender_id": str(comment.author_id),
+                    "sender_name": comment.author.display_name or comment.author.phone,
+                    "content": (comment.content or "")[:200],
+                    "msg_type": comment.msg_type,
+                    "created_at": comment.created_at.isoformat(),
+                }
+            )
+
+        combined.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        return Response({"results": combined[:limit]})
 
 
 class ForwardMessageView(APIView):

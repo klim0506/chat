@@ -40,17 +40,16 @@ export function AvatarManagerModal({
 
   const handleAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
+    if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
     e.target.value = "";
     setPendingFile(file);
   };
 
-  const handleCropConfirm = async (blob: Blob) => {
+  const handleCropConfirm = async (file: File) => {
     if (!pendingFile) return;
     setLoading(true);
     setError("");
     try {
-      const file = new File([blob], "avatar.png", { type: "image/png" });
       const res = await authApi.addAvatar(file);
       setAvatars((prev) => [...prev, res.data].sort((a, b) => a.order - b.order));
       fetchAvatars();
@@ -132,7 +131,13 @@ export function AvatarManagerModal({
             {avatars.map((a, i) => (
               <div key={a.id} className="relative group">
                 <div className="ui-avatar-slot aspect-square rounded-full overflow-hidden border-2">
-                  <MediaImage source={a.url} alt="" className="w-full h-full object-cover" />
+                  <MediaImage
+                    source={a.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    autoplayAnimated
+                    aggressiveAnimatedCompression
+                  />
                 </div>
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 bg-black/50 rounded-full transition-opacity p-1">
                   {(a.id !== "legacy") && (
@@ -174,7 +179,7 @@ export function AvatarManagerModal({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   className="hidden"
                   onChange={handleAdd}
                   disabled={loading}

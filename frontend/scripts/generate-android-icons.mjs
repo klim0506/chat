@@ -7,30 +7,37 @@
 import sharp from "sharp";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { existsSync, mkdirSync, unlinkSync } from "fs";
-import { execFileSync } from "node:child_process";
 import os from "node:os";
 
+const require = createRequire(import.meta.url);
+const ico = require("sharp-ico");
+
 /**
- * Sharp не читает некоторые .ico — извлекаем крупнейший кадр через ImageMagick.
+ * Sharp не читает .ico напрямую; ImageMagick на Windows часто конфликтует с convert.exe.
+ * Берём крупнейший кадр через sharp-ico (как в scripts/prepare-app-icon.mjs).
  */
-function rasterPathForSharp(sourcePath) {
+async function rasterPathForSharp(sourcePath) {
   if (!sourcePath.toLowerCase().endsWith(".ico")) {
     return { path: sourcePath, cleanup: () => {} };
   }
-  const tmp = path.join(os.tmpdir(), `android-launcher-ico-${process.pid}.png`);
-  try {
-    execFileSync("convert", [`${sourcePath}[0]`, tmp], { stdio: "inherit" });
-  } catch {
-    try {
-      execFileSync("magick", [`${sourcePath}[0]`, tmp], { stdio: "inherit" });
-    } catch (e2) {
-      console.error(
-        "Для favicon.ico нужен ImageMagick в PATH (команды convert или magick)."
-      );
-      throw e2;
+  const sharps = await ico.sharpsFromIco(sourcePath);
+  if (!sharps.length) {
+    throw new Error("No images in ICO: " + sourcePath);
+  }
+  let best = sharps[0];
+  let bestArea = 0;
+  for (const s of sharps) {
+    const m = await s.metadata();
+    const area = (m.width || 0) * (m.height || 0);
+    if (area > bestArea) {
+      bestArea = area;
+      best = s;
     }
   }
+  const tmp = path.join(os.tmpdir(), `android-launcher-ico-${process.pid}.png`);
+  await best.png().toFile(tmp);
   return {
     path: tmp,
     cleanup: () => {
@@ -47,9 +54,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SOURCE = path.resolve(__dirname, "../public/favicon.ico");
 const OUT_BASE = path.resolve(__dirname, "../../android/app/src/main/res");
-
-// Pingy theme color (from manifest.json)
-const BG_COLOR = "#0b1220";
 
 // Mipmap densities: [folder, scale factor for 108dp foreground]
 const FOREGROUND_SIZES = [
@@ -75,7 +79,7 @@ async function generate() {
     process.exit(1);
   }
 
-  const { path: raster, cleanup } = rasterPathForSharp(SOURCE);
+  const { path: raster, cleanup } = await rasterPathForSharp(SOURCE);
   try {
   for (const [folder, px] of FOREGROUND_SIZES) {
     const dir = path.join(OUT_BASE, folder);
@@ -112,13 +116,14 @@ async function generate() {
       .png()
       .toBuffer();
 
+    // Solid white behind logo (legacy launcher + round icon)
     await sharp(logoBuf)
       .extend({
         top: padding,
         bottom: padding,
         left: padding,
         right: padding,
-        background: { r: 11, g: 18, b: 32, alpha: 1 },
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
       })
       .png()
       .toFile(path.join(dir, "ic_launcher.png"));
@@ -130,7 +135,7 @@ async function generate() {
         bottom: padding,
         left: padding,
         right: padding,
-        background: { r: 11, g: 18, b: 32, alpha: 1 },
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
       })
       .png()
       .toFile(path.join(dir, "ic_launcher_round.png"));

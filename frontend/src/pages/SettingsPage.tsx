@@ -84,7 +84,7 @@ const SETTINGS_PANEL_BODY_CLASS = "px-6 py-5";
 const SETTINGS_CHATS_SUBCARD_CLASS =
   "rounded-[24px] border border-slate-200/80 bg-white/72 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]";
 const SETTINGS_NAV_SHELL_CLASS = "flex h-full min-h-0 flex-col p-2";
-const SETTINGS_NAV_ACTION_CLASS = "flex w-full items-center gap-3 rounded-[20px] px-3 py-3 text-left text-sm transition-colors";
+const SETTINGS_NAV_ACTION_CLASS = "flex w-full items-center gap-3 rounded-[20px] py-3 pl-4 pr-3 text-left text-sm transition-colors md:px-3";
 const SETTINGS_DESKTOP_NAV_WIDTH = 272;
 const SETTINGS_DESKTOP_NAV_OVERLAY_BREAKPOINT = SETTINGS_DESKTOP_NAV_WIDTH * 2 + 56;
 
@@ -109,20 +109,20 @@ function SettingsNav({ section, onSection, t }: { section: SettingsSection; onSe
     }
   };
   return (
-    <nav className="flex w-full max-w-[17rem] flex-col gap-1 overflow-y-auto pr-1">
+    <nav className="flex w-full max-w-none flex-col gap-2 overflow-y-auto md:max-w-[17rem] md:gap-1 md:pr-1">
       {navItems.map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onSection(item.id)}
           aria-current={section === item.id ? "page" : undefined}
-          className={`flex w-full items-center gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
+          className={`flex w-full items-center gap-3 rounded-[20px] border py-3 pl-4 pr-3 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out md:gap-2.5 md:px-3 md:py-2.5 ${
             section === item.id
               ? "border-sky-200/80 bg-white text-slate-900 shadow-[0_6px_18px_rgba(15,23,42,0.04)]"
               : "border-transparent text-slate-600 hover:bg-white/80 hover:text-slate-900"
           }`}
         >
-          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+          <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:h-10 md:w-10 ${
             section === item.id ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
           }`}>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -130,10 +130,10 @@ function SettingsNav({ section, onSection, t }: { section: SettingsSection; onSe
             </svg>
           </span>
           <span className="min-w-0 flex-1">
-            <span className={`block truncate text-[0.9375rem] font-medium ${section === item.id ? "text-slate-900" : "text-slate-700"}`}>
+            <span className={`block truncate text-base font-semibold md:text-[0.9375rem] md:font-medium ${section === item.id ? "text-slate-900" : "text-slate-700"}`}>
               {t(item.labelKey)}
             </span>
-            <span className="mt-0.5 block truncate text-[0.8125rem] text-slate-400">
+            <span className="mt-0.5 block truncate text-sm text-slate-400 md:text-[0.8125rem]">
               {getItemSubtitle(item.id)}
             </span>
           </span>
@@ -337,7 +337,7 @@ function ReferralProgressCard({
         <button
           type="button"
           onClick={onCopy}
-          className={`ui-accent-strong w-full inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors ${shake ? "animate-username-shake" : ""}`}
+          className={`w-full inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors bg-blue-600 hover:bg-blue-700 active:bg-blue-800 ${shake ? "animate-username-shake" : ""}`}
         >
           {copied ? t("common.copied") : t("settings.referralCopyCta")}
         </button>
@@ -1287,7 +1287,7 @@ function FoldersSection({ t, onFoldersUpdated, hasSubscription = false }: { t: R
         <TopLayerPortal>
           <div
             role="status"
-            className="fixed bottom-6 left-1/2 max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-slate-800 px-4 py-3 text-center text-sm text-white shadow-lg"
+            className="fixed top-4 left-1/2 max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-slate-800 px-4 py-3 text-center text-sm text-white shadow-lg"
             style={{ zIndex: TOP_LAYER_Z_INDEX }}
           >
             {t("folders.premiumRequiredToast")}
@@ -1702,7 +1702,13 @@ export default function SettingsPage({
                   >
                     <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl overflow-hidden">
                       {u.avatar_url ? (
-                        <MediaImage source={u.avatar_url} alt="" className="w-full h-full object-cover" />
+                        <MediaImage
+                          source={u.avatar_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          autoplayAnimated
+                          aggressiveAnimatedCompression
+                        />
                       ) : (
                         getAvatarInitials(u.display_name || u.phone)
                       )}

@@ -15,8 +15,27 @@ interface ImportMetaEnv {
   readonly VITE_MARKETING_HOSTS: string;
   /** Direct URL to Android APK; if not set, APP_BASE_URL/downloads/android/Pingy_{version}.apk is used. */
   readonly VITE_ANDROID_APK_URL: string;
+  /** `web` (default) or `desktop` — desktop uses absolute API base in production (Tauri). */
+  readonly VITE_CLIENT_TYPE: string;
 }
 interface ImportMeta { readonly env: ImportMetaEnv; }
+
+interface AndroidNotificationsBridge {
+  isAndroidApp(): boolean;
+  getNotificationPermission(): "granted" | "denied" | "default";
+  requestNotificationPermission(): void;
+  showMessageNotification(
+    chatTitle: string,
+    sender: string,
+    body: string,
+    chatId: string,
+    timestampMs: string,
+  ): void;
+}
+
+interface Window {
+  PingyAndroid?: AndroidNotificationsBridge;
+}
 
 declare module "libsodium-wrappers-sumo" {
   const mod: any;

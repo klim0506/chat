@@ -6,10 +6,10 @@ import { useAuthStore } from "../store/auth";
 import { useUnreadStore } from "../store/unread";
 import { playSound } from "../lib/sounds";
 import { useTranslation, getLocale } from "../lib/i18n";
+import { buildWsUrl } from "../lib/ws-manager";
 import ConfirmModal from "../components/ConfirmModal";
 import CreateChatModal from "../components/CreateChatModal";
 
-const WS_BASE = import.meta.env.VITE_WS_URL || "";
 const PREVIEW_MESSAGES_LIMIT = 25;
 
 function getSenderName(msg: Message): string {
@@ -189,9 +189,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!token || needsSub) return;
-    const wsUrl =
-      (WS_BASE ? WS_BASE.replace(/^http/, "ws") : `${window.location.origin.replace(/^http/, "ws")}`) +
-      `/ws/notifications/`;
+    const wsUrl = buildWsUrl("/ws/notifications/");
     const ws = new WebSocket(wsUrl, ["bearer", token]);
     notifWsRef.current = ws;
     ws.onmessage = (event) => {

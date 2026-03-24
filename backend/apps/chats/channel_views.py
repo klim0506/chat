@@ -2,7 +2,7 @@
 import tempfile
 from pathlib import Path
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.shortcuts import get_object_or_404
@@ -25,6 +25,7 @@ from .utils import generate_slug, make_verification_code, verify_invite_code
 from .telegram_import import import_telegram_export
 from apps.payments.plan_limits import can_post_channel_content, can_import_telegram, RESTRICTION_CODE
 from apps.common.image_utils import compress_uploaded_image, create_avatar_thumbnails, delete_avatar_thumbnails, AVATAR_MAX_DIM
+from apps.files.access_handles import make_channel_avatar_handle
 
 
 def _channel_member_role(request, channel):
@@ -246,6 +247,41 @@ class ResolveChannelUsernameView(APIView):
                 "title": channel.title,
             }
         )
+
+
+class PublicChannelSearchView(APIView):
+    """GET: search public channels across whole messenger. ?q=text&limit=20"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        q = (request.query_params.get("q") or "").strip()
+        if len(q) < 2:
+            return Response({"results": []})
+        try:
+            limit = min(int(request.query_params.get("limit", 20)), 50)
+        except (TypeError, ValueError):
+            limit = 20
+
+        channels = (
+            Channel.objects.filter(is_active=True, is_public=True)
+            .filter(Q(title__icontains=q) | Q(username__icontains=q))
+            .annotate(_members_count=Count("members", filter=Q(members__status=ChannelMember.Status.ACTIVE)))
+            .order_by("-_members_count", "-created_at")[:limit]
+        )
+        results = []
+        for ch in channels:
+            results.append(
+                {
+                    "id": str(ch.id),
+                    "title": ch.title,
+                    "username": ch.username,
+                    "members_count": int(getattr(ch, "_members_count", 0) or 0),
+                    "avatar_handle": make_channel_avatar_handle(ch.id) if ch.avatar else None,
+                    "avatar_handle_small": make_channel_avatar_handle(ch.id, size="small") if ch.avatar else None,
+                    "avatar_handle_medium": make_channel_avatar_handle(ch.id, size="medium") if ch.avatar else None,
+                }
+            )
+        return Response({"results": results})
 
 
 class JoinChannelPreviewView(APIView):

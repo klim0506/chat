@@ -76,6 +76,9 @@ jobs:
           fi
         env:
           CI: false
+          # Same as scripts/build-desktop-windows.ps1 — absolute API base in packaged app.
+          VITE_CLIENT_TYPE: desktop
+          VITE_APP_URL: https://web.pingychat.com
 
       - name: Upload Linux artifacts
         if: matrix.runner == 'ubuntu-22.04'

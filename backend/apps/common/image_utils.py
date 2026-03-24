@@ -47,6 +47,10 @@ def compress_uploaded_image(
     except Exception:
         return file_obj
 
+    # Keep animated avatars as-is (GIF/WebP/APNG): converting to static kills animation.
+    if bool(getattr(img, "is_animated", False)) or int(getattr(img, "n_frames", 1) or 1) > 1:
+        return file_obj
+
     img = ImageOps.exif_transpose(img)
     has_alpha = img.mode in ("RGBA", "LA") or (
         img.mode == "P" and "transparency" in img.info
@@ -101,6 +105,9 @@ def create_avatar_thumbnails(original_path: str) -> bool:
     try:
         with Image.open(full_path) as img:
             img = ImageOps.exif_transpose(img)
+            # Do not create static thumbnails for animated avatars.
+            if bool(getattr(img, "is_animated", False)) or int(getattr(img, "n_frames", 1) or 1) > 1:
+                return False
             has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
 
             for size in (AVATAR_SIZE_SMALL, AVATAR_SIZE_MEDIUM):

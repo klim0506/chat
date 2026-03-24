@@ -3,6 +3,7 @@ import hmac
 import logging
 import mimetypes
 import re
+import shutil
 from datetime import timezone as dt_timezone
 from io import BytesIO
 from urllib.parse import quote
@@ -13,6 +14,7 @@ from pathlib import Path
 from uuid import UUID
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
@@ -46,8 +48,9 @@ _PLACEHOLDER_GIF = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!
 
 DEFAULT_MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB fallback
 FILE_TOKEN_TTL_SECONDS = 24 * 60 * 60  # 24h — reduce 403 for cached/long-open tabs
-# Chunked upload: 128 KB per part — server only holds one part in memory
-CHUNKED_UPLOAD_PART_SIZE = 128 * 1024
+# Chunked upload size (default 1 MB): fewer requests and less per-request overhead.
+CHUNKED_UPLOAD_PART_SIZE = int(getattr(settings, "CHUNKED_UPLOAD_PART_SIZE", 1024 * 1024))
+CHUNKED_UPLOAD_CLEANUP_INTERVAL_SECONDS = int(getattr(settings, "CHUNKED_UPLOAD_CLEANUP_INTERVAL_SECONDS", 300))
 ALLOWED_UPLOAD_MIME_PREFIXES = (
     "image/",
     "audio/",
@@ -353,13 +356,6 @@ class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # #region agent log
-        try:
-            _log = {"sessionId": "5254ee", "hypothesisId": "H1", "location": "files/views.py:FileUploadView.post", "message": "upload_view_entered", "data": {"content_length": request.META.get("CONTENT_LENGTH")}, "timestamp": __import__("time", fromlist=["time"]).time() * 1000}
-            open("/tmp/debug-5254ee.log", "a").write(__import__("json", fromlist=["dumps"]).dumps(_log) + "\n")
-        except Exception:
-            pass
-        # #endregion
         file_obj = request.FILES.get("file")
         if not file_obj:
             return Response({"detail": "Файл не передан."}, status=status.HTTP_400_BAD_REQUEST)
@@ -440,23 +436,9 @@ class FileUploadView(APIView):
             new_name = f"{uuid.uuid4().hex}{ext}"
             file_path = os.path.join(rel_dir, new_name).replace("\\", "/")
             full_path = os.path.join(settings.MEDIA_ROOT, file_path)
-            # #region agent log
-            try:
-                _log = {"sessionId": "5254ee", "hypothesisId": "H2", "location": "files/views.py:FileUploadView.post", "message": "upload_before_chunks", "data": {"size": file_obj.size}, "timestamp": __import__("time", fromlist=["time"]).time() * 1000}
-                open("/tmp/debug-5254ee.log", "a").write(__import__("json", fromlist=["dumps"]).dumps(_log) + "\n")
-            except Exception:
-                pass
-            # #endregion
             with open(full_path, "wb+") as dest:
                 for chunk in file_obj.chunks():
                     dest.write(chunk)
-            # #region agent log
-            try:
-                _log = {"sessionId": "5254ee", "hypothesisId": "H2", "location": "files/views.py:FileUploadView.post", "message": "upload_after_chunks", "data": {}, "timestamp": __import__("time", fromlist=["time"]).time() * 1000}
-                open("/tmp/debug-5254ee.log", "a").write(__import__("json", fromlist=["dumps"]).dumps(_log) + "\n")
-            except Exception:
-                pass
-            # #endregion
             scan_status = FileAttachment.ScanStatus.ENCRYPTED if is_encrypted else FileAttachment.ScanStatus.CLEAN
             att = FileAttachment.objects.create(
                 uploader=request.user,
@@ -483,22 +465,8 @@ class FileUploadView(APIView):
                     optimize_uploaded_image.delay(str(att.id))
                 except Exception:
                     pass
-            # #region agent log
-            try:
-                _log = {"sessionId": "5254ee", "hypothesisId": "H4", "location": "files/views.py:FileUploadView.post", "message": "upload_success", "data": {"att_id": str(att.id)}, "timestamp": __import__("time", fromlist=["time"]).time() * 1000}
-                open("/tmp/debug-5254ee.log", "a").write(__import__("json", fromlist=["dumps"]).dumps(_log) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return Response(FileAttachmentSerializer(att, context={"request": request}).data, status=status.HTTP_201_CREATED)
         except Exception as e:
-            # #region agent log
-            try:
-                _log = {"sessionId": "5254ee", "hypothesisId": "H4", "location": "files/views.py:FileUploadView.post", "message": "upload_exception", "data": {"error": str(e), "type": type(e).__name__}, "timestamp": __import__("time", fromlist=["time"]).time() * 1000}
-                open("/tmp/debug-5254ee.log", "a").write(__import__("json", fromlist=["dumps"]).dumps(_log) + "\n")
-            except Exception:
-                pass
-            # #endregion
             raise
 
 
@@ -517,6 +485,9 @@ def _delete_chunked_session_and_files(session: "ChunkedUploadSession") -> None:
 
 def _clean_old_chunked_sessions():
     """Remove chunked upload sessions older than 2 hours and their temp dirs."""
+    lock_key = "files.chunked.cleanup.lock"
+    if not cache.add(lock_key, "1", timeout=CHUNKED_UPLOAD_CLEANUP_INTERVAL_SECONDS):
+        return
     from django.utils import timezone
     from datetime import timedelta
     cutoff = timezone.now() - timedelta(hours=2)
@@ -635,9 +606,8 @@ class ChunkedUploadView(APIView):
                     total_size = 0
                     with open(full_path, "wb") as out:
                         with open(os.path.join(full_temp_dir, "part_0"), "rb") as inp:
-                            data = inp.read()
-                            total_size = len(data)
-                            out.write(data)
+                            total_size = os.path.getsize(inp.name)
+                            shutil.copyfileobj(inp, out, length=1024 * 1024)
                     os.unlink(os.path.join(full_temp_dir, "part_0"))
                     os.rmdir(full_temp_dir)
                     orig_name = session.original_name
@@ -721,9 +691,8 @@ class ChunkedUploadView(APIView):
                     if not os.path.isfile(p):
                         raise ValueError(f"Отсутствует часть {i}")
                     with open(p, "rb") as inp:
-                        data = inp.read()
-                        total_size += len(data)
-                        out.write(data)
+                        total_size += os.path.getsize(p)
+                        shutil.copyfileobj(inp, out, length=1024 * 1024)
             for i in range(session.total_parts):
                 os.unlink(os.path.join(full_temp_dir, f"part_{i}"))
             os.rmdir(full_temp_dir)

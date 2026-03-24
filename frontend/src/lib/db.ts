@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { Chat, Message } from "../api/client";
+import type { Chat, Channel, Message } from "../api/client";
 
 /* ------------------------------------------------------------------ */
 /*  Cached types — mirror API shapes, add indexing / sync metadata     */
@@ -11,6 +11,18 @@ export type CachedChat = Chat & {
   _cachedAt?: string;
   /** Owner user ID — prevents cross-account cache leaks */
   _userId?: string;
+  /** Position in server-ordered chat list (for instant startup ordering). */
+  _listPos?: number;
+};
+
+/** Channel row cached in IndexedDB — same shape as API Channel. */
+export type CachedChannel = Channel & {
+  /** ISO timestamp of last sync from server for this channel entry */
+  _cachedAt?: string;
+  /** Owner user ID — prevents cross-account cache leaks */
+  _userId?: string;
+  /** Position in server-ordered channel list (for instant startup ordering). */
+  _listPos?: number;
 };
 
 /** Message row cached in IndexedDB — same shape as API Message + chatId for indexing. */
@@ -98,6 +110,7 @@ export interface CachedTrustedIdentity {
 
 class AppDatabase extends Dexie {
   chats!: Table<CachedChat, string>;
+  channels!: Table<CachedChannel, string>;
   messages!: Table<CachedMessage, string>;
   outbox!: Table<OutboxItem, string>;
   syncMeta!: Table<SyncMeta, string>;
@@ -131,6 +144,19 @@ class AppDatabase extends Dexie {
 
     this.version(3).stores({
       chats: "id, _userId",
+      messages: "id, chatId, [chatId+created_at]",
+      outbox: "id, chatId, status",
+      syncMeta: "chatId",
+      identityKeyPair: "id",
+      signedPreKeys: "keyId",
+      preKeys: "keyId",
+      sessions: "id, [remoteUserId+remoteDeviceId]",
+      trustedIdentities: "userId",
+    });
+
+    this.version(4).stores({
+      chats: "id, _userId",
+      channels: "id, _userId",
       messages: "id, chatId, [chatId+created_at]",
       outbox: "id, chatId, status",
       syncMeta: "chatId",

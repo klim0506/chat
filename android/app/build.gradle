@@ -9,8 +9,8 @@ android {
         minSdk 21
         targetSdk 34
         // Синхронизируйте с frontend/package.json и frontend/src-tauri/tauri.conf.json (version)
-        versionCode 10319
-        versionName "1.3.17"
+        versionCode 10320
+        versionName "1.3.20"
     }
 
     // Release APK для прямой раздачи (сайт). Для Google Play замените на свой keystore.

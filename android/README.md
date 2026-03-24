@@ -34,6 +34,6 @@ npm run downloads:copy:android:win
 
 APK: `app/build/outputs/apk/debug/app-debug.apk` → для сайта: **`frontend/public/downloads/android/Pingy.apk`**.
 
-Иконка лаунчера генерируется из **`frontend/public/favicon.ico`** (`npm run android:icons` в `frontend/`). Для `.ico` в PATH нужен **ImageMagick** (`convert` или `magick`).
+Иконка лаунчера генерируется из **`frontend/public/favicon.ico`** (`npm run android:icons` в `frontend/`, через **sharp-ico**, без ImageMagick).
 
 Полный чеклист и CI: [docs/build-windows-and-android.md](../docs/build-windows-and-android.md).

@@ -124,6 +124,11 @@ def can_create_folders(user) -> bool:
     return _user_has_subscription(user)
 
 
+def can_archive_chats(user) -> bool:
+    """Архив чатов доступен только с активной подпиской."""
+    return _user_has_subscription(user)
+
+
 def can_post_channel_content(user) -> bool:
     """Публикация и редактирование постов в канале (owner/admin) — только с подпиской."""
     return _user_has_subscription(user)

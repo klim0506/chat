@@ -70,7 +70,7 @@ Workflow **«Tauri build (Desktop + iOS)»** (`.github/workflows/tauri-build.yml
 - **JDK 17** (Temurin / Oracle)
 - **Android SDK** с компонентами: `platform-tools`, `platforms;android-34`, `build-tools;34.0.0`
 - Переменная **`ANDROID_HOME`** (или `ANDROID_SDK_ROOT`) — путь к SDK
-- Для пересборки иконки из **`favicon.ico`**: в `frontend/` выполнить `npm run android:icons` (нужен **ImageMagick** — `convert` или `magick` в PATH)
+- Для пересборки иконки из **`favicon.ico`**: в `frontend/` выполнить `npm run android:icons` (через **sharp-ico**, ImageMagick не нужен)
 
 Первый раз на машине: в `android/` скопируйте `local.properties.example` → `local.properties` и укажите `sdk.dir=...` (Gradle подхватит SDK даже без `ANDROID_HOME`, если указан `sdk.dir`).
 

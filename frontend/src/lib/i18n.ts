@@ -602,7 +602,10 @@ const translations = {
   "search.result": { en: "%n message found", ru: "%n сообщение найдено" },
   "search.results": { en: "%n messages found", ru: "%n сообщений найдено" },
   "search.secretLocal": { en: "Search in secret chat (local only)", ru: "Поиск в секретном чате (только локально)" },
-  "search.globalPlaceholder": { en: "Search across all chats…", ru: "Поиск по всем чатам…" },
+  "search.globalPlaceholder": { en: "Messages in your chats and channels", ru: "Сообщения в ваших чатах и каналах" },
+  "search.myChatsAndChannels": { en: "Your chats and channels", ru: "Ваши чаты и каналы" },
+  "search.peopleAndPublicChannels": { en: "People and public channels", ru: "Личные чаты и публичные каналы" },
+  "search.messagesInMySpaces": { en: "Messages in your chats and channels", ru: "Сообщения в ваших чатах и каналах" },
 
   // ─── Join chat modal ─────────────────────────────────────
   "joinChat.title": { en: "Joining chat", ru: "Вступление в чат" },
@@ -707,6 +710,9 @@ const translations = {
   "chat.cameraAccessFailed": { en: "Could not access camera. Allow in browser settings.", ru: "Не удалось получить доступ к камере. Разрешите в настройках браузера." },
   "chat.expandError": { en: "Could not expand chat", ru: "Не удалось расширить чат" },
   "chat.avatarTooLarge": { en: "Avatar file is larger than 2 GB.", ru: "Файл аватара больше 2 ГБ." },
+  "chat.avatarTypeUnsupported": { en: "Only image and video files are supported for avatars.", ru: "Для аватара поддерживаются только изображения и видео." },
+  "chat.holdToRecordVoiceHint": { en: "Hold to record a voice message", ru: "Зажми для записи аудиосообщения" },
+  "chat.holdToRecordVideoHint": { en: "Hold to record a video message", ru: "Зажми для записи видеосообщения" },
   "chat.bgTooLarge": { en: "Background file is larger than 2 GB.", ru: "Файл фона больше 2 ГБ." },
   "chat.copyLink": { en: "Copy link", ru: "Копировать ссылку" },
   "chat.share": { en: "Share", ru: "Поделиться" },

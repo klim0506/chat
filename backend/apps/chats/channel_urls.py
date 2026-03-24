@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .channel_views import (
     ChannelViewSet,
     ResolveChannelUsernameView,
+    PublicChannelSearchView,
     JoinChannelPreviewView,
     JoinChannelView,
     ChannelImportTelegramView,
@@ -20,6 +21,7 @@ router.register(r"", ChannelViewSet, basename="channel")
 
 urlpatterns = [
     path("resolve/", ResolveChannelUsernameView.as_view(), name="channel-resolve"),
+    path("search/", PublicChannelSearchView.as_view(), name="channel-search-public"),
     path("join/preview/", JoinChannelPreviewView.as_view(), name="channel-join-preview"),
     path("join/", JoinChannelView.as_view(), name="channel-join"),
     path("", include(router.urls)),

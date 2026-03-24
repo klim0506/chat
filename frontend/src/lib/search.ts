@@ -59,6 +59,7 @@ export function scoreSearchableConversation(query: string, item: SearchableConve
     if (secondary.includes(token)) score += 6;
   }
 
+  if (score <= 0) return 0;
   const freshnessBoost = item.sortTs ? Math.min(14, Math.round(item.sortTs / 86_400_000_000)) : 0;
   return score + freshnessBoost;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
-import { authApi, chatsApi, channelsApi, foldersApi, paymentsApi, userDisplayName, normalizeMediaPayload, type Chat, type Channel, type ChatFolder, type UserSearchResult, type GlobalSearchResult } from "../api/client";
+import { authApi, chatsApi, channelsApi, foldersApi, paymentsApi, userDisplayName, normalizeMediaPayload, type Chat, type Channel, type ChatFolder, type UserSearchResult, type GlobalSearchResult, type PublicChannelSearchResult } from "../api/client";
 import { useAuthStore } from "../store/auth";
 import { useChatListStore } from "../store/chatList";
+import { useChannelListStore } from "../store/channelList";
 import { useUploadProgressStore } from "../store/uploadProgress";
 import { useMessagesStore, normalizeMessage } from "../store/messages";
 import { getAvatarInitials } from "../lib/avatar-initials";
@@ -19,13 +20,13 @@ import CreateChatModal from "../components/CreateChatModal";
 import CreateChannelModal from "../components/CreateChannelModal";
 import JoinChatPreviewModal from "../components/JoinChatPreviewModal";
 import { AnchoredPortal, TopLayerPortal, TOP_LAYER_Z_INDEX } from "../components/TopLayerPortal";
-import { useTranslation, formatMembersCount, t as tFn } from "../lib/i18n";
+import { useTranslation, formatMembersCount, t as tFn, type TranslationKey } from "../lib/i18n";
 import { usePreferencesStore } from "../store/preferences";
 import { usePremiumModalStore } from "../store/premiumModal";
 import type { AppLanguage } from "../store/preferences";
 import { MediaImage } from "../components/MediaImage";
 import { buildUserInfoHref } from "../lib/user-info-link";
-import { buildSearchSnippet, scoreChannelForSearch, scoreChatForSearch, scoreGlobalSearchResult } from "../lib/search";
+import { buildSearchSnippet, scoreChannelForSearch, scoreChatForSearch, scoreGlobalSearchResult, scoreSearchableConversation } from "../lib/search";
 
 /** Compact time for chat list: today = "14:30", yesterday = "Вчера", older = "12 мар" */
 function formatLastMessageTime(iso: string | undefined | null, lang: AppLanguage): string {
@@ -154,6 +155,116 @@ function WelcomeAnimationButton() {
   );
 }
 
+function MessengerWelcomeContent({
+  lang,
+  isMobile,
+  hasRegularChats,
+  t,
+  onCreateGroup,
+  onCreateChannel,
+}: {
+  lang: AppLanguage;
+  isMobile: boolean;
+  hasRegularChats: boolean;
+  t: (key: TranslationKey) => string;
+  onCreateGroup: () => void;
+  onCreateChannel: () => void;
+}) {
+  const welcomeCopy = lang === "ru"
+    ? {
+        existingTitle: "Выберите чат",
+        existingDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
+        firstTitle: "Рады вас видеть",
+        firstDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
+      }
+    : {
+        existingTitle: "Choose a chat",
+        existingDesc: "Open a conversation from the left or start a new one.",
+        firstTitle: "Nice to see you",
+        firstDesc: "Open a conversation from the left or start a new one.",
+      };
+
+  if (hasRegularChats) {
+    return (
+      <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
+        <div className="hidden mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          {lang === "ru" ? "Открытые чаты" : "Open chats"}
+        </div>
+        <WelcomeAnimationButton />
+        <h2 className="mb-2 text-2xl font-semibold text-slate-800">{lang === "ru" ? "Добро пожаловать в Pingy!" : "Nice to see you"}</h2>
+        <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.existingDesc}</p>
+        {isMobile && (
+          <p className="mx-auto mb-4 max-w-md text-sm leading-6 text-slate-500">
+            {lang === "ru" ? "Для создания чата или канала нажмите +" : "To create a chat or channel, tap +"}
+          </p>
+        )}
+        <div className="hidden mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
+            <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Список слева" : "List on the left"}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Откройте любой диалог одним нажатием." : "Open any conversation with one tap."}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
+            <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Новый чат" : "Start new"}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Создайте группу, канал или перейдите в Избранное." : "Create a group, a channel, or open Favorites."}</p>
+          </div>
+        </div>
+        {!isMobile && (
+          <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onCreateGroup}
+            className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            {t("createMenu.createGroup")}
+          </button>
+          <button
+            type="button"
+            onClick={onCreateChannel}
+            className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+            {t("createMenu.createChannel")}
+          </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
+      <WelcomeAnimationButton />
+      <h2 className="mb-2 text-2xl font-semibold text-slate-800">{welcomeCopy.firstTitle}</h2>
+      <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.firstDesc}</p>
+      {isMobile && (
+        <p className="mx-auto mb-4 max-w-md text-sm leading-6 text-slate-500">
+          {lang === "ru" ? "Для создания чата или канала нажмите +" : "To create a chat or channel, tap +"}
+        </p>
+      )}
+      {!isMobile && (
+        <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={onCreateGroup}
+          className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {t("createMenu.createGroup")}
+        </button>
+        <button
+          type="button"
+          onClick={onCreateChannel}
+          className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+          {t("createMenu.createChannel")}
+        </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function highlightMatch(text: string, query: string): ReactNode {
   const source = String(text || "");
   const needle = String(query || "").trim();
@@ -268,7 +379,9 @@ export default function MessengerPage() {
   const [settingsMobileInSubSection, setSettingsMobileInSubSection] = useState(false);
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId || null);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(urlChannelId || null);
-  const [channels, setChannels] = useState<Channel[]>([]);
+  const channels = useChannelListStore((s) => s.channels);
+  const loadChannels = useChannelListStore((s) => s.loadChannels);
+  const updateChannel = useChannelListStore((s) => s.updateChannel);
   const chats = useChatListStore((s) => s.chats);
   const chatListLoading = useChatListStore((s) => s.loading);
   const chatListError = useChatListStore((s) => s.error);
@@ -297,11 +410,14 @@ export default function MessengerPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<UserSearchResult[]>([]);
   const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [publicChannelSearchResults, setPublicChannelSearchResults] = useState<PublicChannelSearchResult[]>([]);
+  const [publicChannelSearchLoading, setPublicChannelSearchLoading] = useState(false);
   const [msgSearchResults, setMsgSearchResults] = useState<GlobalSearchResult[]>([]);
   const [msgSearchLoading, setMsgSearchLoading] = useState(false);
   const msgSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const userSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const publicChannelSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
       const w = localStorage.getItem("sidebarWidth");
@@ -434,13 +550,14 @@ export default function MessengerPage() {
     }
   }, [location.pathname, urlChatId, urlChannelId]);
 
-  /* ---------- Load channels ---------- */
+  /* ---------- Load channels (cache first + network revalidate) ---------- */
   useEffect(() => {
-    if (!token) return;
-    channelsApi.list()
-      .then((res) => setChannels(res.data?.results ?? []))
-      .catch(() => setChannels([]));
-  }, [token]);
+    if (!token) {
+      useChannelListStore.getState().reset();
+      return;
+    }
+    loadChannels().catch(() => {});
+  }, [loadChannels, token]);
 
   /* ---------- Load folders ---------- */
   useEffect(() => {
@@ -608,12 +725,25 @@ export default function MessengerPage() {
       const chatId = data.chat_id;
       const raw = data.message as Record<string, unknown> | undefined;
       const msgId = raw && raw.id != null ? String(raw.id) : "";
+      const updatedContent = raw && typeof raw.content === "string" ? raw.content : "";
+      const updatedCreatedAt = raw && typeof raw.created_at === "string" ? raw.created_at : undefined;
       if (msgId && raw?.is_deleted) {
         useMessagesStore.getState().updateMessage(chatId, msgId, { is_deleted: true });
       }
-      chatsApi.get(chatId).then((res) => {
-        useChatListStore.getState().upsertChat(res.data);
-      }).catch(() => {});
+      if (msgId && raw && !raw.is_deleted && updatedContent) {
+        const preview = formatMessagePreview(
+          { msg_type: (raw.msg_type as string) || "text", content: updatedContent, file: (raw.file as { mime_type?: string } | undefined) },
+          lang,
+        );
+        storeUpdateChat(chatId, {
+          last_message_preview: preview,
+          ...(updatedCreatedAt ? { last_message_at: updatedCreatedAt } : {}),
+        });
+      } else {
+        chatsApi.get(chatId).then((res) => {
+          useChatListStore.getState().upsertChat(res.data);
+        }).catch(() => {});
+      }
       return;
     }
 
@@ -968,6 +1098,44 @@ export default function MessengerPage() {
   const hasRegularChats = chats.some((chat) => !chat.is_favorites);
   const showSidebarSearch = hasRegularChats || channels.length > 0 || archivedCount > 0 || !!selectedFolderId || q.length > 0;
   const showRightPanel = rightPanelOpen || chats.length === 0 || (!rightPanelOpen && onlyFavoritesChat);
+  /** Mobile list view: not inside a chat/channel/settings. */
+  const onMessengerListOnly =
+    !renderChatId && !renderChannelId && !showSettings;
+  /**
+   * Mobile: welcome block only under the chat list (below Favorites / empty list), never in the center column.
+   * Applies when there are no "regular" chats yet (only Favorites and/or empty during/after load).
+   */
+  const hideCenterWelcomeOnMobile =
+    isMobile && onMessengerListOnly && !hasRegularChats && q.length === 0;
+  const inlineWelcomeMobile =
+    hideCenterWelcomeOnMobile && !loading && !chatListLoading && !needsSub;
+  /** Hide main column welcome on mobile while loading empty list, when subscription required, or when showing inline welcome. */
+  const showMainColumn =
+    showRightPanel &&
+    !inlineWelcomeMobile &&
+    !(hideCenterWelcomeOnMobile && (loading || chatListLoading || needsSub));
+  const splashChatsReadySentRef = useRef(false);
+
+  useEffect(() => {
+    if (splashChatsReadySentRef.current) return;
+    if (loading || chatListLoading) return;
+    splashChatsReadySentRef.current = true;
+    // Let the list fully paint before allowing splash to fade out.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(new Event("app:chats-ready"));
+      });
+    });
+  }, [loading, chatListLoading]);
+
+  // Android WebView: system Back must leave chat/channel for /chats (history.back() often lands on wrong SPA step).
+  useEffect(() => {
+    const onPingyBackToChats = () => {
+      navigate("/chats", { replace: true });
+    };
+    window.addEventListener("pingy-back-to-chats", onPingyBackToChats);
+    return () => window.removeEventListener("pingy-back-to-chats", onPingyBackToChats);
+  }, [navigate]);
   const folderTabBaseClass = "border text-center transition-[background-color,box-shadow,border-color,color,transform] duration-150 ease-out";
   const folderTabActiveClass = "messenger-list-row-active text-slate-900";
   const folderTabInactiveClass = "messenger-list-row text-slate-600 hover:text-slate-800";
@@ -1112,6 +1280,44 @@ export default function MessengerPage() {
     };
   }, [searchQuery]);
 
+  // Global public channel search
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setPublicChannelSearchResults([]);
+      return;
+    }
+    if (publicChannelSearchDebounceRef.current) clearTimeout(publicChannelSearchDebounceRef.current);
+    publicChannelSearchDebounceRef.current = setTimeout(() => {
+      setPublicChannelSearchLoading(true);
+      channelsApi
+        .searchPublic(q, { limit: 20 })
+        .then((res) => {
+          const ranked = [...(res.data.results || [])].sort(
+            (a, b) =>
+              scoreSearchableConversation(q, {
+                title: b.title || "",
+                username: b.username || "",
+                secondary: "",
+                sortTs: getActivityTimeMs(b.last_post_at || b.created_at || undefined),
+              }) -
+              scoreSearchableConversation(q, {
+                title: a.title || "",
+                username: a.username || "",
+                secondary: "",
+                sortTs: getActivityTimeMs(a.last_post_at || a.created_at || undefined),
+              })
+          );
+          setPublicChannelSearchResults(ranked);
+        })
+        .catch(() => setPublicChannelSearchResults([]))
+        .finally(() => setPublicChannelSearchLoading(false));
+    }, 300);
+    return () => {
+      if (publicChannelSearchDebounceRef.current) clearTimeout(publicChannelSearchDebounceRef.current);
+    };
+  }, [searchQuery]);
+
   // Global message search
   useEffect(() => {
     const q = searchQuery.trim();
@@ -1141,6 +1347,8 @@ export default function MessengerPage() {
           openChat(chat.id);
           setSearchQuery("");
           setUserSearchResults([]);
+          setPublicChannelSearchResults([]);
+          setMsgSearchResults([]);
           if (chat.is_personal) {
             const chatLink = `${window.location.origin}/chat/${chat.id}`;
             if (navigator.clipboard?.writeText) {
@@ -1235,11 +1443,9 @@ export default function MessengerPage() {
       setShowInviteLinkCopiedToast(true);
       setTimeout(() => setShowInviteLinkCopiedToast(false), 2000);
     }
-    channelsApi.list()
-      .then((res) => setChannels(res.data?.results ?? []))
-      .catch(() => {});
+    loadChannels().catch(() => {});
     openChannel(channelId);
-  }, [openChannel]);
+  }, [loadChannels, openChannel]);
 
   const handleJoinPreviewJoined = useCallback((chatId: string) => {
     setShowJoinPreviewModal(false);
@@ -1786,13 +1992,14 @@ export default function MessengerPage() {
             {q.length > 0 && (
               <div className="mt-2 flex items-center justify-between gap-2 px-1">
                 <p className="text-[0.6875rem] text-slate-500">
-                  {filteredChats.length + filteredChannels.length} {t("messenger.chats").toLowerCase()} • {userSearchResults.length} {t("messenger.users").toLowerCase()} • {msgSearchResults.length} {t("common.message").toLowerCase()}
+                  {filteredChats.length + filteredChannels.length} {t("messenger.chats").toLowerCase()} • {userSearchResults.length + publicChannelSearchResults.length} {t("search.peopleAndPublicChannels").toLowerCase()} • {msgSearchResults.length} {t("search.messagesInMySpaces").toLowerCase()}
                 </p>
                 <button
                   type="button"
                   onClick={() => {
                     setSearchQuery("");
                     setUserSearchResults([]);
+                    setPublicChannelSearchResults([]);
                     setMsgSearchResults([]);
                   }}
                   className="text-[0.6875rem] font-medium text-slate-500 transition-colors hover:text-slate-700"
@@ -2006,6 +2213,8 @@ export default function MessengerPage() {
                                   source={getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")}
                                   alt=""
                                   className="h-10 w-10 rounded-full object-cover"
+                                  autoplayAnimated
+                                  aggressiveAnimatedCompression
                                   loading="lazy"
                                   decoding="async"
                                 />
@@ -2069,6 +2278,8 @@ export default function MessengerPage() {
                                     source={getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")}
                                     alt=""
                                     className="h-10 w-10 rounded-full object-cover"
+                                    autoplayAnimated
+                                    aggressiveAnimatedCompression
                                     loading="lazy"
                                     decoding="async"
                                   />
@@ -2157,6 +2368,8 @@ export default function MessengerPage() {
                                     source={src}
                                     alt=""
                                     className="dialog-avatar avatar-photo h-12 w-12 rounded-full object-cover"
+                                    autoplayAnimated
+                                    aggressiveAnimatedCompression
                                     loading="lazy"
                                     decoding="async"
                                   />
@@ -2269,58 +2482,112 @@ export default function MessengerPage() {
               ) : selectedFolderId === UNREAD_FOLDER_ID ? (
                 <p className="text-slate-500 text-sm py-3 px-4">{t("messenger.unreadEmpty")}</p>
               ) : null}
+              {q.length >= 1 && (
+                <div className="messenger-divider-horizontal border-t">
+                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("search.myChatsAndChannels")}</p>
+                </div>
+              )}
               {q.length >= 2 && (
                 <div className="messenger-divider-horizontal border-t">
-                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("messenger.users")}</p>
-                  {userSearchLoading ? (
+                  <p className="px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50/80">{t("search.peopleAndPublicChannels")}</p>
+                  {userSearchLoading || publicChannelSearchLoading ? (
                     <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.searching")}</p>
-                  ) : userSearchResults.length === 0 ? (
-                    <p className="text-slate-500 text-xs py-3 px-4">{t("messenger.noUsersFound")}</p>
+                  ) : (userSearchResults.length === 0 && publicChannelSearchResults.length === 0) ? (
+                    <p className="text-slate-500 text-xs py-3 px-4">{t("search.noResults")}</p>
                   ) : (
-                    <ul className="py-1">
-                      {userSearchResults.map((u) => (
-                        <li key={u.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50">
-                          <Link
-                            to={buildUserInfoHref(u)}
-                            className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:ring-offset-2 focus:ring-offset-white"
-                            aria-label={u.display_name || u.username || u.id}
-                            title={t("chat.personInfo")}
-                          >
-                            {u.avatar_url ? (
-                              <>
-                                <MediaImage
-                                  source={getAvatarUrlBySize(u.avatar_url, undefined, undefined, "medium")}
-                                  alt=""
-                                  className="w-12 h-12 rounded-full object-cover shrink-0"
-                                  loading="lazy"
-                                  decoding="async"
-                                />
-                                <div style={{ display: "none" }} className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
-                                  {getAvatarInitials(u.display_name || u.username || "?")}
-                                </div>
-                              </>
-                            ) : (
-                              <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
-                                {getAvatarInitials(u.display_name || u.username || "?")}
+                    <>
+                      {userSearchResults.length > 0 && (
+                        <ul className="py-1">
+                          {userSearchResults.map((u) => (
+                            <li key={u.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50">
+                              <Link
+                                to={buildUserInfoHref(u)}
+                                className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400/60 focus:ring-offset-2 focus:ring-offset-white"
+                                aria-label={u.display_name || u.username || u.id}
+                                title={t("chat.personInfo")}
+                              >
+                                {u.avatar_url ? (
+                                  <>
+                                    <MediaImage
+                                      source={getAvatarUrlBySize(u.avatar_url, undefined, undefined, "medium")}
+                                      alt=""
+                                      className="w-12 h-12 rounded-full object-cover shrink-0"
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
+                                    <div style={{ display: "none" }} className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
+                                      {getAvatarInitials(u.display_name || u.username || "?")}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600 shrink-0">
+                                    {getAvatarInitials(u.display_name || u.username || "?")}
+                                  </div>
+                                )}
+                              </Link>
+                              <div className="flex-1 min-w-0">
+                                <span className="font-medium text-slate-800 text-sm truncate block">{highlightMatch(`@${u.username}`, q)}</span>
+                                {u.display_name && u.display_name !== u.username && (
+                                  <span className="text-xs text-slate-500 truncate block">{highlightMatch(u.display_name, q)}</span>
+                                )}
                               </div>
-                            )}
-                          </Link>
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium text-slate-800 text-sm truncate block">{highlightMatch(`@${u.username}`, q)}</span>
-                            {u.display_name && u.display_name !== u.username && (
-                              <span className="text-xs text-slate-500 truncate block">{highlightMatch(u.display_name, q)}</span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleWriteToUser(u.id)}
-                            className="shrink-0 text-blue-600 hover:text-blue-700 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-                          >
-                            {t("common.write")}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                              <button
+                                type="button"
+                                onClick={() => handleWriteToUser(u.id)}
+                                className="shrink-0 text-blue-600 hover:text-blue-700 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                              >
+                                {t("common.write")}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {publicChannelSearchResults.length > 0 && (
+                        <ul className="pb-1">
+                          {publicChannelSearchResults.map((ch) => (
+                            <li key={`public-search-${ch.id}`}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  openChannel(ch.id);
+                                  setSearchQuery("");
+                                  setUserSearchResults([]);
+                                  setPublicChannelSearchResults([]);
+                                  setMsgSearchResults([]);
+                                }}
+                                className="w-full text-left flex items-center gap-3 px-4 py-2 hover:bg-slate-50 transition-colors"
+                              >
+                                <div className="shrink-0">
+                                  {ch.avatar_url ? (
+                                    <MediaImage
+                                      source={getAvatarUrlBySize(ch.avatar_url, ch.avatar_url_small, ch.avatar_url_medium, "medium")}
+                                      alt=""
+                                      className="w-12 h-12 rounded-full object-cover"
+                                      autoplayAnimated
+                                      aggressiveAnimatedCompression
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-sm font-semibold text-slate-600">
+                                      {getAvatarInitials(ch.title || "К")}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-medium text-slate-800 text-sm truncate block">
+                                    {highlightMatch(ch.title, q)}
+                                  </span>
+                                  <span className="text-xs text-slate-500 truncate block">
+                                    {ch.username ? highlightMatch(`@${ch.username}`, q) : t("createMenu.createChannel")}
+                                  </span>
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -2338,8 +2605,14 @@ export default function MessengerPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              openChat(r.chat_id, { targetMessageId: r.id });
+                              if (r.target_type === "chat_message" && r.chat_id) {
+                                openChat(r.chat_id, { targetMessageId: r.id });
+                              } else if (r.channel_id) {
+                                openChannel(r.channel_id);
+                              }
                               setSearchQuery("");
+                              setUserSearchResults([]);
+                              setPublicChannelSearchResults([]);
                               setMsgSearchResults([]);
                             }}
                             className="w-full text-left flex items-start gap-3 px-4 py-2 hover:bg-slate-50 transition-colors"
@@ -2361,6 +2634,18 @@ export default function MessengerPage() {
                 </div>
               )}
             </>
+          )}
+          {inlineWelcomeMobile && (
+            <div className="messenger-divider-horizontal border-t px-2 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 flex min-h-[42vh] items-end justify-center">
+              <MessengerWelcomeContent
+                lang={lang}
+                isMobile={isMobile}
+                hasRegularChats={hasRegularChats}
+                t={t}
+                onCreateGroup={() => setShowCreateChatModal(true)}
+                onCreateChannel={() => setShowCreateChannelModal(true)}
+              />
+            </div>
           )}
           </div>
         </div>
@@ -2384,7 +2669,7 @@ export default function MessengerPage() {
       {/* ═══════ Right panel — column-center (Telegram: main-column / chat area) ═══════ */}
       <main
         id="column-center"
-        className={`column-center main-column ${showRightPanel ? "flex" : "hidden md:flex"} messenger-main-backdrop flex-col flex-1 min-w-0 min-h-0 overflow-hidden ${
+        className={`column-center main-column ${showMainColumn ? "flex" : "hidden md:flex"} messenger-main-backdrop flex-col flex-1 min-w-0 min-h-0 overflow-hidden ${
           showMainTopSafeInset ? "pt-[calc(env(safe-area-inset-top)+var(--visual-viewport-offset-top,0px))]" : ""
         }`}
       >
@@ -2434,15 +2719,10 @@ export default function MessengerPage() {
               channelId={renderChannelId}
               onBack={closeChannel}
               onMessageSent={(cid, preview, messageCreatedAt) => {
-                setChannels((prev) => prev.map((channel) => (
-                  channel.id === cid
-                    ? {
-                        ...channel,
-                        last_post_preview: preview,
-                        ...(messageCreatedAt ? { last_post_at: messageCreatedAt } : {}),
-                      }
-                    : channel
-                )));
+                updateChannel(cid, {
+                  last_post_preview: preview,
+                  ...(messageCreatedAt ? { last_post_at: messageCreatedAt } : {}),
+                });
               }}
             />
           </div>
@@ -2491,92 +2771,19 @@ export default function MessengerPage() {
               onNavigateToChat={openChat}
             />
           </div>
-        ) : (
+        ) : hideCenterWelcomeOnMobile ? null : (
           <div
             key="welcome"
             className="messenger-main-backdrop messenger-panel-fade-in flex min-h-0 flex-1 flex-col items-center justify-end overflow-y-auto p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:flex-row md:items-center md:justify-center md:overflow-visible md:pb-6"
           >
-          {(() => {
-            const welcomeCopy = lang === "ru"
-              ? {
-                  existingTitle: "Выберите чат",
-                  existingDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
-                  firstTitle: "Рады вас видеть",
-                  firstDesc: "Начните общение в новом чате, пригласите друзей и импортируйте историю из других мессенджеров",
-                }
-              : {
-                  existingTitle: "Choose a chat",
-                  existingDesc: "Open a conversation from the left or start a new one.",
-                  firstTitle: "Nice to see you",
-                  firstDesc: "Open a conversation from the left or start a new one.",
-                };
-
-            if (hasRegularChats) {
-              return (
-                <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
-                  <div className="hidden mb-4 inline-flex items-center justify-center rounded-full bg-slate-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    {lang === "ru" ? "Открытые чаты" : "Open chats"}
-                  </div>
-                  <WelcomeAnimationButton />
-                  <h2 className="mb-2 text-2xl font-semibold text-slate-800">{lang === "ru" ? "Добро пожаловать в Pingy!" : "Nice to see you"}</h2>
-                  <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.existingDesc}</p>
-                  <div className="hidden mx-auto mb-6 grid max-w-md gap-2 text-left sm:grid-cols-2">
-                    <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
-                      <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Список слева" : "List on the left"}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Откройте любой диалог одним нажатием." : "Open any conversation with one tap."}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3">
-                      <p className="text-sm font-medium text-slate-800">{lang === "ru" ? "Новый чат" : "Start new"}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">{lang === "ru" ? "Создайте группу, канал или перейдите в Избранное." : "Create a group, a channel, or open Favorites."}</p>
-                    </div>
-                  </div>
-                  <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateChatModal(true)}
-                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                      {t("createMenu.createGroup")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateChannelModal(true)}
-                      className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
-                      {t("createMenu.createChannel")}
-                    </button>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div className="messenger-empty-card max-w-lg rounded-[32px] p-7 text-center">
-                <WelcomeAnimationButton />
-                <h2 className="mb-2 text-2xl font-semibold text-slate-800">{welcomeCopy.firstTitle}</h2>
-                <p className="mx-auto mb-6 max-w-md text-sm leading-6 text-slate-500">{welcomeCopy.firstDesc}</p>
-                <div className="mx-auto flex w-full max-w-[32rem] flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateChatModal(true)}
-                    className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    {t("createMenu.createGroup")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateChannelModal(true)}
-                    className="ui-accent-strong inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition-colors sm:flex-1"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
-                    {t("createMenu.createChannel")}
-                  </button>
-                </div>
-              </div>
-            );
-          })()}
+            <MessengerWelcomeContent
+              lang={lang}
+              isMobile={isMobile}
+              hasRegularChats={hasRegularChats}
+              t={t}
+              onCreateGroup={() => setShowCreateChatModal(true)}
+              onCreateChannel={() => setShowCreateChannelModal(true)}
+            />
           </div>
         )}
       </main>

@@ -286,6 +286,13 @@ export default function AuthPage() {
     }
   };
 
+  // TODO(auth): Add sign-in via already authorized mobile app session.
+  // Flow idea:
+  // 1) Web asks backend for one-time login challenge.
+  // 2) Mobile app (already linked to same account) receives push/in-app prompt.
+  // 3) User confirms on mobile, backend marks challenge as approved.
+  // 4) Web polls/subscribes and exchanges approved challenge for access/refresh tokens.
+  // 5) Apply strict TTL + one-time use + device binding + revoke on cancel/timeout.
   const onPairingCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = pairingCode.replace(/\s/g, "").replace(/-/g, "").trim();
@@ -362,11 +369,10 @@ export default function AuthPage() {
     }
   };
 
-  const onCropConfirm = (blob: Blob) => {
+  const onCropConfirm = (file: File) => {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-    const croppedFile = new File([blob], "avatar.png", { type: "image/png" });
-    setAvatarFile(croppedFile);
-    setAvatarPreview(URL.createObjectURL(blob));
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
     setCropFile(null);
   };
 
@@ -463,7 +469,8 @@ export default function AuthPage() {
           "Softer loading and transition states",
         ],
       };
-  const primaryButtonClass = "ui-accent-strong w-full rounded-2xl px-4 py-3 text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50";
+  const primaryButtonClass =
+    "ui-accent-strong w-full min-h-[48px] rounded-2xl px-4 py-3.5 text-sm font-medium text-white transition-[transform,background-color,box-shadow] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-3";
   const inputClass = "ui-field-shell w-full rounded-2xl px-4 py-3 text-sm text-slate-800 transition-[border-color,box-shadow,background-color] focus:border-sky-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-100";
   const authUxCopy = language === "ru"
     ? {
@@ -523,14 +530,14 @@ export default function AuthPage() {
       ? ""
       : authUxCopy.descriptions[flowStage];
   return (
-    <div className="auth-shell relative min-h-screen w-full max-w-[100vw] overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-6 lg:px-8">
+    <div className="auth-shell relative min-h-[100dvh] w-full max-w-[100vw] overflow-x-hidden overflow-y-auto px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 sm:py-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-[-8%] top-[-6%] h-64 w-64 rounded-full bg-sky-200/40 blur-3xl" />
         <div className="absolute bottom-[-8%] right-[-4%] h-72 w-72 rounded-full bg-blue-200/40 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] w-full min-w-0 max-w-3xl items-center justify-center">
-        <div className="grid w-full min-w-0 max-w-full items-stretch gap-5">
+      <div className="relative mx-auto flex min-h-[calc(100dvh-max(1.5rem,env(safe-area-inset-top))-max(1rem,env(safe-area-inset-bottom)))] w-full min-w-0 max-w-3xl items-center justify-center sm:min-h-[calc(100vh-2rem)]">
+        <div className="grid w-full min-w-0 max-w-full items-stretch gap-4 sm:gap-5">
           <section className="hidden">
             <div className="space-y-8">
               <Link
@@ -589,20 +596,42 @@ export default function AuthPage() {
             </div>
           </section>
 
-          <section className={`auth-glass-card relative mx-auto flex w-full min-w-0 max-w-[min(34rem,100%)] flex-col justify-center rounded-[28px] p-4 sm:p-7 lg:rounded-[32px] lg:p-8 ${
-            step === "phone" || step === "code" ? "min-h-[24rem]" : ""
+          <section className={`auth-glass-card relative mx-auto flex w-full min-w-0 max-w-[min(34rem,100%)] flex-col justify-center rounded-2xl p-5 shadow-[0_8px_40px_rgba(15,23,42,0.06)] sm:rounded-[28px] sm:p-7 sm:shadow-none lg:rounded-[32px] lg:p-8 ${
+            step === "phone" || step === "code" ? "min-h-0 sm:min-h-[24rem]" : ""
           }`}>
-            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <div className="min-w-0 flex-1 space-y-3">
-                <Link
-                  to="/"
-                  className="inline-flex items-center rounded-2xl"
-                  aria-label={t("landing.brand")}
-                >
-                  <img src={LOGO_URL} alt={t("auth.logo")} className="h-12 w-auto object-contain opacity-95" />
-                </Link>
+            <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0 flex-1 space-y-2.5 sm:space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <Link
+                    to="/"
+                    className="inline-flex items-center rounded-2xl"
+                    aria-label={t("landing.brand")}
+                  >
+                    <img src={LOGO_URL} alt={t("auth.logo")} className="h-11 w-auto object-contain opacity-95 sm:h-12" />
+                  </Link>
+                  <div className="soft-chip inline-flex shrink-0 rounded-full p-1 sm:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setLanguage("ru")}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                        language === "ru" ? "ui-accent-strong text-white" : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Рус
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLanguage("en")}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                        language === "en" ? "ui-accent-strong text-white" : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Eng
+                    </button>
+                  </div>
+                </div>
                 <div className="min-w-0 space-y-2">
-                  <h2 className="break-words text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+                  <h2 className="break-words text-[1.35rem] font-semibold leading-snug tracking-[-0.03em] text-slate-950 sm:text-2xl">
                     {stageTitle}
                   </h2>
                   {stageDescription && (
@@ -621,7 +650,7 @@ export default function AuthPage() {
                         {language === "ru"
                           ? "Отправили сообщение в Telegram на номер"
                           : "Sent a message to Telegram for number"}{" "}
-                        <span className="font-medium text-slate-900 break-all">{phone}</span>
+                        <span className="whitespace-nowrap font-medium text-slate-900">{phone}</span>
                       </span>
                       <button
                         type="button"
@@ -642,7 +671,7 @@ export default function AuthPage() {
                   )}
                 </div>
               </div>
-              <div className="soft-chip inline-flex w-fit shrink-0 self-end rounded-full p-1 sm:self-start">
+              <div className="soft-chip hidden w-fit shrink-0 self-end rounded-full p-1 sm:inline-flex sm:self-start">
                 <button
                   type="button"
                   onClick={() => setLanguage("ru")}
@@ -779,7 +808,7 @@ export default function AuthPage() {
                         ? "border-emerald-300 focus-within:ring-sky-100"
                         : "focus-within:border-sky-300 focus-within:ring-sky-100"
                   }`}>
-                    <span className={`select-none border-r px-4 py-3 text-base font-medium ${
+                    <span className={`select-none border-r px-3 py-3 text-sm font-medium sm:px-4 sm:text-base ${
                       usernameForm.formState.errors.username || usernameStatus === "taken"
                         ? "border-slate-200 bg-slate-50/80 text-slate-500"
                         : usernameStatus === "available"
@@ -790,7 +819,7 @@ export default function AuthPage() {
                       type="text"
                       autoComplete="username"
                       placeholder="pingy"
-                      className="min-w-0 flex-1 border-0 bg-transparent px-4 py-3 text-sm lowercase text-slate-800 focus:outline-none focus:ring-0"
+                      className="min-w-0 flex-1 border-0 bg-transparent px-3 py-3 text-sm lowercase text-slate-800 focus:outline-none focus:ring-0 sm:px-4"
                       {...usernameForm.register("username", {
                         onChange: (e) => checkUsernameAvailability(e.target.value),
                       })}
@@ -819,9 +848,9 @@ export default function AuthPage() {
               <form onSubmit={codeForm.handleSubmit(onVerifyCode)} className="min-w-0 space-y-6">
                 <div className="min-w-0 space-y-2">
                   <div className="min-w-0 rounded-[22px] bg-white/40 p-1.5">
-                    <div className={`ui-field-shell flex min-w-0 overflow-hidden rounded-[18px] border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 ${codeForm.formState.errors.code || error ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
-                      <div className="ui-picker-tile flex min-w-0 shrink-0 items-center gap-2 rounded-none border-r border-slate-200 px-3 py-3 text-left sm:px-5">
-                        <span className="text-base font-medium text-slate-700 sm:text-lg">
+                    <div className={`ui-field-shell flex min-w-0 flex-col overflow-hidden rounded-[18px] border transition-[border-color,box-shadow,background-color] focus-within:bg-white focus-within:ring-4 sm:flex-row ${codeForm.formState.errors.code || error ? "border-rose-300 focus-within:ring-rose-100" : "focus-within:border-sky-300 focus-within:ring-sky-100"}`}>
+                      <div className="ui-picker-tile flex min-w-0 items-center gap-2 border-b border-slate-200 px-4 py-2.5 text-left sm:shrink-0 sm:rounded-none sm:border-b-0 sm:border-r sm:px-5 sm:py-3">
+                        <span className="text-sm font-medium text-slate-700 sm:text-lg">
                           {language === "ru" ? "Код" : "Code"}
                         </span>
                       </div>

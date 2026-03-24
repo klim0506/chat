@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { paymentsApi } from "../api/client";
 import { useTranslation } from "../lib/i18n";
 import type { TranslationKey } from "../lib/i18n";
 import { usePremiumModalStore } from "../store/premiumModal";
@@ -23,9 +23,10 @@ const BENEFIT_KEYS: TranslationKey[] = [
 
 export default function PremiumRequiredModal() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const open = usePremiumModalStore((s) => s.open);
   const closeModal = usePremiumModalStore((s) => s.closeModal);
+  const [subLoading, setSubLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -36,10 +37,26 @@ export default function PremiumRequiredModal() {
     return () => document.removeEventListener("keydown", handleKey);
   }, [open, closeModal]);
 
-  const handleCta = () => {
-    closeModal();
-    // Открываем настройки Premium и сразу запускаем оплату пробной недели (страница привязки карты YooKassa).
-    navigate("/chats/settings?section=premium&checkout=intro");
+  const handleCta = async () => {
+    if (subLoading) return;
+    setPaymentError("");
+    setSubLoading(true);
+    try {
+      const returnUrl = window.location.href;
+      const { data } = await paymentsApi.subscribe({
+        return_url: returnUrl,
+        offer_code: "intro_week",
+      });
+      if (data.confirmation_url) {
+        window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+      }
+      closeModal();
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setPaymentError(detail || t("settings.paymentError"));
+    } finally {
+      setSubLoading(false);
+    }
   };
 
   if (!open) return null;
@@ -91,11 +108,19 @@ export default function PremiumRequiredModal() {
           <button
             type="button"
             onClick={handleCta}
-            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+            disabled={subLoading}
+            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {t("premiumModal.cta")}
+            {subLoading ? t("common.loading") : t("premiumModal.cta")}
           </button>
         </div>
+        {paymentError && (
+          <div className="px-6 pb-5 -mt-2">
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {paymentError}
+            </p>
+          </div>
+        )}
       </div>
     </ModalViewportLayer>
   );

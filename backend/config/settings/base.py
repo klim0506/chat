@@ -275,6 +275,9 @@ CELERY_TASK_ALWAYS_EAGER = not _REDIS_OK  # execute tasks synchronously when no 
 # Keep uploads off heap: files larger than this are streamed to temp file (avoids OOM on large uploads)
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024  # 2 MB — larger uploads go to disk
 DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB (form fields only; file part uses above)
+# Chunked upload tuning (server-side). Larger part => fewer HTTP requests, lower overhead.
+CHUNKED_UPLOAD_PART_SIZE = env.int("CHUNKED_UPLOAD_PART_SIZE", default=1024 * 1024)  # 1 MB
+CHUNKED_UPLOAD_CLEANUP_INTERVAL_SECONDS = env.int("CHUNKED_UPLOAD_CLEANUP_INTERVAL_SECONDS", default=300)
 
 # Frontend URL for invite links etc.
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")

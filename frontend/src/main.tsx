@@ -69,6 +69,51 @@ usePreferencesStore.persist?.onFinishHydration?.(() => {
   syncDocumentPrefs();
 });
 
+function setupSplashHideController() {
+  if (typeof window === "undefined") return null;
+  const splash = document.getElementById("app-splash");
+  if (!splash) return null;
+
+  const startedAt = performance.now();
+  const pathname = window.location.pathname;
+  const shouldWaitForChatsReady =
+    pathname === "/chats"
+    || pathname === "/chats/settings"
+    || pathname.startsWith("/chat/")
+    || pathname.startsWith("/channel/");
+  const MIN_VISIBLE_MS = 2000;
+  const MAX_VISIBLE_MS = 2000;
+  const FADE_OUT_MS = 260;
+  let isDone = false;
+
+  const hideSplash = () => {
+    if (isDone) return;
+    isDone = true;
+    splash.classList.add("app-splash--hidden");
+    window.setTimeout(() => splash.remove(), FADE_OUT_MS);
+  };
+
+  const requestHide = () => {
+    if (isDone) return;
+    const elapsed = performance.now() - startedAt;
+    const minRemaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
+    const maxRemaining = Math.max(0, MAX_VISIBLE_MS - elapsed);
+    const waitMs = Math.min(minRemaining, maxRemaining);
+    window.setTimeout(hideSplash, waitMs);
+  };
+
+  if (shouldWaitForChatsReady) {
+    window.addEventListener("app:chats-ready", requestHide, { once: true });
+    return { requestHide, shouldAutoHideAfterMount: false };
+  }
+
+  const hardStopDelay = Math.max(0, MAX_VISIBLE_MS - (performance.now() - startedAt));
+  window.setTimeout(hideSplash, hardStopDelay);
+  return { requestHide, shouldAutoHideAfterMount: true };
+}
+
+const splashController = setupSplashHideController();
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
@@ -76,6 +121,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
+if (splashController?.shouldAutoHideAfterMount) {
+  // Hide splash after the app shell has been painted.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      splashController.requestHide();
+    });
+  });
+}
 
 // ─── Service Worker registration (PWA) ──────────────────────────────────
 // Controlled by VITE_PWA_INSTALL_ENABLED env variable.

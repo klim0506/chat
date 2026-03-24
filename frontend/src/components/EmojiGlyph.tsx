@@ -14,7 +14,8 @@ interface EmojiGlyphProps {
 
 export function EmojiGlyph({ emoji, size = 22, className = "", preferNative = false, imageSource }: EmojiGlyphProps) {
   const src = imageSource ?? TELEGRAM_EMOJI_SRC_BY_EMOJI.get(emoji);
-  const [useNativeFallback, setUseNativeFallback] = useState(preferNative);
+  const isTelegramPublicEmoji = typeof src === "string" && src.startsWith("/telegram-emoji/");
+  const [useNativeFallback, setUseNativeFallback] = useState(preferNative || isTelegramPublicEmoji);
   const useMediaImage = imageSource && isOpaqueMediaHandle(imageSource);
   if (src && !useNativeFallback) {
     if (useMediaImage) {

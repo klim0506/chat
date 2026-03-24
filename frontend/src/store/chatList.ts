@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Chat } from "../api/client";
+import type { Chat, PaginatedResponse } from "../api/client";
 import { chatsApi } from "../api/client";
 import { db, type CachedChat } from "../lib/db";
 import { useAuthStore } from "./auth";
@@ -42,6 +42,7 @@ interface ChatListState {
 }
 
 const MAX_PINNED = 5;
+const CHAT_LIST_PAGE_SIZE = 50;
 
 /* ------------------------------------------------------------------ */
 /*  Store                                                              */
@@ -72,7 +73,10 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
         ? cached.filter((c) => c._userId === currentUserId)
         : [];
       if (ownedChats.length > 0) {
-        const chats = ownedChats.map(stripCacheMeta);
+        const chats = ownedChats
+          .slice()
+          .sort(sortCachedChats)
+          .map(stripCacheMeta);
         const pins = extractPins(chats);
         set({ chats, pinnedChatIds: pins, loading: false });
       }
@@ -82,10 +86,24 @@ export const useChatListStore = create<ChatListState>()((set, get) => ({
 
     // 2. Revalidate from network (stale-while-revalidate)
     try {
-      const res = await chatsApi.list();
-      const data = res.data;
-      let freshChats: Chat[] = Array.isArray(data) ? data : data.results ?? [];
-      // Всегда добавляем чат «Избранное» в список, если его ещё нет (пустой список или нет в ответе)
+      const existingById = new Map(get().chats.map((c) => [c.id, c]));
+      let nextUrl: string | null = null;
+      let page = 1;
+      let fetchedOrder: Chat[] = [];
+      do {
+        const data: PaginatedResponse<Chat> = page === 1
+          ? (await chatsApi.list({ limit: CHAT_LIST_PAGE_SIZE })).data
+          : (await chatsApi.listByUrl(nextUrl!)).data;
+        const pageRows: Chat[] = data.results ?? [];
+        fetchedOrder = mergeOrderedUnique(fetchedOrder, pageRows);
+        const mergedForUi = mergeForSmoothReorder(fetchedOrder, existingById);
+        const pinsForUi = extractPins(mergedForUi);
+        set({ chats: mergedForUi, pinnedChatIds: pinsForUi, loading: false, error: null });
+        nextUrl = data.next ?? null;
+        page += 1;
+      } while (nextUrl);
+
+      let freshChats: Chat[] = fetchedOrder;
       const hasFavorites = freshChats.some((c) => c.is_favorites);
       if (!hasFavorites) {
         try {
@@ -211,7 +229,7 @@ function extractPins(chats: Chat[]): string[] {
 
 function stripCacheMeta(cached: CachedChat): Chat {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _cachedAt, ...chat } = cached;
+  const { _cachedAt, _listPos, ...chat } = cached;
   return chat;
 }
 
@@ -219,14 +237,61 @@ async function persistChats(chats: Chat[]) {
   const now = new Date().toISOString();
   const userId = useAuthStore.getState().user?.id;
   if (!userId) return;
-  const rows: CachedChat[] = chats.map((c) => ({ ...c, _cachedAt: now, _userId: userId }));
+  const rows: CachedChat[] = chats.map((c, index) => ({
+    ...c,
+    _cachedAt: now,
+    _userId: userId,
+    _listPos: index,
+  }));
   await db.chats.bulkPut(rows);
 }
 
 async function persistChat(chat: Chat) {
   const userId = useAuthStore.getState().user?.id;
   if (!userId) return;
-  const row: CachedChat = { ...chat, _cachedAt: new Date().toISOString(), _userId: userId };
+  const prev = await db.chats.get(chat.id).catch(() => undefined);
+  const row: CachedChat = {
+    ...chat,
+    _cachedAt: new Date().toISOString(),
+    _userId: userId,
+    _listPos: prev?._listPos,
+  };
   await db.chats.put(row);
+}
+
+function sortCachedChats(a: CachedChat, b: CachedChat): number {
+  if (typeof a._listPos === "number" && typeof b._listPos === "number") {
+    return a._listPos - b._listPos;
+  }
+  if (typeof a._listPos === "number") return -1;
+  if (typeof b._listPos === "number") return 1;
+  const aPin = a.pin_order ?? Number.MAX_SAFE_INTEGER;
+  const bPin = b.pin_order ?? Number.MAX_SAFE_INTEGER;
+  if (aPin !== bPin) return aPin - bPin;
+  return toMs(b.last_message_at || b.created_at) - toMs(a.last_message_at || a.created_at);
+}
+
+function mergeOrderedUnique(base: Chat[], next: Chat[]): Chat[] {
+  const seen = new Set<string>();
+  const merged: Chat[] = [];
+  for (const chat of [...base, ...next]) {
+    if (seen.has(chat.id)) continue;
+    seen.add(chat.id);
+    merged.push(chat);
+  }
+  return merged;
+}
+
+function mergeForSmoothReorder(fetchedOrder: Chat[], existingById: Map<string, Chat>): Chat[] {
+  const mergedHead = fetchedOrder.map((chat) => ({ ...(existingById.get(chat.id) || {}), ...chat }));
+  const fetchedIds = new Set(mergedHead.map((c) => c.id));
+  const tail = [...existingById.values()].filter((c) => !fetchedIds.has(c.id));
+  return [...mergedHead, ...tail];
+}
+
+function toMs(iso?: string | null): number {
+  if (!iso) return 0;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : 0;
 }
 

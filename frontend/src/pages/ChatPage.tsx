@@ -611,8 +611,12 @@ function MarkdownMessageContent({
   const baseCls = "ui-text-body text-slate-800";
   const navigate = useNavigate();
   /** Drop trailing empty lines; keep internal Shift+Enter breaks (remark-breaks). */
-  const segments = splitContentWithMentions(stripTrailingNewlinesForDisplay(content));
-  const Wrapper: React.ElementType = inline ? "span" : "div";
+  const normalizedContent = stripTrailingNewlinesForDisplay(content);
+  const shouldKeepMarkdownWhole = /(^|\n)\s*(?:[-*+]\s+|\d+\.\s+)|(^|\s)[*_~`]|```/m.test(normalizedContent);
+  const segments = shouldKeepMarkdownWhole
+    ? [{ type: "text" as const, value: normalizedContent }]
+    : splitContentWithMentions(normalizedContent);
+  const wrapperClassName = inline ? "inline-block align-baseline max-w-full" : "";
   const handleMentionClick = useCallback(async (raw: string) => {
     const username = raw.replace(/^@+/, "").trim();
     if (!username) return;
@@ -631,7 +635,7 @@ function MarkdownMessageContent({
     }
   }, [navigate]);
   return (
-    <Wrapper className={`markdown-message ${baseCls} ${className}`}>
+    <div className={`markdown-message ${baseCls} ${wrapperClassName} ${className}`}>
       {segments.map((seg, i) => {
         if (seg.type === "mention") {
           const username = seg.value.slice(1).trim();
@@ -653,6 +657,9 @@ function MarkdownMessageContent({
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               p: ({ children }) => (inline ? <span className="inline">{children}</span> : <span className="block">{children}</span>),
+              ul: ({ children }) => <ul className="list-disc pl-5 my-1">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal pl-5 my-1">{children}</ol>,
+              li: ({ children }) => <li className="my-0.5">{children}</li>,
               strong: ({ children }) => <strong className="font-bold">{children}</strong>,
               em: ({ children }) => <em className="italic">{children}</em>,
               s: ({ children }) => <s className="line-through">{children}</s>,
@@ -686,7 +693,7 @@ function MarkdownMessageContent({
       {!inline && linkPreview?.url && (
         <LinkPreviewCard preview={linkPreview} isMine={isMine} />
       )}
-    </Wrapper>
+    </div>
   );
 }
 
@@ -696,13 +703,27 @@ const MemoImageTileGrid = memo(
   function MemoImageTileGrid({
     images,
     imagesKey,
+    lightboxImages,
+    resolveLightboxIndex,
   }: {
     images: { id: string; url?: string | null; original_name?: string; mime_type?: string }[];
     imagesKey: string;
+    lightboxImages?: { id: string; url?: string | null; original_name?: string }[];
+    resolveLightboxIndex?: (img: { id: string }, localIndex: number) => number;
   }) {
-    return <ImageTileGrid key={imagesKey} images={images} />;
+    return (
+      <ImageTileGrid
+        key={imagesKey}
+        images={images}
+        lightboxImages={lightboxImages}
+        resolveLightboxIndex={resolveLightboxIndex}
+      />
+    );
   },
-  (prev, next) => prev.imagesKey === next.imagesKey,
+  (prev, next) =>
+    prev.imagesKey === next.imagesKey &&
+    prev.lightboxImages === next.lightboxImages &&
+    prev.resolveLightboxIndex === next.resolveLightboxIndex,
 );
 
 /** Normalize API/WS message shape (reactions, read status, etc.). */
@@ -963,6 +984,30 @@ export default function ChatPage({
 
   const [members, setMembers] = useState<ChatMember[]>([]);
   const messages = useMessagesStore((s) => s.byChat[conversationId ?? ""] ?? []);
+  const chatImageGallery = useMemo(() => {
+    const gallery: { id: string; url?: string | null; original_name?: string }[] = [];
+    for (const msg of messages) {
+      if (msg.is_deleted) continue;
+      const files = (msg.files ?? []).filter((f) => f && typeof f === "object" && "id" in f) as NonNullable<Message["files"]>;
+      const imageFiles = files.filter((f) => {
+        const mime = (f.mime_type || "").toLowerCase();
+        if (mime.startsWith("image/")) return true;
+        const name = (f.original_name || "").toLowerCase();
+        return /\.(jpg|jpeg|png|gif|webp|bmp|svg|heic)$/.test(name);
+      });
+      for (const f of imageFiles) {
+        gallery.push({ id: f.id, url: f.url, original_name: f.original_name });
+      }
+    }
+    return gallery;
+  }, [messages]);
+  const chatImageIndexByFileId = useMemo(() => {
+    const map: Record<string, number> = {};
+    chatImageGallery.forEach((img, idx) => {
+      map[img.id] = idx;
+    });
+    return map;
+  }, [chatImageGallery]);
   const openPremiumModal = usePremiumModalStore((s) => s.openModal);
   const storeUpsertMessage = useMessagesStore((s) => s.upsertMessage);
   const storeLoadMessages = useMessagesStore((s) => s.loadMessages);
@@ -975,6 +1020,9 @@ export default function ChatPage({
   const loadingMessages = useMessagesStore((s) => s.loadingChats[conversationId ?? ""] ?? false);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
+  const [isMobileInput, setIsMobileInput] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches,
+  );
   const [typing, setTyping] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [messageDeleteError, setMessageDeleteError] = useState("");
@@ -1020,6 +1068,15 @@ export default function ChatPage({
       return null;
     }
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setIsMobileInput(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     if (chatId && typeof localStorage !== "undefined") {
@@ -1418,10 +1475,20 @@ export default function ChatPage({
   /* ── Long-press refs for mobile context actions ── */
   const lpSendRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lpSendFiredRef = useRef(false);
-  const lpVoiceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lpVoiceFiredRef = useRef(false);
   const lpInputRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lpInputFiredRef = useRef(false);
+  const holdToRecordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdToRecordStartRef = useRef<{ x: number; y: number } | null>(null);
+  const holdToRecordModeRef = useRef<"voice" | "video_circle" | null>(null);
+  const holdToRecordStartedRef = useRef(false);
+  const holdToRecordLockedRef = useRef(false);
+  const holdToRecordStartedOnceRef = useRef(false);
+  const [holdToRecordLocked, setHoldToRecordLocked] = useState(false);
+  const [holdToRecordHintVisible, setHoldToRecordHintVisible] = useState(false);
+  const [holdToRecordHintMode, setHoldToRecordHintMode] = useState<"voice" | "video_circle">("voice");
+  const [holdToRecordLiftProgress, setHoldToRecordLiftProgress] = useState(0);
+  const [recordTapHintToast, setRecordTapHintToast] = useState<string | null>(null);
+  const recordTapHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Set both the markdown state and the contenteditable display (for programmatic content changes) */
   const setInputAndEditable = useCallback((markdown: string) => {
@@ -1599,9 +1666,15 @@ export default function ChatPage({
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const [chatAreaWidth, setChatAreaWidth] = useState(0);
   const [chatAreaBounds, setChatAreaBounds] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(
+    () => (typeof window !== "undefined" ? window.innerWidth : 0),
+  );
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const SWIPE_THRESHOLD_PX = 80;
   const INFO_PANEL_WIDTH_PX = 320;
+  const INFO_PANEL_OVERLAY_BREAKPOINT_PX = 1350;
+  const [infoLayoutMode, setInfoLayoutMode] = useState<"replace" | "sidebar">("sidebar");
+  const infoLayoutLockedRef = useRef(false);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesWrapperRef = useRef<HTMLDivElement>(null);
   const rowHeightsRef = useRef<Map<string, number>>(new Map());
@@ -2226,7 +2299,7 @@ export default function ChatPage({
         setMentionPicker((p) => ({ ...p, selectedIndex: Math.max(0, p.selectedIndex - 1) }));
         return;
       }
-      if (e.key === "Enter" && !e.shiftKey && mentionFiltered.length > 0) {
+      if (!isMobileInput && e.key === "Enter" && !e.shiftKey && mentionFiltered.length > 0) {
         e.preventDefault();
         const idx = Math.min(mentionPicker.selectedIndex, mentionFiltered.length - 1);
         const m = mentionFiltered[idx];
@@ -2252,7 +2325,7 @@ export default function ChatPage({
         setEmojiPicker((p) => ({ ...p, selectedIndex: Math.max(0, p.selectedIndex - 1) }));
         return;
       }
-      if ((e.key === "Enter" || e.key === "Tab") && emojiFiltered.length > 0) {
+      if (!isMobileInput && (e.key === "Enter" || e.key === "Tab") && emojiFiltered.length > 0) {
         e.preventDefault();
         const idx = Math.min(emojiPicker.selectedIndex, emojiFiltered.length - 1);
         insertEmoji(emojiFiltered[idx].emoji);
@@ -2260,6 +2333,7 @@ export default function ChatPage({
       }
     }
     if (e.key === "Enter" && !e.shiftKey) {
+      if (isMobileInput) return;
       e.preventDefault();
       if (pendingFilesForPreview?.length && filePreviewConfirmRef.current) {
         filePreviewConfirmRef.current();
@@ -2320,7 +2394,7 @@ export default function ChatPage({
       handleSwitchLayout();
       return;
     }
-  }, [applyFormatShortcut, setInputAndEditable, handleSwitchLayout, mentionPicker, mentionFiltered, insertMention, emojiPicker, emojiFiltered, insertEmoji, pendingFilesForPreview]);
+  }, [applyFormatShortcut, setInputAndEditable, handleSwitchLayout, mentionPicker, mentionFiltered, insertMention, emojiPicker, emojiFiltered, insertEmoji, pendingFilesForPreview, isMobileInput]);
 
   /* ---------- Auto-resize input height: 1 line → up to 8 lines, then inner scroll ---------- */
   const INPUT_LINE_HEIGHT_PX = 24;
@@ -2385,6 +2459,27 @@ export default function ChatPage({
       window.removeEventListener("scroll", update, true);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!showInfo) {
+      infoLayoutLockedRef.current = false;
+      return;
+    }
+    if (infoLayoutLockedRef.current) return;
+    const shouldReplaceOnOpen =
+      viewportWidth < INFO_PANEL_OVERLAY_BREAKPOINT_PX
+      || (chatAreaWidth > 0 && chatAreaWidth < INFO_PANEL_WIDTH_PX * 2);
+    setInfoLayoutMode(shouldReplaceOnOpen ? "replace" : "sidebar");
+    infoLayoutLockedRef.current = true;
+  }, [showInfo, viewportWidth, chatAreaWidth, INFO_PANEL_OVERLAY_BREAKPOINT_PX, INFO_PANEL_WIDTH_PX]);
 
   useEffect(() => {
     const active = new Set(messages.map((m) => m.id));
@@ -3318,12 +3413,15 @@ export default function ChatPage({
         const content = text;
         if (channelId) {
           channelPostsApi.update(channelId, editingMessageId, { content }).then((res) => {
-            done(channelPostToMessage(res.data, channelId, channelRaw));
+            const updated = channelPostToMessage(res.data, channelId, channelRaw);
+            done(updated);
+            onMessageSent?.(conversationId, formatMessagePreview(updated, lang), updated.created_at);
             scheduleScrollToBottomAfterSend();
           });
         } else {
           messagesApi.update(chatId!, editingMessageId, { content }).then((res) => {
             done(res.data);
+            onMessageSent?.(conversationId, formatMessagePreview(res.data, lang), res.data.created_at);
             scheduleScrollToBottomAfterSend();
           });
         }
@@ -3601,6 +3699,12 @@ export default function ChatPage({
   const handleAvatarFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !chatId || !chat) return;
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      setUploadError(t("chat.avatarTypeUnsupported"));
+      setTimeout(() => setUploadError(""), 5000);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+      return;
+    }
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setUploadError(t("chat.avatarTooLarge"));
       setTimeout(() => setUploadError(""), 5000);
@@ -3611,9 +3715,8 @@ export default function ChatPage({
     if (avatarInputRef.current) avatarInputRef.current.value = "";
   };
 
-  const handleAvatarCropConfirm = async (blob: Blob) => {
+  const handleAvatarCropConfirm = async (file: File) => {
     if (!chatId || !chat) return;
-    const file = new File([blob], "avatar.png", { type: "image/png" });
     setPendingAvatarFile(null);
     setAvatarUploading(true);
     try {
@@ -4053,15 +4156,6 @@ export default function ChatPage({
     setAiListening(false);
   }, []);
 
-  const toggleVoiceInput = useCallback(() => {
-    if (voiceInputMode === "record") {
-      startRecording();
-    } else {
-      if (aiListening) stopAiListening();
-      else startAiListening();
-    }
-  }, [voiceInputMode, aiListening, startAiListening, stopAiListening]);
-
   // Переключение голосовой режим (запись аудио ↔ AI транскрипция в поле). Временно отключено — только запись.
   // const toggleVoiceMode = useCallback(() => {
   //   setVoiceInputMode((prev) => {
@@ -4081,10 +4175,6 @@ export default function ChatPage({
     if (!btn) return;
     const rect = btn.getBoundingClientRect();
     setScheduleMenuPos({ x: rect.left, y: rect.top });
-  }), []);
-
-  const lpVoiceHandlers = useMemo(() => makeLongPressHandlers(lpVoiceRef, lpVoiceFiredRef, () => {
-    // toggleVoiceMode(); // Временно отключено: переключение на AI-голосовой ввод (речь → текст)
   }), []);
 
   const lpInputHandlers = useMemo(() => makeLongPressHandlers(lpInputRef, lpInputFiredRef, (e) => {
@@ -4225,9 +4315,116 @@ export default function ChatPage({
     }
   }, [videoRecording]);
 
+  const clearHoldToRecord = useCallback(() => {
+    if (holdToRecordTimerRef.current) {
+      clearTimeout(holdToRecordTimerRef.current);
+      holdToRecordTimerRef.current = null;
+    }
+    holdToRecordStartRef.current = null;
+    holdToRecordModeRef.current = null;
+    holdToRecordStartedRef.current = false;
+    holdToRecordLockedRef.current = false;
+    holdToRecordStartedOnceRef.current = false;
+    setHoldToRecordLocked(false);
+    setHoldToRecordHintVisible(false);
+    setHoldToRecordLiftProgress(0);
+  }, []);
+
+  const startHoldToRecord = useCallback(
+    (mode: "voice" | "video_circle", e: React.PointerEvent<HTMLButtonElement>) => {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch { /* ignore */ }
+      if (holdToRecordTimerRef.current) clearTimeout(holdToRecordTimerRef.current);
+      holdToRecordStartRef.current = { x: e.clientX, y: e.clientY };
+      holdToRecordModeRef.current = mode;
+      holdToRecordStartedRef.current = false;
+      holdToRecordLockedRef.current = false;
+      setHoldToRecordLocked(false);
+      setHoldToRecordHintMode(mode);
+      setHoldToRecordHintVisible(true);
+      setHoldToRecordLiftProgress(0);
+      holdToRecordTimerRef.current = setTimeout(async () => {
+        holdToRecordTimerRef.current = null;
+        const nextMode = holdToRecordModeRef.current;
+        if (!nextMode) return;
+        if (nextMode === "voice") await startRecording();
+        else await startVideoRecording("video_circle");
+        if (holdToRecordModeRef.current !== nextMode) {
+          if (nextMode === "voice") stopRecording();
+          else stopVideoRecording();
+          return;
+        }
+        holdToRecordStartedRef.current = true;
+        holdToRecordStartedOnceRef.current = true;
+      }, 170);
+    },
+    [startRecording, startVideoRecording, stopRecording, stopVideoRecording]
+  );
+
+  const moveHoldToRecord = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (holdToRecordLockedRef.current) return;
+    const start = holdToRecordStartRef.current;
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    const progress = Math.max(0, Math.min(1, -dy / 56));
+    setHoldToRecordLiftProgress(progress);
+    if (!holdToRecordStartedRef.current) return;
+    if (dy <= -56) {
+      holdToRecordLockedRef.current = true;
+      setHoldToRecordLocked(true);
+      setHoldToRecordHintVisible(false);
+      setHoldToRecordLiftProgress(1);
+      if (navigator.vibrate) navigator.vibrate(8);
+    }
+  }, []);
+
+  const endHoldToRecord = useCallback(() => {
+    if (holdToRecordTimerRef.current) {
+      clearTimeout(holdToRecordTimerRef.current);
+      holdToRecordTimerRef.current = null;
+    }
+    if (!holdToRecordStartedRef.current) {
+      clearHoldToRecord();
+      return;
+    }
+    const mode = holdToRecordModeRef.current;
+    const isLocked = holdToRecordLockedRef.current;
+    if (!isLocked && mode === "voice" && recording) {
+      stopRecording();
+      clearHoldToRecord();
+      return;
+    }
+    if (!isLocked && mode === "video_circle" && videoRecording) {
+      stopVideoRecording();
+      clearHoldToRecord();
+      return;
+    }
+    // locked: keep recording until explicit send/stop
+    holdToRecordStartRef.current = null;
+    setHoldToRecordHintVisible(false);
+  }, [clearHoldToRecord, recording, stopRecording, stopVideoRecording, videoRecording]);
+
+  useEffect(() => {
+    if (!recording && !videoRecording) {
+      clearHoldToRecord();
+    }
+  }, [clearHoldToRecord, recording, videoRecording]);
+
+  useEffect(() => () => {
+    if (recordTapHintTimerRef.current) clearTimeout(recordTapHintTimerRef.current);
+  }, []);
+
+  const showRecordTapHint = useCallback((kind: "voice" | "video") => {
+    if (recordTapHintTimerRef.current) clearTimeout(recordTapHintTimerRef.current);
+    setRecordTapHintToast(kind === "voice" ? t("chat.holdToRecordVoiceHint") : t("chat.holdToRecordVideoHint"));
+    recordTapHintTimerRef.current = setTimeout(() => setRecordTapHintToast(null), 2200);
+  }, [t]);
+
   /* ---------- Cleanup ---------- */
   useEffect(() => () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (holdToRecordTimerRef.current) clearTimeout(holdToRecordTimerRef.current);
     if (mediaRecorderRef.current?.state !== "inactive") {
       mediaRecorderRef.current?.stream.getTracks().forEach((t) => t.stop());
       mediaRecorderRef.current?.stop();
@@ -4259,7 +4456,7 @@ export default function ChatPage({
     },
   }));
   const pendingMembers = members.filter((m) => m.status === "pending");
-  const shouldReplaceChatWithInfo = showInfo && chatAreaWidth > 0 && chatAreaWidth < INFO_PANEL_WIDTH_PX * 2;
+  const shouldReplaceChatWithInfo = showInfo && infoLayoutMode === "replace";
   const handleCopy = () => {
     if (!chat?.invite_link) return;
     copyToClipboard(normalizeInviteLink(chat.invite_link)).then(() => {
@@ -4375,7 +4572,13 @@ export default function ChatPage({
                 contacts.map((c) => (
                   <button key={c.id} type="button" onClick={() => handleShareContact(c)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 text-left transition-colors">
                     {c.contact_user.avatar_url || c.contact_user.avatar ? (
-                      <MediaImage source={c.contact_user.avatar_url || c.contact_user.avatar!} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                      <MediaImage
+                        source={c.contact_user.avatar_url || c.contact_user.avatar!}
+                        alt=""
+                        className="w-10 h-10 rounded-full object-cover shrink-0"
+                        autoplayAnimated
+                        aggressiveAnimatedCompression
+                      />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-slate-200 shrink-0 flex items-center justify-center text-slate-600 font-medium">
                         {(c.local_name || c.contact_user.display_name || "?").charAt(0).toUpperCase()}
@@ -4486,6 +4689,8 @@ export default function ChatPage({
                       source={getAvatarUrlBySize(displayChat.other_member!.avatar_url ?? displayChat.other_member!.avatar, displayChat.other_member!.avatar_url_small, displayChat.other_member!.avatar_url_medium, "small")}
                       alt=""
                       className="w-9 h-9 rounded-full object-cover"
+                      autoplayAnimated
+                      aggressiveAnimatedCompression
                     />
                   ) : (
                     <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
@@ -4505,6 +4710,8 @@ export default function ChatPage({
                   source={getAvatarUrlBySize(displayChat.avatar_url, displayChat.avatar_url_small, displayChat.avatar_url_medium, "small")}
                   alt=""
                   className="w-9 h-9 rounded-full object-cover"
+                  autoplayAnimated
+                  aggressiveAnimatedCompression
                 />
               ) : (
                 <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold">
@@ -4914,14 +5121,14 @@ export default function ChatPage({
                     aria-hidden
                   >
                     {loadingOlder && (
-                      <div className="flex justify-center items-center gap-2 py-2">
+                      <div className="flex min-h-7 items-center justify-center gap-2 py-2">
                         <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                        <span className="text-xs text-slate-500">{t("common.loading")}</span>
+                        <span className="text-xs leading-4 text-slate-500">{t("common.loading")}</span>
                       </div>
                     )}
                     {!hasOlderMessages && messages.length > 0 && (
-                      <div className="flex justify-center py-3">
-                        <span className="text-xs text-slate-400">{t("chat.conversationStart")}</span>
+                      <div className="flex min-h-7 items-center justify-center py-2">
+                        <span className="text-xs leading-4 text-slate-400">{t("chat.conversationStart")}</span>
                       </div>
                     )}
                   </div>
@@ -5047,6 +5254,8 @@ export default function ChatPage({
                           reactionPickerOpen={openReactionPickerMessageId === msg.id}
                           onOpenReactionPicker={() => setOpenReactionPickerMessageId(msg.id)}
                           onCloseReactionPicker={() => setOpenReactionPickerMessageId(null)}
+                          chatImageGallery={chatImageGallery}
+                          chatImageIndexByFileId={chatImageIndexByFileId}
                         />
                         <div
                           ref={(el) => {
@@ -5269,6 +5478,12 @@ export default function ChatPage({
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse shrink-0" />
                 <span className="text-slate-700 font-medium text-sm">Запись… {fmtTime(recordingTime)}</span>
+                {!holdToRecordLocked && (
+                  <span className="text-[0.6875rem] text-slate-500">Удерживайте или свайп вверх для фиксации</span>
+                )}
+                {holdToRecordLocked && (
+                  <span className="text-[0.6875rem] text-emerald-600 font-medium">Зафиксировано</span>
+                )}
                 <div className="flex items-center gap-1.5 ml-auto shrink-0" aria-hidden>
                   <div className="w-1.5 h-8 bg-slate-200 rounded-full overflow-hidden">
                     <div
@@ -5400,7 +5615,30 @@ export default function ChatPage({
                 <span className="text-red-600">{t("chat.messageTooLong")}</span>
               </div>
             )}
-            <form onSubmit={handleSubmit} className="p-2 sm:p-2.5 flex gap-1.5 sm:gap-2 items-end">
+            <form onSubmit={handleSubmit} className="relative p-2 sm:p-2.5 flex gap-1.5 sm:gap-2 items-end">
+              {holdToRecordHintVisible && !input.trim() && !holdToRecordLocked && (
+                <div
+                  className="pointer-events-none absolute bottom-full z-20 mb-2"
+                  style={{
+                    right: holdToRecordHintMode === "voice" ? 8 : 52,
+                    transform: `translateY(${-Math.round(holdToRecordLiftProgress * 16)}px)`,
+                    opacity: 0.55 + holdToRecordLiftProgress * 0.45,
+                  }}
+                  aria-hidden
+                >
+                  <div className="flex h-32 w-14 flex-col items-center justify-between rounded-[28px] border border-slate-300 bg-white/95 px-2 py-3 shadow-[0_10px_28px_rgba(15,23,42,0.18)]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    <div className="flex flex-col items-center gap-0.5 text-slate-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="animate-bounce">
+                        <path d="m18 15-6-6-6 6"/>
+                      </svg>
+                      <span className="text-[0.625rem] leading-none">hold</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="relative" ref={attachMenuRef}>
                 <button type="button" onClick={() => setShowAttachMenu((p) => !p)} className={`text-slate-500 hover:text-slate-800 p-2 rounded-xl hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color] ${showAttachMenu ? "bg-slate-100/80" : ""}`} title={t("chat.attach")}>
                   {hasActiveUploads ? (
@@ -5456,7 +5694,7 @@ export default function ChatPage({
                 contentEditable
                 suppressContentEditableWarning
                 inputMode="text"
-                enterKeyHint="send"
+                enterKeyHint={isMobileInput ? "enter" : "send"}
                 role="textbox"
                 aria-multiline
                 aria-label={t("chat.messagePlaceholder")}
@@ -5523,7 +5761,7 @@ export default function ChatPage({
                   setFormatMenuPos({ x: e.clientX, y: e.clientY, start: 0, end: 0 });
                 }}
                 {...lpInputHandlers}
-                className="flex-1 min-h-[2.25rem] max-h-[11rem] overflow-y-auto resize-none border backdrop-blur rounded-xl px-3 py-2 ui-text-assist focus:outline-none focus:ring-2 focus:ring-blue-400/40 scrollbar-hide empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400 shadow-sm"
+                className="flex-1 min-w-0 min-h-[2.25rem] max-h-[11rem] overflow-y-auto resize-none border backdrop-blur rounded-xl px-3 py-2 ui-text-assist focus:outline-none focus:ring-2 focus:ring-blue-400/40 scrollbar-hide empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400 shadow-sm"
                 style={{
                   height: "38px",
                   background: "var(--surface-2)",
@@ -5531,30 +5769,59 @@ export default function ChatPage({
                   color: "var(--text-0)",
                 }}
               />
-            {/* Video circle button */}
-            <button type="button" onClick={() => startVideoRecording("video_circle")} className="text-slate-500 hover:text-purple-600 p-2 rounded-xl hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color]" title={t("chat.videoCircle")}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
-            </button>
-            {/* Voice: только запись аудио. Переключение на AI-ввод (речь → текст) временно отключено. */}
-            <button
-              type="button"
-              onClick={() => { if (!lpVoiceFiredRef.current) toggleVoiceInput(); }}
-              // onContextMenu={(e) => {
-              //   e.preventDefault();
-              //   e.stopPropagation();
-              //   toggleVoiceMode();
-              // }}
-              {...lpVoiceHandlers}
-              className={`p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${voiceInputMode === "ai" ? "text-blue-700 hover:text-blue-800 hover:bg-blue-50/80" : "text-slate-500 hover:text-red-600 hover:bg-slate-100/80"} ${aiListening ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : ""}`}
-              title={voiceInputMode === "ai" ? (aiListening ? t("chat.stopDictation") : t("chat.aiVoiceInput")) : t("chat.voiceMsg")}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-            </button>
+            {!input.trim() && (
+              <>
+                {/* Video circle button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (holdToRecordStartedOnceRef.current) return;
+                    showRecordTapHint("video");
+                  }}
+                  onPointerDown={(e) => { e.preventDefault(); startHoldToRecord("video_circle", e); }}
+                  onPointerMove={moveHoldToRecord}
+                  onPointerUp={endHoldToRecord}
+                  onPointerCancel={endHoldToRecord}
+                  className="shrink-0 text-slate-500 hover:text-purple-600 p-2 rounded-xl hover:bg-slate-100/80 active:scale-[0.98] transition-[transform,background-color,color]"
+                  title={holdToRecordLocked ? "Запись зафиксирована" : "Удерживайте для записи, свайп вверх для фиксации"}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+                </button>
+                {/* Voice: только запись аудио. Переключение на AI-ввод (речь → текст) временно отключено. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (holdToRecordStartedOnceRef.current) return;
+                    showRecordTapHint("voice");
+                    // Keep AI dictation entrypoint for future mode switch.
+                    if (voiceInputMode === "ai") {
+                      if (aiListening) stopAiListening();
+                      else startAiListening();
+                    }
+                  }}
+                  onPointerDown={(e) => { e.preventDefault(); startHoldToRecord("voice", e); }}
+                  onPointerMove={moveHoldToRecord}
+                  onPointerUp={endHoldToRecord}
+                  onPointerCancel={endHoldToRecord}
+                  // onContextMenu={(e) => {
+                  //   e.preventDefault();
+                  //   e.stopPropagation();
+                  //   toggleVoiceMode();
+                  // }}
+                  className={`shrink-0 p-2 rounded-xl transition-[background-color,color,transform] active:scale-[0.98] ${voiceInputMode === "ai" ? "text-blue-700 hover:text-blue-800 hover:bg-blue-50/80" : "text-slate-500 hover:text-red-600 hover:bg-slate-100/80"} ${aiListening ? "bg-blue-600 text-white shadow-sm shadow-blue-600/15" : ""}`}
+                  title={holdToRecordLocked ? "Запись зафиксирована" : "Удерживайте для записи, свайп вверх для фиксации"}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+              </>
+            )}
             {input.trim() && (
               <button
                 type="submit"
                 disabled={input.length > MESSAGE_MAX_LENGTH}
-                className="p-2 rounded-2xl flex items-center justify-center transition-[background-color,transform,box-shadow] bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/15"
+                className="shrink-0 p-2 rounded-2xl flex items-center justify-center transition-[background-color,transform,box-shadow] bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/15"
                 title={input.length > MESSAGE_MAX_LENGTH ? t("chat.messageTooLong") : t("chat.enterToSend")}
                 onMouseDown={(e) => {
                   // Keep focus on the message input on mobile web (avoid closing keyboard when tapping send).
@@ -5615,6 +5882,12 @@ export default function ChatPage({
             </button>
           </div>,
           document.body,
+        )}
+        {recordTapHintToast && createPortal(
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[500] px-4 py-2.5 bg-slate-800 text-white text-sm rounded-lg shadow-lg whitespace-nowrap animate-in fade-in duration-200" role="status">
+            {recordTapHintToast}
+          </div>,
+          document.body
         )}
 
         {/* Context menu: Markdown formatting (right-click on input field) — stays within chat bounds */}
@@ -5765,7 +6038,14 @@ export default function ChatPage({
               </div>
               <div className="px-6 pb-2 flex flex-col items-center">
                 {chat.avatar_url ? (
-                  <MediaImage source={chat.avatar_url} alt={t("chat.chatPhoto")} className="w-48 h-48 rounded-2xl object-cover mb-6" lazy={false} />
+                  <MediaImage
+                    source={chat.avatar_url}
+                    alt={t("chat.chatPhoto")}
+                    className="w-48 h-48 rounded-2xl object-cover mb-6"
+                    autoplayAnimated
+                    aggressiveAnimatedCompression
+                    lazy={false}
+                  />
                 ) : (
                   <div className="w-48 h-48 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-6">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
@@ -6473,6 +6753,8 @@ export default function ChatPage({
                       source={getAvatarUrlBySize(chat.is_personal && chat.other_member ? (chat.other_member!.avatar_url ?? chat.other_member!.avatar)! : chat.avatar_url!, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, chat.is_personal && chat.other_member ? chat.other_member!.avatar_url_medium : chat.avatar_url_medium, "medium")}
                       alt=""
                       className="w-20 h-20 rounded-full object-cover"
+                      autoplayAnimated
+                      aggressiveAnimatedCompression
                       lazy={false}
                     />
                   </button>
@@ -6491,7 +6773,7 @@ export default function ChatPage({
                 {chat.is_personal && chat.other_member && onlineStatus[chat.other_member.id]?.is_online && (
                   <span className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full" />
                 )}
-                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileSelect} />
+                <input ref={avatarInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleAvatarFileSelect} />
               </div>
               {editingTitle ? (
                 <div className="w-full mt-2 space-y-1">
@@ -7613,6 +7895,10 @@ type MessageBubbleProps = {
   downloadProgress?: { loaded: number; total: number };
   /** When set, file link triggers this (fetch with progress) instead of opening href. */
   onDownloadWithProgress?: (messageId: string, url: string, filename: string) => void;
+  /** Global chat image gallery for continuous lightbox navigation. */
+  chatImageGallery?: { id: string; url?: string | null; original_name?: string }[];
+  /** Map file id -> index in global gallery. */
+  chatImageIndexByFileId?: Record<string, number>;
 };
 
 /** Delay before hiding reaction picker when mouse leaves message/picker (lets user move to picker) */
@@ -7654,24 +7940,31 @@ const MessageBubble = memo(function MessageBubble({
   onCancelUpload,
   downloadProgress,
   onDownloadWithProgress,
+  chatImageGallery,
+  chatImageIndexByFileId,
 }: MessageBubbleProps) {
   const { t, lang } = useTranslation();
   const [_hoverDelayPassed, setHoverDelayPassed] = useState(false);
   const hoverDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pickerHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [_pickerHover, setPickerHover] = useState(false);
-  const pickerVisible = reactionPickerOpen;
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.content || "");
   const [videoLightboxOpen, setVideoLightboxOpen] = useState(false);
   const [reactionLoading, setReactionLoading] = useState(false);
   const [reactionLimitToast, setReactionLimitToast] = useState(false);
   const reactionLimitToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const CONTEXT_MENU_WIDTH_PX = 220;
+  const CONTEXT_SUBMENU_WIDTH_PX = 200;
+  const CONTEXT_MENU_REACTIONS_HEIGHT_PX = 42;
+  const CONTEXT_MENU_REACTIONS_GAP_PX = 6;
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [contextSubmenu, setContextSubmenu] = useState<"copy" | "pin" | null>(null);
   const [contextMenuCopied, setContextMenuCopied] = useState(false);
   const [contextMenuCopyShake, setContextMenuCopyShake] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const contextReactionsRef = useRef<HTMLDivElement>(null);
+  const pickerVisible = reactionPickerOpen && !contextMenu;
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const swipeActiveRef = useRef(false);
@@ -7742,8 +8035,24 @@ const MessageBubble = memo(function MessageBubble({
   const handleLongPress = () => {
     longPressTimerRef.current = null;
     if (!longPressStartRef.current) return;
+    const menuWidth = CONTEXT_MENU_WIDTH_PX;
+    const menuHeight = 180;
+    const pad = 8;
+    const minYForPicker = pad + CONTEXT_MENU_REACTIONS_HEIGHT_PX + CONTEXT_MENU_REACTIONS_GAP_PX;
+    const anchorRect = messageWrapperRef.current?.getBoundingClientRect();
+    const targetX = anchorRect
+      ? alignRight
+        ? anchorRect.right - 16
+        : anchorRect.left + 16
+      : longPressStartRef.current.x;
+    const targetY = anchorRect
+      ? anchorRect.top + Math.min(56, Math.max(20, anchorRect.height * 0.45))
+      : longPressStartRef.current.y;
+    const x = Math.max(pad, Math.min(targetX, window.innerWidth - menuWidth - pad));
+    const y = Math.max(minYForPicker, Math.min(targetY, window.innerHeight - menuHeight - pad));
+    onCloseReactionPicker?.();
     setContextSubmenu(null);
-    setContextMenu({ x: longPressStartRef.current.x, y: longPressStartRef.current.y });
+    setContextMenu({ x, y });
     longPressStartRef.current = null;
     if (navigator.vibrate) navigator.vibrate(15);
   };
@@ -7765,6 +8074,7 @@ const MessageBubble = memo(function MessageBubble({
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      if (contextReactionsRef.current && contextReactionsRef.current.contains(e.target as Node)) return;
       setContextMenu(null);
       setContextSubmenu(null);
     };
@@ -7863,14 +8173,14 @@ const MessageBubble = memo(function MessageBubble({
       return;
     }
     const r = el.getBoundingClientRect();
-    const gap = 4;
-    const flyoutWidth = 260;
+    const gap = 2;
+    const flyoutWidth = CONTEXT_SUBMENU_WIDTH_PX;
     let left = r.right + gap;
     if (left + flyoutWidth > window.innerWidth - 8) {
       left = Math.max(8, r.left - gap - flyoutWidth);
     }
     setContextSubmenuFlyoutPos({ top: r.top, left });
-  }, [contextSubmenu]);
+  }, [contextSubmenu, CONTEXT_SUBMENU_WIDTH_PX]);
 
   useLayoutEffect(() => {
     updateContextSubmenuFlyoutPosition();
@@ -8052,7 +8362,7 @@ const MessageBubble = memo(function MessageBubble({
           disabled={reactionLoading}
           title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
         >
-          <AnimatedReaction emoji={emoji} size={18} playOnce preferEmoji={emoji !== "🔥"} />
+          <AnimatedReaction emoji={emoji} size={18} playOnce preferEmoji />
           {count > 1 && <span className="ml-0.5 tabular-nums">{count}</span>}
         </button>
       ))}
@@ -8109,14 +8419,26 @@ const MessageBubble = memo(function MessageBubble({
       onContextMenu={(e) => {
         const selection = window.getSelection();
         const hasSelection = selection && selection.toString().trim().length > 0;
-        if (hasSelection && window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+        const selectionInsideCurrentMessage =
+          !!selection?.anchorNode &&
+          !!messageWrapperRef.current &&
+          messageWrapperRef.current.contains(selection.anchorNode);
+        if (
+          hasSelection &&
+          selectionInsideCurrentMessage &&
+          window.matchMedia("(hover: hover) and (pointer: fine)").matches
+        ) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
-        const menuWidth = 200;
+        const menuWidth = CONTEXT_MENU_WIDTH_PX;
         const menuHeight = 180;
         const pad = 8;
         const x = Math.max(pad, Math.min(e.clientX, window.innerWidth - menuWidth - pad));
-        const y = Math.max(pad, Math.min(e.clientY, window.innerHeight - menuHeight - pad));
+        const minYForPicker = pad + CONTEXT_MENU_REACTIONS_HEIGHT_PX + CONTEXT_MENU_REACTIONS_GAP_PX;
+        const y = Math.max(minYForPicker, Math.min(e.clientY, window.innerHeight - menuHeight - pad));
+        onCloseReactionPicker?.();
         setContextSubmenu(null);
         setContextMenu({ x, y });
       }}
@@ -8177,6 +8499,15 @@ const MessageBubble = memo(function MessageBubble({
         applySwipeVisuals(0);
         cancelLongPress();
         e.stopPropagation();
+      }}
+      onDoubleClick={(e) => {
+        if (!onReply || selectionMode) return;
+        const target = e.target as HTMLElement | null;
+        if (!target) return;
+        if (target.closest("a,button,input,textarea,[role='button']")) return;
+        const selectedText = window.getSelection()?.toString().trim();
+        if (selectedText) return;
+        onReply(message);
       }}
     >
       {/* Wrapper: [reply icon on swipe] [avatar + bubble + reactions]. Structure: bubble (Telegram-like). */}
@@ -8241,6 +8572,8 @@ const MessageBubble = memo(function MessageBubble({
                       source={getAvatarUrlBySize(avatarUrl, (message.sender as User)?.avatar_url_small, (message.sender as User)?.avatar_url_medium, "small")}
                       alt=""
                       className="w-full h-full object-cover"
+                      autoplayAnimated
+                      aggressiveAnimatedCompression
                       lazy={false}
                     />
                   ) : (
@@ -8492,9 +8825,14 @@ const MessageBubble = memo(function MessageBubble({
           ) : isImageGroup ? (
             <div className="min-w-0 max-w-full">
               <div className="relative">
-                <MemoImageTileGrid images={imageFiles} imagesKey={imageFilesKey} />
+                <MemoImageTileGrid
+                  images={imageFiles}
+                  imagesKey={imageFilesKey}
+                  lightboxImages={chatImageGallery}
+                  resolveLightboxIndex={(img, localIndex) => chatImageIndexByFileId?.[img.id] ?? localIndex}
+                />
                 {/* Time/reactions overlay on bottom-right of image grid */}
-                <div className="absolute bottom-1.5 left-2 flex items-center gap-x-1 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-white [&_span]:!text-white/90">
+                <div className="absolute bottom-1.5 right-2 flex items-center gap-x-1 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-white [&_span]:!text-white/90">
                   {timeEl}{hasReactions && <span className="animate-reactions-appear">{reactionButtons}</span>}
                 </div>
               </div>
@@ -8670,9 +9008,10 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           ) : isShortText && !message.link_preview?.url ? (
             <>
-              <div className="inline-flex items-baseline gap-x-1.5 flex-nowrap leading-snug whitespace-nowrap">
+              <div className="relative inline-flex max-w-full items-baseline gap-x-1.5 flex-nowrap leading-snug whitespace-nowrap">
                 <MemoMarkdownMessageContent content={content} isMine={isMine} className="inline" inline />
-                {timeEl}
+                <span className="invisible inline-flex items-center whitespace-nowrap ml-1.5 text-[0.625rem]">{timeEl}</span>
+                <span className="absolute bottom-[1px] right-0 z-10">{timeEl}</span>
               </div>
               {hasReactions && (
                 <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-px animate-reactions-appear justify-start -ml-1 mr-1">
@@ -8751,7 +9090,7 @@ const MessageBubble = memo(function MessageBubble({
                   className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
                   title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
                 >
-                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji={emoji !== "🔥"} />
+                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji />
                 </button>
               ))}
             </div>
@@ -8797,7 +9136,7 @@ const MessageBubble = memo(function MessageBubble({
                   className={`w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-slate-100 transition-colors shrink-0 ${myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""}`}
                   title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
                 >
-                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji={emoji !== "🔥"} />
+                  <AnimatedReaction emoji={emoji} size={24} loop preferEmoji />
                 </button>
               ))}
             </div>
@@ -8815,9 +9154,35 @@ const MessageBubble = memo(function MessageBubble({
             aria-hidden
           />
           <div
+            ref={contextReactionsRef}
+            className="fixed z-[100] overflow-hidden rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-lg"
+            style={{
+              left: contextMenu.x,
+              top: contextMenu.y - CONTEXT_MENU_REACTIONS_HEIGHT_PX - CONTEXT_MENU_REACTIONS_GAP_PX,
+              width: CONTEXT_MENU_WIDTH_PX,
+            }}
+          >
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={`ctx-react-${emoji}`}
+                  type="button"
+                  disabled={reactionLoading || (!myReactions.includes(emoji) && !canAddReaction)}
+                  onClick={() => { void handleReaction(emoji); closeContextMenu(); }}
+                  className={`h-7 w-7 shrink-0 rounded-md text-base transition-colors hover:bg-slate-100 ${
+                    myReactions.includes(emoji) ? "bg-blue-100 ring-1 ring-blue-300" : ""
+                  }`}
+                  title={myReactions.includes(emoji) ? `Снять ${emoji}` : canAddReaction ? emoji : t("chat.maxReactions")}
+                >
+                  <AnimatedReaction emoji={emoji} size={18} loop preferEmoji />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div
             ref={menuRef}
-            className="context-menu-bottom-sheet fixed z-[100] min-w-[200px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh] overflow-y-auto"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+            className="context-menu-bottom-sheet fixed z-[100] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col max-h-[70vh] overflow-y-auto"
+            style={{ left: contextMenu.x, top: contextMenu.y, width: CONTEXT_MENU_WIDTH_PX }}
           >
             {/* 1. Reply */}
           {onReply && (
@@ -8837,7 +9202,7 @@ const MessageBubble = memo(function MessageBubble({
               className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
               onClick={() => { closeContextMenu(); onEnterSelectionMode(message.id); }}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.4 2.4 4.6-4.8"/></svg>
               {t("chat.select")}
             </button>
           )}
@@ -8941,6 +9306,8 @@ const MessageBubble = memo(function MessageBubble({
                           source={getAvatarUrlBySize(u.avatar_url ?? u.avatar, u.avatar_url_small, u.avatar_url_medium, "small")}
                           alt=""
                           className="w-6 h-6 rounded-full object-cover shrink-0"
+                          autoplayAnimated
+                          aggressiveAnimatedCompression
                           lazy={false}
                         />
                       ) : (
@@ -8961,8 +9328,8 @@ const MessageBubble = memo(function MessageBubble({
           (contextSubmenu === "copy" || contextSubmenu === "pin") &&
           createPortal(
             <div
-              className="fixed z-[102] min-w-[200px] max-w-[260px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col"
-              style={{ top: contextSubmenuFlyoutPos.top, left: contextSubmenuFlyoutPos.left }}
+              className="fixed z-[102] py-1 bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col"
+              style={{ top: contextSubmenuFlyoutPos.top, left: contextSubmenuFlyoutPos.left, width: CONTEXT_SUBMENU_WIDTH_PX }}
               onMouseEnter={clearSubmenuHoverCloseTimer}
               onMouseLeave={supportsHoverSubmenu ? scheduleSubmenuHoverClose : undefined}
             >
@@ -9048,7 +9415,7 @@ const MessageBubble = memo(function MessageBubble({
         </>
       )}
       {reactionLimitToast && createPortal(
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[500] px-4 py-2.5 bg-slate-800 text-white text-sm rounded-lg shadow-lg whitespace-nowrap animate-in fade-in duration-200" role="alert">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[500] px-4 py-2.5 bg-slate-800 text-white text-sm rounded-lg shadow-lg whitespace-nowrap animate-in fade-in duration-200" role="alert">
           Максимум 3 реакции от одного пользователя
         </div>,
         document.body
@@ -9464,7 +9831,15 @@ function useMaxTileH() {
 
 type ImageTileItem = { id: string; url?: string | null; original_name?: string; mime_type?: string; width_px?: number; height_px?: number };
 
-function ImageTileGrid({ images }: { images: ImageTileItem[] }) {
+function ImageTileGrid({
+  images,
+  lightboxImages,
+  resolveLightboxIndex,
+}: {
+  images: ImageTileItem[];
+  lightboxImages?: { id: string; url?: string | null; original_name?: string }[];
+  resolveLightboxIndex?: (img: ImageTileItem, localIndex: number) => number;
+}) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const maxShow = 6;
   const visibleImages = images.slice(0, maxShow);
@@ -9540,13 +9915,22 @@ function ImageTileGrid({ images }: { images: ImageTileItem[] }) {
   const count = visibleImages.length;
   const d = (i: number): ImgDims => dims[i] ?? { w: 400, h: 300, ratio: 4 / 3 };
 
-  const clampW = (w: number) => Math.min(Math.max(w, TILE_MIN_W), TILE_MAX_W);
+  const clampW = (w: number) => {
+    const safeInnerWidth = typeof window !== "undefined" ? window.innerWidth : TILE_MAX_W;
+    const viewportMax = Math.max(180, Math.min(TILE_MAX_W, safeInnerWidth - 96));
+    return Math.min(Math.max(w, TILE_MIN_W), viewportMax);
+  };
 
   const renderTile = (img: typeof visibleImages[0], idx: number, style: React.CSSProperties) => {
     const url = img.url || "#";
     const isLast = idx === maxShow - 1 && hiddenCount > 0;
     return (
-      <div key={img.id} className="relative cursor-pointer overflow-hidden" style={style} onClick={() => setLightboxIdx(idx)}>
+      <div
+        key={img.id}
+        className="relative cursor-pointer overflow-hidden"
+        style={style}
+        onClick={() => setLightboxIdx(resolveLightboxIndex ? resolveLightboxIndex(img, idx) : idx)}
+      >
         <ProgressiveImage
           src={url}
           alt={img.original_name || ""}
@@ -9699,7 +10083,11 @@ function ImageTileGrid({ images }: { images: ImageTileItem[] }) {
     <>
       {buildLayout()}
       {lightboxIdx !== null && createPortal(
-        <ImageLightbox images={images} initialIndex={lightboxIdx} onClose={() => setLightboxIdx(null)} />,
+        <ImageLightbox
+          images={lightboxImages && lightboxImages.length > 0 ? lightboxImages : images}
+          initialIndex={lightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+        />,
         document.body,
       )}
     </>

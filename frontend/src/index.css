@@ -1399,16 +1399,3 @@ select {
   animation: message-enter 0.2s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
 }
 
-/* Context menu: bottom sheet on mobile */
-@media (max-width: 767px) {
-  .context-menu-bottom-sheet {
-    left: 0 !important;
-    right: 0 !important;
-    top: auto !important;
-    bottom: 0 !important;
-    min-width: unset !important;
-    max-height: 65vh !important;
-    border-radius: 1rem 1rem 0 0;
-    border-top: 1px solid #e2e8f0;
-  }
-}

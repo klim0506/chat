@@ -1,8 +1,9 @@
 import axios from "axios";
 import { useAuthStore } from "../store/auth";
 import { usePremiumModalStore } from "../store/premiumModal";
+import { resolveApiOrigin } from "../lib/api-origin";
 
-const baseURL = import.meta.env.VITE_API_URL || "";
+const baseURL = resolveApiOrigin();
 
 /** Client type for session lifetime: web = 30 days, android/desktop = 3 years. Set at build time. */
 const clientType = (import.meta.env.VITE_CLIENT_TYPE as string) || "web";
@@ -491,7 +492,9 @@ export interface PaginatedResponse<T> {
 }
 
 export const chatsApi = {
-  list: () => api.get<PaginatedResponse<Chat>>("/chats/"),
+  list: (params?: { limit?: number; offset?: number; page?: number }) =>
+    api.get<PaginatedResponse<Chat>>("/chats/", { params }),
+  listByUrl: (url: string) => api.get<PaginatedResponse<Chat>>(url),
   /** Get or create the «Избранное» chat for the current user. */
   getFavorites: () => api.get<Chat>("/chats/favorites/"),
   create: (data: { title: string; chat_type: "open" | "closed"; description?: string; title_icon?: string }) => api.post<Chat>("/chats/", data),
@@ -655,8 +658,24 @@ export interface ChannelPostComment {
   reply_to?: ReplyComment | null;
 }
 
+export interface PublicChannelSearchResult {
+  id: string;
+  title: string;
+  username?: string | null;
+  members_count?: number;
+  avatar_url?: string | null;
+  avatar_url_small?: string | null;
+  avatar_url_medium?: string | null;
+  created_at?: string;
+  last_post_at?: string | null;
+}
+
 export const channelsApi = {
-  list: () => api.get<PaginatedResponse<Channel>>("/channels/"),
+  list: (params?: { limit?: number; offset?: number; page?: number }) =>
+    api.get<PaginatedResponse<Channel>>("/channels/", { params }),
+  listByUrl: (url: string) => api.get<PaginatedResponse<Channel>>(url),
+  searchPublic: (q: string, params?: { limit?: number }) =>
+    api.get<{ results: PublicChannelSearchResult[] }>("/channels/search/", { params: { q: q.trim(), ...params } }),
   create: (data: { title: string; username: string; description?: string; is_public?: boolean; title_icon?: string }) =>
     api.post<Channel>("/channels/", data),
   get: (id: string) => api.get<Channel>(`/channels/${id}/`),
@@ -710,7 +729,9 @@ export const channelPostCommentsApi = {
 
 export interface GlobalSearchResult {
   id: string;
-  chat_id: string;
+  target_type?: "chat_message" | "channel_post" | "channel_comment";
+  chat_id?: string | null;
+  channel_id?: string | null;
   chat_title: string;
   chat_is_personal: boolean;
   sender_id: string;
@@ -888,13 +909,13 @@ export const scheduledApi = {
     api.delete(`/chats/${chatId}/scheduled/${scheduledId}/`),
 };
 
-/** Chunk size for chunked upload (128 KB). Server only holds one chunk in RAM. */
-const CHUNK_SIZE = 128 * 1024;
+/** Chunk size for chunked upload (1 MB) to reduce request overhead on server. */
+const CHUNK_SIZE = 1024 * 1024;
 /** Use chunked upload for files larger than this to avoid OOM on server. */
 const CHUNKED_UPLOAD_THRESHOLD = 10 * 1024 * 1024; // 10 MB
 
-/** Max concurrent chunk requests (parallel upload for speed). */
-const CHUNKED_UPLOAD_CONCURRENCY = 6;
+/** Max concurrent chunk requests (balance speed and backend load). */
+const CHUNKED_UPLOAD_CONCURRENCY = 3;
 
 export const filesApi = {
   cancelChunkedUpload: (uploadId: string) =>
