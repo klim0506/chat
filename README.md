@@ -11,92 +11,73 @@ React + Django + PostgreSQL + Redis + Celery.
 - `celery-beat` — планировщик фоновых задач
 - `nginx` — прокси (порт `80`)
 
-## Быстрый запуск через Docker (рекомендуется)
+## Быстрый запуск через Docker
 
-Требования: Docker Desktop + Docker Compose.
+Запустите Docker Desktop или Docker Engine с плагином Compose. Все команды выполняйте из корня репозитория. Если `backend/.env` ещё нет, скопируйте `backend/.env.example`.
 
-1. Поднять все сервисы:
+- В PowerShell выполните `Copy-Item backend/.env.example backend/.env`.
+- В Bash выполните `cp backend/.env.example backend/.env`.
+
+Укажите `USE_SQLITE=False` в `backend/.env`. Запустите PostgreSQL и Redis, примените миграции и поднимите остальные сервисы.
+
 ```bash
-npm run docker:up
+docker compose up -d --wait db redis
+docker compose run --rm --build backend python manage.py migrate
+docker compose up -d --build
 ```
 
-2. Проверить статус:
+Откройте [веб-клиент](http://localhost:5173). API доступен на `http://localhost:8000`, прокси Nginx — на `http://localhost`, PostgreSQL — на `localhost:5433`.
+
 ```bash
-npm run docker:ps
+docker compose ps       # статус сервисов
+docker compose logs -f  # логи
+docker compose down     # остановка сервисов
 ```
 
-3. Логи:
-```bash
-npm run docker:logs
+## Запуск backend и frontend в Windows
+
+Установите Python `3.12+` и Node.js `20+`. Подготовьте `backend/.env` по инструкции выше. Для запуска PostgreSQL и Redis в Docker выполните команду из корня репозитория.
+
+```powershell
+docker compose up -d --wait db redis
 ```
 
-4. Остановить:
-```bash
-npm run docker:down
-```
+Укажите в `backend/.env` `USE_SQLITE=False`, `DATABASE_URL=postgres://postgres:postgres@localhost:5433/chatdb` и `REDIS_URL=redis://localhost:6379/0`. Если PostgreSQL и Redis уже работают отдельно, подставьте их адреса. Для разработки с SQLite установите `USE_SQLITE=True` и запустите Redis.
 
-Доступ:
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:8000`
-- Nginx: `http://localhost`
-- PostgreSQL: `localhost:5433`
+Установите зависимости, примените миграции и запустите Django.
 
-## Запуск через командную строку (локально)
-
-Требования:
-- Python `3.12+`
-- Node.js `20+`
-- PostgreSQL `16+` (или SQLite)
-- Redis `7+`
-
-### 1) Инфраструктура
-Вариант A: локально установленный PostgreSQL и Redis.
-
-Вариант B (проще): поднять только инфраструктуру в Docker:
-```bash
-docker compose up -d db redis
-```
-
-### 2) Backend
-```bash
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:DJANGO_SETTINGS_MODULE = 'config.settings.dev'
+.\.venv\Scripts\python.exe manage.py migrate
+.\.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8000
 ```
 
-### 3) Frontend
-В отдельном терминале:
-```bash
+В отдельном терминале из корня репозитория запустите веб-клиент.
+
+```powershell
 cd frontend
-npm install
-npm run dev
+npm.cmd install
+npm.cmd run dev
 ```
 
-### 4) Фоновые сервисы (Celery)
-Ещё в двух терминалах:
-```bash
-cd backend
-.venv\Scripts\activate
-celery -A config.celery worker -l info
+Для фоновых задач запустите Celery Worker в отдельном терминале из папки `backend`.
+
+```powershell
+$env:DJANGO_SETTINGS_MODULE = 'config.settings.dev'
+.\.venv\Scripts\celery.exe -A config.celery worker --pool=solo -l info
 ```
 
-```bash
-cd backend
-.venv\Scripts\activate
-celery -A config.celery beat -l info
+Для периодических задач запустите Celery Beat в ещё одном терминале из папки `backend`.
+
+```powershell
+$env:DJANGO_SETTINGS_MODULE = 'config.settings.dev'
+.\.venv\Scripts\celery.exe -A config.celery beat -l info
 ```
 
-### Запуск всех локальных процессов одной командой
-Из корня проекта:
-```bash
-npm run run:all
-```
-
-Важно: перед `run:all` должны быть доступны БД и Redis.
+Локальные процессы можно остановить сочетанием `Ctrl+C` в их терминалах.
 
 ## Переменные окружения backend
 Скопируйте `backend/.env.example` в `backend/.env` и заполните:
@@ -138,8 +119,8 @@ npm run test:e2e
 ## Полезные команды
 
 ```bash
-# только core-сервисы без celery/nginx
-npm run docker:up:core
+# только основные сервисы после подготовки .env и миграций
+docker compose up -d db redis backend frontend
 
 # миграции вручную в Docker
 docker compose exec backend python manage.py migrate
